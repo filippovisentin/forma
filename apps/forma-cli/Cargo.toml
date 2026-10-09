@@ -7,3 +7,4 @@ license.workspace = true
 [dependencies]
 forma-engine.workspace = true
 forma-doc.workspace = true
+forma-io-3dm.workspace = true

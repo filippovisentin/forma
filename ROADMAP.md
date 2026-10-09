@@ -9,7 +9,7 @@ Estimates are rough agent wall-clock hours, to be corrected as we measure.
 
 | # | Milestone | Status | Est. hours |
 |---|---|---|---|
-| M0 | Skeleton: workspace, command engine, document + undo, CLI, CI gates; spikes S1 (openNURBS) and S2 (kernel) | **in progress** — workspace, engine, `Line`, CLI and xtask done | 10 |
+| M0 | Skeleton: workspace, command engine, document + undo, CLI, CI gates; spikes S1 (openNURBS) and S2 (kernel) | **in progress** — workspace, engine, CLI, xtask and S1 (`.3dm` reading) done; S2 next | 10 |
 | M1 | Viewport & precision: egui app, 3D viewport (orbit/pan/zoom, top/front/right/perspective), grid, CPlane, osnaps (end, mid, cen, int, perp), ortho, typed coordinates; `Polyline`, `Curve`, `Arc`, `Circle`, `Rectangle`. **Target demo: open `gggg.3dm` read-only and orbit it** (needs S1 + render meshes of breps/extrusions) | todo | 30 |
 | M2 | Surfaces & solids: `Extrude`, `ExtrudeCrv`, `Loft`, `Revolve`, `Sweep1`, `Box`, `Cylinder`, `PlanarSrf`, shaded display | todo | 30 |
 | M3 | Transform & edit: `Move`, `Copy`, `Rotate`, `Scale`, `Mirror`, `Array`, `Join`, `Explode`, `Trim`, `Split`, gumball, layers panel | todo | 25 |
@@ -56,6 +56,8 @@ Commands not on that list are out of scope until requested.
 - [x] Command registry + command-line parser, `Line` command
 - [x] Document with undo/redo
 - [x] `forma-cli run --script ... --dump`
-- [ ] Spike S1: openNURBS builds and reads a `.3dm` on Windows (MSVC) and Linux
+- [x] Spike S1: openNURBS builds and reads Filippo's `.3dm` files on Linux (counts match rhino3dm); `forma-cli info` — ADR 0002
+- [ ] S1 on Windows (MSVC): verified by the CI Windows job
+- [ ] S1 black-box check: a file written by Forma opens correctly in Rhino
 - [ ] Spike S2: kernel choice — boolean + fillet on Filippo's test cases
 - [ ] GitHub Actions running `cargo xtask ci` on Windows and Linux

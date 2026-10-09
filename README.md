@@ -3,12 +3,15 @@
 A personal, Rhino-style NURBS modeller written in Rust — built for my own interior-design
 workflow and as an experiment in building a real CAD tool with AI agents.
 
-> Status: **M0 — skeleton**. Headless command engine, document with undo/redo, CLI.
+> Status: **M0 — skeleton**. Headless command engine, document with undo/redo, CLI,
+> `.3dm` reading through openNURBS.
 > No window yet. See [ROADMAP.md](ROADMAP.md).
 
 ## Try it
 
 ```sh
+git submodule update --init --depth 1   # openNURBS, needed for .3dm I/O
+cargo run -p forma-cli -- info model.3dm
 cargo run -p forma-cli -- run --script "Polyline 0,0 600,0 600,400 0,400 c; Line 0,0 @0,0,720" --dump
 cargo run -p forma            # interactive command line (Help, List, Exit)
 cargo xtask ci                # the gate every change must pass

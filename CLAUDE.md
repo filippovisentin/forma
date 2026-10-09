@@ -38,6 +38,14 @@ agents, with Filippo as architect, reviewer and only user. Read `ARCHITECTURE.md
 - Units: millimetres by default (interior design workflow).
 - Code, comments and docs in English. Conversations with Filippo may be in Italian.
 
+## Setup
+
+- After cloning: `git submodule update --init --depth 1` (openNURBS, see ADR 0002).
+- A C++ toolchain and CMake are required; the first build of `forma-io-3dm` takes ~2 min.
+- Filippo's real models live in `tests/data/private/` (git-ignored). Tests that need them
+  skip themselves when the files are missing; never commit them.
+- `cargo run -p forma-cli -- info model.3dm` prints a summary of any `.3dm` file.
+
 ## How to verify your own work
 
 - `cargo run -p forma-cli -- run --script "Line 0,0,0 100,0,0" --dump` prints the

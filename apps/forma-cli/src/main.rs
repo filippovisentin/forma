@@ -3,6 +3,7 @@
 //! ```text
 //! forma-cli run --script "Line 0,0 @100,0; Undo" [--file script.txt] [--dump]
 //! forma-cli commands
+//! forma-cli info model.3dm
 //! ```
 
 use std::process::ExitCode;
@@ -24,6 +25,10 @@ fn main() -> ExitCode {
             }
             ExitCode::SUCCESS
         }
+        Some("info") => match args.get(1) {
+            Some(path) => info(path),
+            None => usage(),
+        },
         Some("run") => {
             let mut script = String::new();
             let mut dump = false;
@@ -64,4 +69,51 @@ fn main() -> ExitCode {
         }
         _ => usage(),
     }
+}
+
+fn info(path: &str) -> ExitCode {
+    use std::collections::BTreeMap;
+    let s = match forma_io_3dm::read_summary(path) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("{e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    println!("{path}");
+    println!(
+        "  version {} | units {:?} | tolerance {} | angle {:.2}°",
+        s.archive_version, s.units, s.absolute_tolerance, s.angle_tolerance_deg
+    );
+    println!(
+        "  {} objects, {} layers, {} materials, {} blocks",
+        s.objects.len(),
+        s.layers.len(),
+        s.material_count,
+        s.block_count
+    );
+    let mut kinds: BTreeMap<_, usize> = BTreeMap::new();
+    let mut per_layer: BTreeMap<&str, usize> = BTreeMap::new();
+    for o in &s.objects {
+        *kinds.entry(o.kind).or_default() += 1;
+        let layer = o.layer.map_or("?", |i| s.layers[i].as_str());
+        *per_layer.entry(layer).or_default() += 1;
+    }
+    println!("  by type:");
+    for (k, n) in kinds {
+        println!("    {:<12} {n}", format!("{k:?}"));
+    }
+    println!("  by layer:");
+    for (l, n) in per_layer {
+        println!("    {n:>6}  {l}");
+    }
+    if let Some(e) = s.extents() {
+        println!(
+            "  extents {:.0} x {:.0} x {:.0}",
+            e.max.x - e.min.x,
+            e.max.y - e.min.y,
+            e.max.z - e.min.z
+        );
+    }
+    ExitCode::SUCCESS
 }

@@ -7,3 +7,7 @@ license.workspace = true
 [dependencies]
 forma-geom.workspace = true
 forma-doc.workspace = true
+
+[build-dependencies]
+cmake = "0.1"
+cc = "1"
