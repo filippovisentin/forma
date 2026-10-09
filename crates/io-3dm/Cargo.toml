@@ -1,0 +1,9 @@
+[package]
+name = "forma-io-3dm"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+forma-geom.workspace = true
+forma-doc.workspace = true

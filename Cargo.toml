@@ -1,0 +1,32 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/geom",
+    "crates/doc",
+    "crates/io-3dm",
+    "crates/io-mesh",
+    "crates/render",
+    "crates/engine",
+    "crates/ui",
+    "crates/mcp",
+    "apps/forma",
+    "apps/forma-cli",
+    "xtask",
+]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+authors = ["Filippo Antonio Visentin"]
+repository = "https://github.com/filippovisentin/forma"
+
+[workspace.dependencies]
+forma-geom = { path = "crates/geom" }
+forma-doc = { path = "crates/doc" }
+forma-io-3dm = { path = "crates/io-3dm" }
+forma-io-mesh = { path = "crates/io-mesh" }
+forma-render = { path = "crates/render" }
+forma-engine = { path = "crates/engine" }
+forma-ui = { path = "crates/ui" }
+forma-mcp = { path = "crates/mcp" }
