@@ -1,0 +1,9 @@
+[package]
+name = "kernel-occt"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+opencascade = "0.3"
+glam = "0.24"

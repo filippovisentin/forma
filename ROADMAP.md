@@ -9,15 +9,15 @@ Estimates are rough agent wall-clock hours, to be corrected as we measure.
 
 | # | Milestone | Status | Est. hours |
 |---|---|---|---|
-| M0 | Skeleton: workspace, command engine, document + undo, CLI, CI gates; spikes S1 (openNURBS) and S2 (kernel) | **in progress** — workspace, engine, CLI, xtask and S1 (`.3dm` reading) done; S2 next | 10 |
+| M0 | Skeleton: workspace, command engine, document + undo, CLI, CI gates; spikes S1 (openNURBS) and S2 (kernel) | **done** — S1: openNURBS `.3dm` I/O (ADR 0002); S2: OpenCascade chosen for solids (ADR 0001). Open: Rhino black-box check of a written file | — |
 | M1 | Viewport & precision: egui app, 3D viewport (orbit/pan/zoom, top/front/right/perspective), grid, CPlane, osnaps (end, mid, cen, int, perp), ortho, typed coordinates; `Polyline`, `Curve`, `Arc`, `Circle`, `Rectangle`. **Target demo: open `gggg.3dm` read-only and orbit it** (needs S1 + render meshes of breps/extrusions) | todo | 30 |
 | M2 | Surfaces & solids: `Extrude`, `ExtrudeCrv`, `Loft`, `Revolve`, `Sweep1`, `Box`, `Cylinder`, `PlanarSrf`, shaded display | todo | 30 |
 | M3 | Transform & edit: `Move`, `Copy`, `Rotate`, `Scale`, `Mirror`, `Array`, `Join`, `Explode`, `Trim`, `Split`, gumball, layers panel | todo | 25 |
-| M4 | Hard kernel: `BooleanUnion/Difference/Intersection`, `FilletEdge`, `Offset`, `OffsetSrf`, `Cap` | todo | 40 |
+| M4 | Hard kernel (OpenCascade behind `forma-geom`, feature `occt`; starts with spike **S3: `.3dm` brep ↔ OCCT conversion**): `BooleanUnion/Difference/Intersection`, `FilletEdge`, `Offset`, `OffsetSrf`, `Cap` | todo | 40 |
 | M5 | Files: full `.3dm` round trip (nested layers, materials, blocks, extrusions, breps, meshes, poly/NURBS curves, units), OBJ/STL/glTF export | todo | 25 |
 | M6 | Agents: MCP server (`command_line`, `execute`, `inspect`, `render`), offscreen render to PNG | todo | 12 |
 
-**Total remaining ≈ 160 hours**, compressible with parallel agents on separate crates.
+**Total remaining ≈ 160 hours** (+ ~8 for S3), compressible with parallel agents on separate crates.
 
 ## What Filippo's real files contain
 
@@ -59,5 +59,5 @@ Commands not on that list are out of scope until requested.
 - [x] Spike S1: openNURBS builds and reads Filippo's `.3dm` files on Linux (counts match rhino3dm); `forma-cli info` — ADR 0002
 - [x] S1 on Windows (MSVC): builds, links and passes tests in the CI Windows job
 - [ ] S1 black-box check: a file written by Forma opens correctly in Rhino
-- [ ] Spike S2: kernel choice — boolean + fillet on Filippo's test cases
+- [x] Spike S2: kernel choice — OpenCascade passes 6/6 interior-design cases, truck 2/6 (`docs/spikes/S2-results.md`, ADR 0001)
 - [x] GitHub Actions running `cargo xtask ci` on Windows and Linux

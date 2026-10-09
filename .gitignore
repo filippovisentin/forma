@@ -1,3 +1,7 @@
 /target
 /tests/data/private/
 *.3dmbak
+
+# Kernel spike build outputs
+/spikes/kernel/target*/
+/spikes/kernel/out/

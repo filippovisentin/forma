@@ -1,5 +1,7 @@
 [workspace]
 resolver = "2"
+# Throwaway experiments with their own dependencies; not part of the product or CI.
+exclude = ["spikes"]
 members = [
     "crates/geom",
     "crates/doc",

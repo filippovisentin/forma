@@ -1,0 +1,12 @@
+[package]
+name = "kernel-truck"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+truck-modeling = "0.6"
+truck-shapeops = "0.4"
+truck-meshalgo = "0.4"
+curvo = "0.3"
+nalgebra = "0.35"

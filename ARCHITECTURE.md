@@ -19,12 +19,13 @@ checks this on every CI run.
 | 5 | `apps/forma-cli` | Headless CLI: run scripts, convert files, start MCP. |
 | — | `xtask` | Dev automation (`ci`, `layering`). Not part of the product. |
 
-## Key decisions (open)
+## Key decisions
 
-- **Geometry kernel** — curvo + truck in pure Rust vs OpenCascade bindings for booleans,
-  fillets and offsets. Decided by spike S2 in M0 (see `docs/spikes/S2-kernel.md`).
-- **`.3dm` I/O** — openNURBS via `cxx`/`bindgen`, built from source on Windows (MSVC).
-  Decided by spike S1 in M0 (see `docs/spikes/S1-opennurbs.md`).
+- **Geometry kernel** — OpenCascade for all solid modelling (booleans, fillets, lofts,
+  offsets), hidden inside `forma-geom` behind a cargo feature `occt`; plain curve math in
+  Rust. truck failed 4/6 interior-design cases in spike S2. See ADR 0001.
+- **`.3dm` I/O** — openNURBS linked through a small C ABI shim, built with CMake from a
+  git submodule. See ADR 0002.
 - **UI** — egui + wgpu via eframe, same stack as ArtCraft's Crafting Apps.
 
 ## Data flow
