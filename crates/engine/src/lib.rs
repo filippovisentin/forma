@@ -28,17 +28,22 @@ macro_rules! impl_meta {
     };
 }
 
+mod analysis;
 mod args;
 mod attrs;
 mod commands;
 mod create;
 mod curves;
 mod edit;
+mod files;
 mod import;
+mod select;
+mod surfaces;
+mod transform;
 
 pub use args::{parse_point, Args};
 
-use forma_doc::{Document, ObjectId};
+use forma_doc::{Document, Geometry, ObjectId};
 use forma_geom::{Point3, Tolerance};
 use std::collections::{BTreeSet, HashMap};
 use std::fmt;
@@ -76,6 +81,20 @@ pub struct Context {
     pub last_point: Option<Point3>,
     /// Selected objects; editing commands (Move, Rotate, Extrude…) act on these.
     pub selection: BTreeSet<ObjectId>,
+    /// Objects added by the last command that added any (for SelLast).
+    pub last_created: Vec<ObjectId>,
+    /// Internal clipboard filled by CopyToClipboard / Cut, used by Paste.
+    pub clipboard: Vec<ClipboardItem>,
+}
+
+/// One object on the internal clipboard: geometry plus the attributes that survive
+/// a paste into another document (layer by name, colour).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ClipboardItem {
+    pub geometry: Geometry,
+    pub layer: String,
+    pub layer_color: [u8; 3],
+    pub color: Option<[u8; 3]>,
 }
 
 impl Context {
@@ -125,6 +144,8 @@ impl Engine {
                 tolerance: Tolerance::default(),
                 last_point: None,
                 selection: BTreeSet::new(),
+                last_created: Vec::new(),
+                clipboard: Vec::new(),
             },
             commands: Vec::new(),
             lookup: HashMap::new(),
@@ -158,10 +179,24 @@ impl Engine {
             .get(&name.to_lowercase())
             .ok_or_else(|| CommandError::UnknownCommand(name.to_string()))?;
         let mut args = Args::new(tokens);
+        let before: BTreeSet<ObjectId> = self.ctx.doc.objects().map(|o| o.id).collect();
         let result = self.commands[idx].run(&mut self.ctx, &mut args);
-        // Drop selected ids that no longer exist (deleted, undone…).
+        // Drop selected ids that no longer exist (deleted, undone…) or that cannot
+        // be selected any more (hidden, locked).
         let doc = &self.ctx.doc;
-        self.ctx.selection.retain(|id| doc.object(*id).is_some());
+        self.ctx
+            .selection
+            .retain(|id| doc.object(*id).is_some_and(|o| doc.is_selectable(o)));
+        if result.is_ok() {
+            let added: Vec<ObjectId> = doc
+                .objects()
+                .map(|o| o.id)
+                .filter(|id| !before.contains(id))
+                .collect();
+            if !added.is_empty() {
+                self.ctx.last_created = added;
+            }
+        }
         let out = result?;
         if let Some(extra) = args.remaining() {
             return Err(CommandError::BadInput(format!("unused input: {extra}")));

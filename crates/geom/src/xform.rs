@@ -1,6 +1,6 @@
 //! Affine transformations.
 
-use crate::{Point3, Vec3};
+use crate::{Plane, Point3, Vec3};
 
 /// Affine transform: `p' = M·p + t` (3×3 linear part `m`, rows; translation `t`).
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -103,12 +103,118 @@ impl Xform {
         self.determinant() < 0.0
     }
 
-    /// Transform a surface normal. Exact for rigid motions, uniform scale and
-    /// mirrors (the transforms Forma uses); renormalised.
+    /// Transform a surface normal with the inverse transpose of the linear part
+    /// (exact for every affine map, also non-uniform scale); renormalised. For a
+    /// projection onto a plane, normals become the plane normal.
     pub fn normal(&self, n: Vec3) -> Vec3 {
-        // For orthogonal maps (times a uniform scale) the inverse transpose is
-        // proportional to the map itself.
-        self.vector(n).normalized().unwrap_or(n)
+        // Cofactor matrix = det · M⁻ᵀ; it also exists for singular maps.
+        let m = &self.m;
+        let c = |r0: usize, r1: usize, c0: usize, c1: usize| {
+            m[r0][c0] * m[r1][c1] - m[r0][c1] * m[r1][c0]
+        };
+        let cof = [
+            [c(1, 2, 1, 2), -c(1, 2, 0, 2), c(1, 2, 0, 1)],
+            [-c(0, 2, 1, 2), c(0, 2, 0, 2), -c(0, 2, 0, 1)],
+            [c(0, 1, 1, 2), -c(0, 1, 0, 2), c(0, 1, 0, 1)],
+        ];
+        let lin = Xform {
+            m: cof,
+            t: Vec3::new(0.0, 0.0, 0.0),
+        };
+        let v = lin.vector(n);
+        let v = if self.determinant() < 0.0 { -v } else { v };
+        v.normalized().unwrap_or(n)
+    }
+
+    /// Scale by `sx`, `sy`, `sz` along the axes of `plane`, about its origin.
+    pub fn scale_axes(plane: &Plane, sx: f64, sy: f64, sz: f64) -> Xform {
+        let mut m = [[0.0; 3]; 3];
+        for (a, s) in [(plane.x, sx), (plane.y, sy), (plane.z, sz)] {
+            let a = [a.x, a.y, a.z];
+            for (i, row) in m.iter_mut().enumerate() {
+                for (j, v) in row.iter_mut().enumerate() {
+                    *v += s * a[i] * a[j];
+                }
+            }
+        }
+        Self::about(plane.origin, m)
+    }
+
+    /// Orthogonal projection onto `plane`.
+    pub fn projection(plane: &Plane) -> Xform {
+        Self::scale_axes(plane, 1.0, 1.0, 0.0)
+    }
+
+    /// `self` followed by `next`.
+    pub fn then(&self, next: &Xform) -> Xform {
+        let mut m = [[0.0; 3]; 3];
+        for (i, row) in m.iter_mut().enumerate() {
+            for (j, v) in row.iter_mut().enumerate() {
+                *v = (0..3).map(|k| next.m[i][k] * self.m[k][j]).sum();
+            }
+        }
+        Xform {
+            m,
+            t: next.vector(self.t) + next.t,
+        }
+    }
+
+    /// True when the map keeps shapes (rotation, mirror and uniform scale, plus a
+    /// translation): circles stay circles. False for non-uniform scale,
+    /// projections and shears.
+    pub fn is_similarity(&self) -> bool {
+        let cols: Vec<Vec3> = [Vec3::X, Vec3::Y, Vec3::Z]
+            .iter()
+            .map(|e| self.vector(*e))
+            .collect();
+        let s2 = cols[0].dot(cols[0]);
+        if s2 < 1e-24 {
+            return false;
+        }
+        let tol = 1e-9 * s2;
+        (cols[1].dot(cols[1]) - s2).abs() < tol
+            && (cols[2].dot(cols[2]) - s2).abs() < tol
+            && cols[0].dot(cols[1]).abs() < tol
+            && cols[0].dot(cols[2]).abs() < tol
+            && cols[1].dot(cols[2]).abs() < tol
+    }
+
+    /// Smallest rotation about the origin turning direction `a` into direction `b`.
+    pub fn rotation_between(a: Vec3, b: Vec3) -> Xform {
+        let (Some(a), Some(b)) = (a.normalized(), b.normalized()) else {
+            return Self::IDENTITY;
+        };
+        let axis = a.cross(b);
+        let cos = a.dot(b).clamp(-1.0, 1.0);
+        if axis.length() < 1e-12 {
+            if cos > 0.0 {
+                return Self::IDENTITY;
+            }
+            // Opposite: half turn about any axis perpendicular to `a`.
+            let perp = Plane::from_normal(Point3::ORIGIN, a).x;
+            return Self::rotation(Point3::ORIGIN, perp, std::f64::consts::PI);
+        }
+        Self::rotation(Point3::ORIGIN, axis, axis.length().atan2(cos))
+    }
+
+    /// Two-point orient: moves `a1` to `b1` and turns the direction `a1→a2` into
+    /// `b1→b2` with the smallest rotation; with `scale`, also scales uniformly by
+    /// `|b2 − b1| / |a2 − a1|`. `None` when a reference pair is degenerate.
+    pub fn orient(a1: Point3, a2: Point3, b1: Point3, b2: Point3, scale: bool) -> Option<Xform> {
+        let (da, db) = (a2 - a1, b2 - b1);
+        if da.length() < 1e-12 || db.length() < 1e-12 {
+            return None;
+        }
+        let f = if scale {
+            db.length() / da.length()
+        } else {
+            1.0
+        };
+        let x = Self::translation(-a1.to_vec())
+            .then(&Self::rotation_between(da, db))
+            .then(&Self::scale(Point3::ORIGIN, f))
+            .then(&Self::translation(b1.to_vec()));
+        Some(x)
     }
 }
 
@@ -142,6 +248,44 @@ mod tests {
         ));
         let t = Xform::translation(Vec3::new(5.0, 0.0, 0.0));
         assert!(close(t.point(Point3::ORIGIN), Point3::new(5.0, 0.0, 0.0)));
+    }
+
+    #[test]
+    fn non_uniform_scale_and_similarity() {
+        let s = Xform::scale_axes(
+            &Plane::TOP.moved_to(Point3::new(1.0, 0.0, 0.0)),
+            2.0,
+            1.0,
+            1.0,
+        );
+        assert!(close(
+            s.point(Point3::new(2.0, 3.0, 4.0)),
+            Point3::new(3.0, 3.0, 4.0)
+        ));
+        assert!(!s.is_similarity());
+        assert!(Xform::rotation(Point3::ORIGIN, Vec3::Z, 0.3).is_similarity());
+        assert!(Xform::mirror(Point3::ORIGIN, Vec3::X).is_similarity());
+        // Normal of the plane x + y = 0 under x-scale 2: (1,1,0) → (0.5,1,0).
+        let n = s.normal(Vec3::new(1.0, 1.0, 0.0));
+        let e = Vec3::new(0.5, 1.0, 0.0).normalized().unwrap();
+        assert!((n - e).length() < 1e-9, "{n:?}");
+    }
+
+    #[test]
+    fn orient_two_points() {
+        let a1 = Point3::new(0.0, 0.0, 0.0);
+        let a2 = Point3::new(10.0, 0.0, 0.0);
+        let b1 = Point3::new(5.0, 5.0, 5.0);
+        let b2 = Point3::new(5.0, 5.0, 25.0);
+        let x = Xform::orient(a1, a2, b1, b2, false).unwrap();
+        assert!(close(x.point(a1), b1));
+        assert!(close(x.point(a2), Point3::new(5.0, 5.0, 15.0)));
+        assert!(x.is_similarity() && !x.flips());
+        let s = Xform::orient(a1, a2, b1, b2, true).unwrap();
+        assert!(close(s.point(a2), b2));
+        // Opposite directions still work.
+        let o = Xform::orient(a1, a2, a1, Point3::new(-3.0, 0.0, 0.0), false).unwrap();
+        assert!(close(o.point(a2), Point3::new(-10.0, 0.0, 0.0)));
     }
 
     #[test]

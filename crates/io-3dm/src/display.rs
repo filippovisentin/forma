@@ -1,5 +1,5 @@
 //! Display geometry from `.3dm` files: triangle meshes for breps, extrusions and
-//! meshes, polylines for curves.
+//! meshes, polylines for curves, points for point objects.
 //!
 //! Public openNURBS cannot mesh breps and many files are saved without render meshes,
 //! so each brep face is triangulated here: the trimming loops are sampled in the
@@ -26,6 +26,7 @@ pub struct ImportedLayer {
 pub enum DisplayGeometry {
     Mesh(Mesh),
     Polyline(Vec<Point3>),
+    Point(Point3),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -86,6 +87,11 @@ pub fn import_display(path: impl AsRef<Path>) -> Result<Import, Error> {
                 | ObjectKind::Arc => {
                     let pts = unsafe { curve_points(m, obj) };
                     (pts.len() >= 2).then_some(DisplayGeometry::Polyline(pts))
+                }
+                ObjectKind::Point => {
+                    let mut xyz = [0.0; 3];
+                    (unsafe { ffi::f3dm_point(m, obj, xyz.as_mut_ptr()) } != 0)
+                        .then(|| DisplayGeometry::Point(Point3::new(xyz[0], xyz[1], xyz[2])))
                 }
                 _ => None,
             };

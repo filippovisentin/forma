@@ -89,7 +89,7 @@ fn gggg_display() {
                     .iter()
                     .all(|p| p.x.is_finite() && p.y.is_finite() && p.z.is_finite()));
             }
-            Some(DisplayGeometry::Polyline(_)) => lines += 1,
+            Some(DisplayGeometry::Polyline(_) | DisplayGeometry::Point(_)) => lines += 1,
             None => *missing.entry(format!("{:?}", o.kind)).or_insert(0) += 1,
         }
     }

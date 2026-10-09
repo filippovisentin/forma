@@ -27,7 +27,8 @@ fn units(u: LengthUnit) -> Units {
 }
 
 /// Save `doc` to `path`. Curves are written as Rhino curves (lines, polylines,
-/// arcs/circles); solids and imported surfaces are written as meshes.
+/// arcs/circles, polycurves, NURBS curves), points as point objects; solids and
+/// surfaces are written as meshes.
 pub fn write_document(path: impl AsRef<Path>, doc: &Document) -> Result<(), Error> {
     let path = path.as_ref();
     let cpath = c_path(path)?;
@@ -123,6 +124,19 @@ pub fn write_document(path: impl AsRef<Path>, doc: &Document) -> Result<(), Erro
                         }
                     }
                     ffi::f3dm_writer_polycurve(w.0, layer, data.as_ptr(), segs.len() as c_int)
+                }
+                Geometry::Point(p) => ffi::f3dm_writer_point(w.0, layer, [p.x, p.y, p.z].as_ptr()),
+                Geometry::Nurbs(n) => {
+                    let xyz: Vec<f64> = n.points.iter().flat_map(|q| [q.x, q.y, q.z]).collect();
+                    ffi::f3dm_writer_nurbs(
+                        w.0,
+                        layer,
+                        n.degree as c_int,
+                        n.points.len() as c_int,
+                        xyz.as_ptr(),
+                        n.weights.as_ptr(),
+                        n.knots.as_ptr(),
+                    )
                 }
                 Geometry::Mesh(m) => {
                     let xyz: Vec<f64> = m.positions.iter().flat_map(|q| [q.x, q.y, q.z]).collect();

@@ -124,8 +124,9 @@ pub fn triangulate_polygon(points: &[Point3], normal: Vec3) -> Vec<[u32; 3]> {
     out
 }
 
-/// Newell normal of a polygon (unnormalised; zero for degenerate input).
-fn polygon_normal(points: &[Point3]) -> Vec3 {
+/// Newell normal of a polygon (unnormalised, twice the area vector; zero for
+/// degenerate input).
+pub(crate) fn polygon_normal(points: &[Point3]) -> Vec3 {
     let n = points.len();
     let mut v = Vec3::new(0.0, 0.0, 0.0);
     for i in 0..n {
@@ -149,14 +150,40 @@ pub fn extrude_mesh(profile: &[Point3], dir: Vec3, closed: bool) -> Mesh {
         pts.pop();
     }
     pts.dedup_by(|a, b| a.distance_to(*b) < 1e-9);
-    let mut m = Mesh::default();
     if pts.len() < 2 || dir.length() < 1e-12 {
-        return m;
+        return Mesh::default();
     }
     if closed && pts.len() >= 3 && polygon_normal(&pts).dot(dir) < 0.0 {
         pts.reverse();
     }
+    let mut m = extrude_walls(&pts, dir, closed);
     let n = pts.len();
+    if closed && n >= 3 {
+        let tris = triangulate_polygon(&pts, dir);
+        let nd = dir.normalized().unwrap_or(Vec3::Z);
+        let base = m.positions.len() as u32;
+        m.positions.extend(pts.iter().copied());
+        m.normals.extend(std::iter::repeat_n(-nd, n));
+        m.triangles
+            .extend(tris.iter().map(|t| [base + t[0], base + t[2], base + t[1]]));
+        let base = m.positions.len() as u32;
+        m.positions.extend(pts.iter().map(|p| *p + dir));
+        m.normals.extend(std::iter::repeat_n(nd, n));
+        m.triangles
+            .extend(tris.iter().map(|t| [base + t[0], base + t[1], base + t[2]]));
+    }
+    m
+}
+
+/// Side walls of a profile (no repeated closing point) moved along `dir`: one quad
+/// `p[i], p[i+1], p[i+1]+dir, p[i]+dir` per segment, in the given order. Corners
+/// sharper than 30° become visible edges; smoother ones share vertices.
+pub(crate) fn extrude_walls(pts: &[Point3], dir: Vec3, closed: bool) -> Mesh {
+    let mut m = Mesh::default();
+    let n = pts.len();
+    if n < 2 {
+        return m;
+    }
     let seg_count = if closed { n } else { n - 1 };
     let seg_dir = |i: usize| (pts[(i + 1) % n] - pts[i]).normalized().unwrap_or(Vec3::X);
     let seg_normal = |i: usize| seg_dir(i).cross(dir).normalized().unwrap_or(Vec3::X);
@@ -223,21 +250,6 @@ pub fn extrude_mesh(profile: &[Point3], dir: Vec3, closed: bool) -> Mesh {
         let (a, b) = (start_col[i], end_col[i]);
         m.triangles.push([a, b, b + 1]);
         m.triangles.push([a, b + 1, a + 1]);
-    }
-
-    if closed && n >= 3 {
-        let tris = triangulate_polygon(&pts, dir);
-        let nd = dir.normalized().unwrap_or(Vec3::Z);
-        let base = m.positions.len() as u32;
-        m.positions.extend(pts.iter().copied());
-        m.normals.extend(std::iter::repeat_n(-nd, n));
-        m.triangles
-            .extend(tris.iter().map(|t| [base + t[0], base + t[2], base + t[1]]));
-        let base = m.positions.len() as u32;
-        m.positions.extend(pts.iter().map(|p| *p + dir));
-        m.normals.extend(std::iter::repeat_n(nd, n));
-        m.triangles
-            .extend(tris.iter().map(|t| [base + t[0], base + t[1], base + t[2]]));
     }
     m
 }

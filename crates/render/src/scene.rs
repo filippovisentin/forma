@@ -135,7 +135,7 @@ impl SceneCache {
         &self.entries[&o.id]
     }
 
-    /// Build the scene of all objects on visible layers.
+    /// Build the scene of all visible objects (visible layer, not hidden).
     pub fn scene(&mut self, doc: &Document) -> Scene {
         self.entries.retain(|id, _| doc.object(*id).is_some());
         let mut s = Scene {
@@ -144,8 +144,7 @@ impl SceneCache {
         };
         let mut first = true;
         for o in doc.objects() {
-            let layer = doc.layer(o.layer);
-            if !layer.visible {
+            if !doc.is_visible(o) {
                 continue;
             }
             let e = self.entry(o, doc.display_color(o));
@@ -163,8 +162,7 @@ impl SceneCache {
         let mut first = true;
         for id in ids {
             let Some(o) = doc.object(*id) else { continue };
-            let layer = doc.layer(o.layer);
-            if !layer.visible {
+            if !doc.is_visible(o) {
                 continue;
             }
             let e = self.entry(o, doc.display_color(o));
@@ -255,6 +253,19 @@ fn build_entry(o: &Object, color: [u8; 3], origin: DVec3) -> Entry {
                     pos: local(&m.positions[b as usize]),
                     color: EDGE_COLOR,
                 });
+            }
+        }
+        Geometry::Point(p) => {
+            // Small 3D cross until the display draws screen-space point markers.
+            let c = wire_color(color);
+            let r = 2.0;
+            for d in [Vec3::X, Vec3::Y, Vec3::Z] {
+                for q in [*p - d * r, *p + d * r] {
+                    e.lines.push(LineVertex {
+                        pos: local(&q),
+                        color: c,
+                    });
+                }
             }
         }
         g => {

@@ -543,16 +543,8 @@ pub fn offset(
     Ok(Chain::new(out))
 }
 
-/// Remove the part of `chain` around `pick` bounded by the nearest crossings with
-/// `cutters`. Returns the remaining pieces (zero, one or two chains).
-pub fn trim(
-    chain: &Chain,
-    cutters: &[Chain],
-    pick: Point3,
-    plane: &Plane,
-    tol: f64,
-) -> Result<Vec<Chain>, CurveError> {
-    let n = chain.segs.len() as f64;
+/// Sorted, de-duplicated chain parameters where `chain` crosses `cutters`.
+fn cut_params(chain: &Chain, cutters: &[Chain], plane: &Plane, tol: f64) -> Vec<f64> {
     let mut ts: Vec<f64> = Vec::new();
     for (i, s) in chain.segs.iter().enumerate() {
         for c in cutters {
@@ -565,6 +557,89 @@ pub fn trim(
     }
     ts.sort_by(f64::total_cmp);
     ts.dedup_by(|a, b| chain.point_at(*a).distance_to(chain.point_at(*b)) <= tol);
+    ts
+}
+
+/// Points where two chains cross inside `plane` (both must lie in it).
+pub fn crossings(a: &Chain, b: &Chain, plane: &Plane, tol: f64) -> Vec<Point3> {
+    let mut out: Vec<Point3> = Vec::new();
+    for t in cut_params(a, std::slice::from_ref(b), plane, tol) {
+        let p = a.point_at(t);
+        if !out.iter().any(|q| q.distance_to(p) <= tol) {
+            out.push(p);
+        }
+    }
+    out
+}
+
+/// Cut `chain` at every crossing with `cutters`, keeping all the pieces (Rhino's
+/// Split). Crossings at the ends of an open chain are ignored; a closed chain is
+/// cut into as many pieces as it has crossings (the piece across the seam is
+/// joined). Errors when there is nothing to split at.
+pub fn split(
+    chain: &Chain,
+    cutters: &[Chain],
+    plane: &Plane,
+    tol: f64,
+) -> Result<Vec<Chain>, CurveError> {
+    let n = chain.segs.len() as f64;
+    let closed = chain.is_closed(tol);
+    let mut ts = cut_params(chain, cutters, plane, tol);
+    if closed {
+        if ts.len() > 1
+            && chain
+                .point_at(ts[0])
+                .distance_to(chain.point_at(*ts.last().expect("len")))
+                <= tol
+        {
+            ts.pop();
+        }
+        if ts.is_empty() {
+            return Err(CurveError::NoIntersection);
+        }
+        let mut out = Vec::new();
+        for w in ts.windows(2) {
+            let c = chain.sub(w[0], w[1], tol);
+            if !c.segs.is_empty() {
+                out.push(c.simplified(tol));
+            }
+        }
+        // Last crossing -> seam -> first crossing.
+        let mut c = chain.sub(*ts.last().expect("len"), n, tol);
+        c.segs.extend(chain.sub(0.0, ts[0], tol).segs);
+        if !c.segs.is_empty() {
+            out.push(c.simplified(tol));
+        }
+        return Ok(out);
+    }
+    ts.retain(|t| {
+        let p = chain.point_at(*t);
+        p.distance_to(chain.start()) > tol && p.distance_to(chain.end()) > tol
+    });
+    if ts.is_empty() {
+        return Err(CurveError::NoIntersection);
+    }
+    let mut bounds = vec![0.0];
+    bounds.extend(ts);
+    bounds.push(n);
+    Ok(bounds
+        .windows(2)
+        .map(|w| chain.sub(w[0], w[1], tol))
+        .filter(|c| !c.segs.is_empty())
+        .collect())
+}
+
+/// Remove the part of `chain` around `pick` bounded by the nearest crossings with
+/// `cutters`. Returns the remaining pieces (zero, one or two chains).
+pub fn trim(
+    chain: &Chain,
+    cutters: &[Chain],
+    pick: Point3,
+    plane: &Plane,
+    tol: f64,
+) -> Result<Vec<Chain>, CurveError> {
+    let n = chain.segs.len() as f64;
+    let mut ts = cut_params(chain, cutters, plane, tol);
     let (tp, _) = chain.closest(pick);
     let closed = chain.is_closed(tol);
     if closed {
@@ -759,6 +834,56 @@ pub fn fillet_lines(
     }
 }
 
+/// Chamfer between two lines that meet (or would meet) at a corner: the first line
+/// is cut back by `d1` from the corner, the second by `d2`. Returns the trimmed
+/// lines and the chamfer segment (None when both distances are 0, which just
+/// extends the lines to the corner).
+pub fn chamfer_lines(
+    a: (Point3, Point3),
+    b: (Point3, Point3),
+    d1: f64,
+    d2: f64,
+    plane: &Plane,
+) -> Result<(Seg, Seg, Option<Seg>), CurveError> {
+    if d1 < 0.0 || d2 < 0.0 {
+        return Err(CurveError::Degenerate("distances must not be negative"));
+    }
+    let la = Seg::Line(a.0, a.1);
+    let lb = Seg::Line(b.0, b.1);
+    let hit = carrier_intersections(&la, &lb, plane);
+    let (ta, _) = *hit
+        .first()
+        .ok_or(CurveError::Degenerate("lines are parallel"))?;
+    let x = la.point_at(ta);
+    let far = |p: (Point3, Point3)| {
+        if p.0.distance_to(x) > p.1.distance_to(x) {
+            p.0
+        } else {
+            p.1
+        }
+    };
+    let (fa, fb) = (far(a), far(b));
+    if d1 < 1e-12 && d2 < 1e-12 {
+        return Ok((Seg::Line(fa, x), Seg::Line(x, fb), None));
+    }
+    if d1 >= fa.distance_to(x) - 1e-9 || d2 >= fb.distance_to(x) - 1e-9 {
+        return Err(CurveError::Degenerate("chamfer distance too large"));
+    }
+    let u1 = (fa - x)
+        .normalized()
+        .ok_or(CurveError::Degenerate("zero-length line"))?;
+    let u2 = (fb - x)
+        .normalized()
+        .ok_or(CurveError::Degenerate("zero-length line"))?;
+    let t1 = x + u1 * d1;
+    let t2 = x + u2 * d2;
+    Ok((
+        Seg::Line(fa, t1),
+        Seg::Line(t2, fb),
+        Some(Seg::Line(t1, t2)),
+    ))
+}
+
 /// Tangent points and arc rounding the corner `x` between `p` and `q`.
 #[allow(clippy::type_complexity)]
 fn fillet_corner(
@@ -852,6 +977,73 @@ mod tests {
     use super::*;
 
     const TOL: f64 = 1e-6;
+
+    #[test]
+    fn split_open_and_closed() {
+        let line = Chain::from_points(&[p(0.0, 5.0), p(20.0, 5.0)]);
+        let cutters = [
+            Chain::from_points(&[p(5.0, 0.0), p(5.0, 10.0)]),
+            Chain::from_points(&[p(12.0, 0.0), p(12.0, 10.0)]),
+        ];
+        let pieces = split(&line, &cutters, &Plane::TOP, TOL).unwrap();
+        assert_eq!(pieces.len(), 3);
+        assert!(pieces[0].end().distance_to(p(5.0, 5.0)) < TOL);
+        assert!(pieces[2].start().distance_to(p(12.0, 5.0)) < TOL);
+        let total: f64 = pieces
+            .iter()
+            .flat_map(|c| c.segs.iter().map(Seg::length))
+            .sum();
+        assert!((total - 20.0).abs() < 1e-9);
+        // A closed square crossed twice by a line → two pieces.
+        let sq = square();
+        let cut = [Chain::from_points(&[p(5.0, -5.0), p(5.0, 15.0)])];
+        let pieces = split(&sq, &cut, &Plane::TOP, TOL).unwrap();
+        assert_eq!(pieces.len(), 2);
+        let total: f64 = pieces
+            .iter()
+            .flat_map(|c| c.segs.iter().map(Seg::length))
+            .sum();
+        assert!((total - 40.0).abs() < 1e-9, "{total}");
+        assert!(split(
+            &line,
+            &[Chain::from_points(&[p(0.0, 9.0), p(1.0, 9.0)])],
+            &Plane::TOP,
+            TOL
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn chamfer_two_lines() {
+        let (a, b, c) = chamfer_lines(
+            (p(0.0, 0.0), p(10.0, 0.0)),
+            (p(10.0, 0.0), p(10.0, 10.0)),
+            2.0,
+            3.0,
+            &Plane::TOP,
+        )
+        .unwrap();
+        assert!(a.end().distance_to(p(8.0, 0.0)) < TOL);
+        assert!(b.start().distance_to(p(10.0, 3.0)) < TOL);
+        let c = c.unwrap();
+        assert!((c.length() - 13f64.sqrt()).abs() < 1e-9);
+        assert!(chamfer_lines(
+            (p(0.0, 0.0), p(10.0, 0.0)),
+            (p(10.0, 0.0), p(10.0, 10.0)),
+            20.0,
+            3.0,
+            &Plane::TOP,
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn crossings_of_circle_and_line() {
+        let c = Chain::new(vec![Seg::Arc(CircleArc::circle(Plane::TOP, 5.0))]);
+        let l = Chain::from_points(&[p(-10.0, 0.0), p(10.0, 0.0)]);
+        let x = crossings(&c, &l, &Plane::TOP, TOL);
+        assert_eq!(x.len(), 2, "{x:?}");
+    }
 
     fn p(x: f64, y: f64) -> Point3 {
         Point3::new(x, y, 0.0)

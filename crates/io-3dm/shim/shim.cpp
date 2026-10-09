@@ -331,6 +331,17 @@ int f3dm_curve_points(F3dmModel* m, int obj) {
   return static_cast<int>(m->scratch_points.size() / 3);
 }
 
+// Location of a point object. Returns 1 if the object is an ON_Point.
+int f3dm_point(const F3dmModel* m, int obj, double* xyz) {
+  if (obj < 0 || static_cast<size_t>(obj) >= m->geometry.size()) return 0;
+  const ON_Point* p = ON_Point::Cast(m->geometry[obj]);
+  if (!p) return 0;
+  xyz[0] = p->point.x;
+  xyz[1] = p->point.y;
+  xyz[2] = p->point.z;
+  return 1;
+}
+
 int f3dm_points_copy(const F3dmModel* m, double* xyz, int cap_points) {
   const int n = static_cast<int>(m->scratch_points.size() / 3);
   if (xyz && cap_points >= n) std::memcpy(xyz, m->scratch_points.data(), m->scratch_points.size() * sizeof(double));
@@ -555,6 +566,36 @@ int f3dm_writer_mesh(F3dmWriter* w, int layer, const double* xyz, const double* 
   if (!normals) mesh->ComputeVertexNormals();
   mesh->BoundingBox();
   return add_object(w, layer, mesh);
+}
+
+// NURBS curve: degree, cv_count control points as xyz triples, one weight per
+// point, and cv_count + degree - 1 knots (openNURBS convention).
+int f3dm_writer_nurbs(F3dmWriter* w, int layer, int degree, int cv_count, const double* xyz,
+                      const double* weights, const double* knots) {
+  bool rational = false;
+  for (int i = 0; i < cv_count; i++) {
+    if (weights[i] != 1.0) rational = true;
+  }
+  ON_NurbsCurve* c = ON_NurbsCurve::New(3, rational, degree + 1, cv_count);
+  for (int i = 0; i < cv_count; i++) {
+    const double* p = xyz + 3 * i;
+    if (rational) {
+      const double wt = weights[i];
+      c->SetCV(i, ON_4dPoint(p[0] * wt, p[1] * wt, p[2] * wt, wt));
+    } else {
+      c->SetCV(i, ON_3dPoint(p));
+    }
+  }
+  for (int i = 0; i < cv_count + degree - 1; i++) c->SetKnot(i, knots[i]);
+  if (!c->IsValid()) {
+    delete c;
+    return 0;
+  }
+  return add_object(w, layer, c);
+}
+
+int f3dm_writer_point(F3dmWriter* w, int layer, const double xyz[3]) {
+  return add_object(w, layer, new ON_Point(ON_3dPoint(xyz)));
 }
 
 int f3dm_writer_save(F3dmWriter* w, const char* path) { return w->model.Write(path, 0) ? 1 : 0; }

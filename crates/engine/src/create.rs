@@ -4,7 +4,9 @@
 
 use crate::{Args, Command, CommandError, CommandResult, Context};
 use forma_doc::{Geometry, ObjectId};
-use forma_geom::{box_mesh, cylinder_mesh, extrude_mesh, sphere_mesh, CircleArc, Plane, Vec3};
+use forma_geom::{
+    box_mesh, cylinder_mesh, extrude_mesh, sphere_mesh, CircleArc, NurbsCurve, Plane, Point3, Vec3,
+};
 
 fn finish(
     ctx: &mut Context,
@@ -236,9 +238,268 @@ impl Command for Extrude {
     }
 }
 
+/// All remaining tokens as points (each relative to the previous one for `@`).
+fn point_list(
+    ctx: &Context,
+    args: &mut Args,
+    first: &'static str,
+) -> Result<Vec<Point3>, CommandError> {
+    let mut pts = vec![args.point(first, ctx.last_point)?];
+    while args.peek().is_some() {
+        let last = *pts.last().expect("non-empty");
+        pts.push(args.point("next point", Some(last))?);
+    }
+    Ok(pts)
+}
+
+simple_command!(
+    Point,
+    "Point",
+    &["Pt"],
+    "Point <point> — add a point object"
+);
+impl Command for Point {
+    impl_meta!(Point);
+    fn run(&self, ctx: &mut Context, args: &mut Args) -> CommandResult {
+        let p = args.point("point location", ctx.last_point)?;
+        ctx.last_point = Some(p);
+        let ids = finish(ctx, vec![Geometry::Point(p)], false)?;
+        Ok(format!("added #{} point", ids[0].0))
+    }
+}
+
+simple_command!(
+    Points,
+    "Points",
+    &[],
+    "Points <p1> <p2> … — add several point objects"
+);
+impl Command for Points {
+    impl_meta!(Points);
+    fn run(&self, ctx: &mut Context, args: &mut Args) -> CommandResult {
+        let pts = point_list(ctx, args, "point location")?;
+        ctx.last_point = pts.last().copied();
+        let n = pts.len();
+        finish(ctx, pts.into_iter().map(Geometry::Point).collect(), false)?;
+        Ok(format!("added {n} points"))
+    }
+}
+
+simple_command!(
+    Curve,
+    "Curve",
+    &["Crv"],
+    "Curve <p1> <p2> … — degree-3 curve from control points (lower degree for fewer points)"
+);
+impl Command for Curve {
+    impl_meta!(Curve);
+    fn run(&self, ctx: &mut Context, args: &mut Args) -> CommandResult {
+        let mut pts = point_list(ctx, args, "start of curve")?;
+        pts.dedup_by(|a, b| a.distance_to(*b) <= ctx.tolerance.absolute);
+        let c = NurbsCurve::clamped_uniform(&pts, 3)
+            .ok_or(CommandError::MissingInput("at least two distinct points"))?;
+        ctx.last_point = pts.last().copied();
+        let ids = finish(ctx, vec![Geometry::Nurbs(c)], false)?;
+        Ok(format!("added #{} curve", ids[0].0))
+    }
+}
+
+simple_command!(
+    InterpCrv,
+    "InterpCrv",
+    &["Interp"],
+    "InterpCrv <p1> <p2> … — degree-3 curve through the points"
+);
+impl Command for InterpCrv {
+    impl_meta!(InterpCrv);
+    fn run(&self, ctx: &mut Context, args: &mut Args) -> CommandResult {
+        let mut pts = point_list(ctx, args, "start of curve")?;
+        pts.dedup_by(|a, b| a.distance_to(*b) <= ctx.tolerance.absolute);
+        if pts.len() < 2 {
+            return Err(CommandError::MissingInput("at least two distinct points"));
+        }
+        let c = NurbsCurve::interpolate(&pts, 3)
+            .ok_or_else(|| CommandError::Invalid("cannot interpolate these points".into()))?;
+        ctx.last_point = pts.last().copied();
+        let ids = finish(ctx, vec![Geometry::Nurbs(c)], false)?;
+        Ok(format!("added #{} curve", ids[0].0))
+    }
+}
+
+simple_command!(
+    Ellipse,
+    "Ellipse",
+    &["El"],
+    "Ellipse <center> <end of first axis> <end of second axis | radius> [normal] — exact NURBS ellipse"
+);
+impl Command for Ellipse {
+    impl_meta!(Ellipse);
+    fn run(&self, ctx: &mut Context, args: &mut Args) -> CommandResult {
+        let c = args.point("center", ctx.last_point)?;
+        let a = args.point("end of first axis", Some(c))?;
+        let second = args
+            .next_token()
+            .ok_or(CommandError::MissingInput("end of second axis"))?;
+        let x = a - c;
+        let ra = positive(x.length(), "first axis", ctx)?;
+        let x = x * (1.0 / ra);
+        let (n, rb) = match second.parse::<f64>() {
+            Ok(r) => {
+                let n = args.optional_vector().unwrap_or(Vec3::Z);
+                (n, r.abs())
+            }
+            Err(_) => {
+                let b = crate::parse_point(second, Some(c))?;
+                let n = args
+                    .optional_vector()
+                    .or_else(|| x.cross(b - c).normalized())
+                    .unwrap_or(Vec3::Z);
+                let y = n.cross(x).normalized().unwrap_or(Vec3::Y);
+                (n, (b - c).dot(y).abs())
+            }
+        };
+        positive(rb, "second axis", ctx)?;
+        let z = (n - x * n.dot(x))
+            .normalized()
+            .ok_or_else(|| CommandError::Invalid("first axis is parallel to the normal".into()))?;
+        let plane = Plane {
+            origin: c,
+            x,
+            y: z.cross(x),
+            z,
+        };
+        let e = NurbsCurve::ellipse(&plane, ra, rb);
+        ctx.last_point = Some(c);
+        let ids = finish(ctx, vec![Geometry::Nurbs(e)], false)?;
+        Ok(format!("added #{} ellipse {ra} x {rb}", ids[0].0))
+    }
+}
+
+simple_command!(
+    Polygon,
+    "Polygon",
+    &["Pol"],
+    "Polygon <center> <corner> [sides=5] [normal] — regular polygon through the corner"
+);
+impl Command for Polygon {
+    impl_meta!(Polygon);
+    fn run(&self, ctx: &mut Context, args: &mut Args) -> CommandResult {
+        let c = args.point("center", ctx.last_point)?;
+        let corner = args.point("corner", Some(c))?;
+        let sides = args.optional_number().unwrap_or(5.0);
+        if sides < 3.0 || sides.fract().abs() > 1e-9 || sides > 1000.0 {
+            return Err(CommandError::Invalid(
+                "number of sides must be a whole number ≥ 3".into(),
+            ));
+        }
+        let n = args.optional_vector().unwrap_or(Vec3::Z);
+        let plane = Plane::from_normal(c, n);
+        let start = plane.project(corner);
+        positive(start.distance_to(c), "radius", ctx)?;
+        let sides = sides as usize;
+        let mut pts: Vec<Point3> = (0..sides)
+            .map(|i| {
+                let x = forma_geom::Xform::rotation(
+                    c,
+                    plane.z,
+                    std::f64::consts::TAU * i as f64 / sides as f64,
+                );
+                x.point(start)
+            })
+            .collect();
+        pts.push(pts[0]);
+        ctx.last_point = Some(c);
+        let ids = finish(ctx, vec![Geometry::Polyline(pts)], false)?;
+        Ok(format!("added #{} polygon, {sides} sides", ids[0].0))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::Engine;
+    use forma_doc::Geometry;
+    use forma_geom::Point3;
+
+    fn last(e: &Engine) -> Geometry {
+        e.doc().objects().last().unwrap().geometry.clone()
+    }
+
+    #[test]
+    fn points_and_point() {
+        let mut e = Engine::new();
+        e.run_line("Point 1,2,3").unwrap();
+        e.run_line("Points 0,0 @10,0 @0,10").unwrap();
+        assert_eq!(e.doc().len(), 4);
+        assert!(e.doc().dump().contains("#1 point [Default] 1,2,3"));
+        assert_eq!(last(&e), Geometry::Point(Point3::new(10.0, 10.0, 0.0)));
+    }
+
+    #[test]
+    fn control_point_and_interpolated_curves() {
+        let mut e = Engine::new();
+        e.run_line("Curve 0,0 10,10 20,0 30,10").unwrap();
+        let Geometry::Nurbs(c) = last(&e) else {
+            panic!()
+        };
+        assert_eq!(c.degree, 3);
+        assert!(c.end().distance_to(Point3::new(30.0, 10.0, 0.0)) < 1e-9);
+        e.run_line("Crv 0,0 10,10").unwrap();
+        let Geometry::Nurbs(c) = last(&e) else {
+            panic!()
+        };
+        assert_eq!(c.degree, 1);
+        e.run_line("InterpCrv 0,0 10,10 20,0 30,10 40,0").unwrap();
+        let Geometry::Nurbs(c) = last(&e) else {
+            panic!()
+        };
+        let pts = c.sample(200);
+        for q in [Point3::new(10.0, 10.0, 0.0), Point3::new(20.0, 0.0, 0.0)] {
+            assert!(pts.iter().any(|p| p.distance_to(q) < 0.5), "{q}");
+        }
+        assert!(e.run_line("InterpCrv 0,0").is_err());
+        assert_eq!(e.doc().len(), 3);
+    }
+
+    #[test]
+    fn ellipse_by_point_and_radius() {
+        let mut e = Engine::new();
+        e.run_line("Ellipse 0,0 100,0 0,40").unwrap();
+        let g = last(&e);
+        assert!(g.is_closed_curve());
+        let b = g.bounding_box();
+        assert!(
+            (b.max.x - 100.0).abs() < 1e-6 && (b.max.y - 40.0).abs() < 1e-6,
+            "{b:?}"
+        );
+        e.run_line("Ellipse 0,0,0 0,0,50 20 1,0,0").unwrap();
+        let b = last(&e).bounding_box();
+        assert!(
+            (b.max.z - 50.0).abs() < 1e-6 && (b.max.y - 20.0).abs() < 1e-6,
+            "{b:?}"
+        );
+        assert!(b.max.x.abs() < 1e-9);
+        assert!(e.run_line("Ellipse 0,0 0,0 10").is_err());
+    }
+
+    #[test]
+    fn polygons() {
+        let mut e = Engine::new();
+        e.run_line("Polygon 0,0 10,0").unwrap();
+        let Geometry::Polyline(p) = last(&e) else {
+            panic!()
+        };
+        assert_eq!(p.len(), 6);
+        assert!(p
+            .iter()
+            .all(|q| (q.distance_to(Point3::ORIGIN) - 10.0).abs() < 1e-9));
+        e.run_line("Polygon 0,0 10,0 6").unwrap();
+        let Geometry::Polyline(p) = last(&e) else {
+            panic!()
+        };
+        assert_eq!(p.len(), 7);
+        assert!(p[1].distance_to(Point3::new(5.0, 75f64.sqrt(), 0.0)) < 1e-9);
+        assert!(e.run_line("Polygon 0,0 10,0 2").is_err());
+    }
 
     #[test]
     fn rectangle_circle_arc() {

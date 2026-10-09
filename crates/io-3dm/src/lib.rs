@@ -130,6 +130,17 @@ pub(crate) mod ffi {
             n: c_int,
         ) -> c_int;
         pub fn f3dm_writer_save(w: *mut Writer, path: *const c_char) -> c_int;
+        pub fn f3dm_writer_nurbs(
+            w: *mut Writer,
+            layer: c_int,
+            degree: c_int,
+            cv_count: c_int,
+            xyz: *const f64,
+            weights: *const f64,
+            knots: *const f64,
+        ) -> c_int;
+        pub fn f3dm_writer_point(w: *mut Writer, layer: c_int, xyz: *const f64) -> c_int;
+        pub fn f3dm_point(m: *const Model, obj: c_int, xyz: *mut f64) -> c_int;
         pub fn f3dm_write_line(
             path: *const c_char,
             a: *const f64,

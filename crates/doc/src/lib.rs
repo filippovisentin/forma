@@ -3,7 +3,9 @@
 //! Every mutation goes through a [`Transaction`], which records the changes so
 //! they can be undone as one step.
 
-use forma_geom::{BoundingBox, Chain, CircleArc, LineCurve, Mesh, Point3, Seg, Vec3, Xform};
+use forma_geom::{
+    BoundingBox, Chain, CircleArc, LineCurve, Mesh, NurbsCurve, Point3, Seg, Vec3, Xform,
+};
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
@@ -26,8 +28,13 @@ pub enum Geometry {
     /// Chain of lines and arcs (result of Join, Fillet, Offset of mixed curves).
     PolyCurve(Vec<Seg>),
     /// Triangle mesh (also the display form of imported breps and extrusions
-    /// until the solid kernel lands, see ADR 0001).
+    /// until the solid kernel lands, see ADR 0001). "Surfaces" made by PlanarSrf,
+    /// Loft, Revolve, Sweep1… are meshes too until NURBS surfaces exist.
     Mesh(Mesh),
+    /// A point object (not a curve).
+    Point(Point3),
+    /// NURBS curve (free-form curves, ellipses, arcs after a non-uniform scale).
+    Nurbs(NurbsCurve),
 }
 
 impl Geometry {
@@ -39,11 +46,13 @@ impl Geometry {
             Geometry::Arc(_) => "arc",
             Geometry::PolyCurve(_) => "polycurve",
             Geometry::Mesh(_) => "mesh",
+            Geometry::Point(_) => "point",
+            Geometry::Nurbs(_) => "nurbs",
         }
     }
 
     pub fn is_curve(&self) -> bool {
-        !matches!(self, Geometry::Mesh(_))
+        !matches!(self, Geometry::Mesh(_) | Geometry::Point(_))
     }
 
     /// True for closed curves (closed polylines and circles).
@@ -56,18 +65,21 @@ impl Geometry {
             Geometry::PolyCurve(s) => {
                 s.len() > 1 && s[0].start().distance_to(s[s.len() - 1].end()) < 1e-9
             }
+            Geometry::Nurbs(n) => n.is_closed(),
             _ => false,
         }
     }
 
-    /// The curve as a chain of line/arc segments (None for meshes).
+    /// The curve as a chain of line/arc segments (None for meshes and points).
+    /// NURBS curves become their display polyline (an approximation).
     pub fn to_chain(&self) -> Option<Chain> {
         match self {
             Geometry::Line(l) => Some(Chain::new(vec![Seg::Line(l.from, l.to)])),
             Geometry::Polyline(p) => Some(Chain::from_points(p)),
             Geometry::Arc(a) => Some(Chain::new(vec![Seg::Arc(*a)])),
             Geometry::PolyCurve(s) => Some(Chain::new(s.clone())),
-            Geometry::Mesh(_) => None,
+            Geometry::Nurbs(n) => Some(Chain::from_points(&n.points())),
+            Geometry::Mesh(_) | Geometry::Point(_) => None,
         }
     }
 
@@ -87,22 +99,65 @@ impl Geometry {
         }
     }
 
-    /// Points of a curve as a polyline (arcs sampled). Empty for meshes.
+    /// Points of a curve as a polyline (arcs and NURBS sampled). Empty for meshes
+    /// and points.
     pub fn curve_points(&self) -> Vec<Point3> {
         match self {
             Geometry::Line(l) => vec![l.from, l.to],
             Geometry::Polyline(p) => p.clone(),
             Geometry::Arc(a) => a.points(96),
             Geometry::PolyCurve(s) => Chain::new(s.clone()).points(),
-            Geometry::Mesh(_) => Vec::new(),
+            Geometry::Nurbs(n) => n.points(),
+            Geometry::Mesh(_) | Geometry::Point(_) => Vec::new(),
         }
     }
 
-    /// Transformed copy (rigid motions, uniform scale, mirror).
+    /// Length of a curve (`None` for meshes and points).
+    pub fn length(&self) -> Option<f64> {
+        match self {
+            Geometry::Line(l) => Some(l.length()),
+            Geometry::Polyline(p) => Some(p.windows(2).map(|w| w[0].distance_to(w[1])).sum()),
+            Geometry::Arc(a) => Some(a.radius * a.sweep),
+            Geometry::PolyCurve(s) => Some(s.iter().map(Seg::length).sum()),
+            Geometry::Nurbs(n) => Some(n.length()),
+            Geometry::Mesh(_) | Geometry::Point(_) => None,
+        }
+    }
+
+    /// Same curve running the other way; meshes get flipped normals and winding;
+    /// points are unchanged.
+    pub fn reversed(&self) -> Geometry {
+        match self {
+            Geometry::Line(l) => Geometry::Line(LineCurve::new(l.to, l.from)),
+            Geometry::Polyline(p) => Geometry::Polyline(p.iter().rev().copied().collect()),
+            Geometry::Arc(a) => match Seg::Arc(*a).reversed() {
+                Seg::Arc(r) => Geometry::Arc(r),
+                Seg::Line(..) => unreachable!("arc reverses to an arc"),
+            },
+            Geometry::PolyCurve(s) => Geometry::PolyCurve(Chain::new(s.clone()).reversed().segs),
+            Geometry::Nurbs(n) => Geometry::Nurbs(n.reversed()),
+            Geometry::Mesh(m) => Geometry::Mesh(m.flipped()),
+            Geometry::Point(p) => Geometry::Point(*p),
+        }
+    }
+
+    /// Transformed copy. Any affine map works: under a non-uniform map (or a
+    /// projection) circles and arcs become exact rational NURBS curves, and so do
+    /// polycurves that contain arcs.
     pub fn transformed(&self, x: &Xform) -> Geometry {
+        let similar = x.is_similarity();
         match self {
             Geometry::Line(l) => Geometry::Line(LineCurve::new(x.point(l.from), x.point(l.to))),
             Geometry::Polyline(p) => Geometry::Polyline(p.iter().map(|q| x.point(*q)).collect()),
+            Geometry::Point(p) => Geometry::Point(x.point(*p)),
+            Geometry::Nurbs(n) => Geometry::Nurbs(n.transformed(x)),
+            Geometry::Arc(a) if !similar => Geometry::Nurbs(NurbsCurve::from_arc(a).transformed(x)),
+            Geometry::PolyCurve(s) if !similar && s.iter().any(|g| matches!(g, Seg::Arc(_))) => {
+                match NurbsCurve::from_segs(s) {
+                    Some(n) => Geometry::Nurbs(n.transformed(x)),
+                    None => Geometry::PolyCurve(Vec::new()),
+                }
+            }
             Geometry::Arc(a) => Geometry::Arc(a.transformed(x)),
             Geometry::PolyCurve(s) => Geometry::PolyCurve(
                 s.iter()
@@ -174,6 +229,8 @@ impl Geometry {
                 min: Point3::ORIGIN,
                 max: Point3::ORIGIN,
             }),
+            Geometry::Point(p) => BoundingBox { min: *p, max: *p },
+            Geometry::Nurbs(n) => n.bounding_box(),
         }
     }
 }
@@ -185,8 +242,15 @@ pub struct Object {
     pub geometry: Geometry,
     /// Display colour; `None` means "by layer".
     pub color: Option<[u8; 3]>,
-    /// Changes whenever this object's geometry or layer changes (for display caches).
+    /// Changes whenever this object's geometry or attributes change (for display
+    /// caches).
     pub rev: u64,
+    /// Hidden objects are neither drawn nor selectable (Hide / Show).
+    pub hidden: bool,
+    /// Locked objects are drawn but cannot be selected (Lock / Unlock).
+    pub locked: bool,
+    /// Group the object belongs to (Group / Ungroup), if any.
+    pub group: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -313,12 +377,22 @@ impl Document {
         o.color.unwrap_or(self.layers[o.layer.0].color)
     }
 
-    /// Bounding box of all objects on visible layers.
+    /// True when the object is drawn: its layer is visible and it is not hidden.
+    pub fn is_visible(&self, o: &Object) -> bool {
+        !o.hidden && self.layers[o.layer.0].visible
+    }
+
+    /// True when the object can be selected: visible, not locked, layer unlocked.
+    pub fn is_selectable(&self, o: &Object) -> bool {
+        self.is_visible(o) && !o.locked && !self.layers[o.layer.0].locked
+    }
+
+    /// Bounding box of all visible objects.
     pub fn visible_bounding_box(&self) -> Option<BoundingBox> {
         let pts: Vec<Point3> = self
             .objects
             .values()
-            .filter(|o| self.layers[o.layer.0].visible)
+            .filter(|o| self.is_visible(o))
             .flat_map(|o| {
                 let b = o.geometry.bounding_box();
                 [b.min, b.max]
@@ -438,6 +512,20 @@ impl Document {
                         m.triangles.len()
                     );
                 }
+                Geometry::Point(p) => {
+                    let _ = writeln!(out, "#{} point [{}] {}", o.id.0, layer, p);
+                }
+                Geometry::Nurbs(n) => {
+                    let _ = writeln!(
+                        out,
+                        "#{} nurbs [{}] degree {} {} points{}",
+                        o.id.0,
+                        layer,
+                        n.degree,
+                        n.points.len(),
+                        if n.is_closed() { " closed" } else { "" }
+                    );
+                }
             }
         }
         out
@@ -498,6 +586,9 @@ impl Transaction<'_> {
             geometry,
             color: None,
             rev,
+            hidden: false,
+            locked: false,
+            group: None,
         });
         self.doc.apply(&change);
         self.changes.push(change);
@@ -564,6 +655,35 @@ impl Transaction<'_> {
         self.doc.apply(&change);
         self.changes.push(change);
         true
+    }
+
+    /// Change an object's attributes through `f` (undoable, bumps the revision).
+    fn modify(&mut self, id: ObjectId, f: impl FnOnce(&mut Object)) -> bool {
+        let Some(before) = self.doc.objects.get(&id).cloned() else {
+            return false;
+        };
+        let mut after = before.clone();
+        f(&mut after);
+        after.rev = self.doc.take_rev();
+        let change = Change::Modified { before, after };
+        self.doc.apply(&change);
+        self.changes.push(change);
+        true
+    }
+
+    /// Hide or show an object.
+    pub fn set_hidden(&mut self, id: ObjectId, hidden: bool) -> bool {
+        self.modify(id, |o| o.hidden = hidden)
+    }
+
+    /// Lock or unlock an object.
+    pub fn set_locked(&mut self, id: ObjectId, locked: bool) -> bool {
+        self.modify(id, |o| o.locked = locked)
+    }
+
+    /// Put an object in a group (`None` = no group).
+    pub fn set_group(&mut self, id: ObjectId, group: Option<u32>) -> bool {
+        self.modify(id, |o| o.group = group)
     }
 
     /// Add an object with the attributes (layer, colour) of `like`.
@@ -664,6 +784,108 @@ mod tests {
         doc.undo();
         assert_eq!(doc.object(id).unwrap().geometry, line());
         assert_eq!(doc.object(id).unwrap().rev, rev0);
+    }
+
+    #[test]
+    fn hide_lock_group_are_undoable_attributes() {
+        let mut doc = Document::new();
+        let mut t = doc.begin();
+        let id = t.add(line());
+        t.commit();
+        let o = doc.object(id).unwrap().clone();
+        assert!(doc.is_visible(&o) && doc.is_selectable(&o));
+        let mut t = doc.begin();
+        t.set_hidden(id, true);
+        t.set_group(id, Some(3));
+        t.commit();
+        let o = doc.object(id).unwrap().clone();
+        assert!(!doc.is_visible(&o) && !doc.is_selectable(&o));
+        assert_eq!(o.group, Some(3));
+        assert!(doc.visible_bounding_box().is_none());
+        let mut t = doc.begin();
+        t.set_hidden(id, false);
+        t.set_locked(id, true);
+        t.commit();
+        let o = doc.object(id).unwrap().clone();
+        assert!(doc.is_visible(&o) && !doc.is_selectable(&o));
+        doc.undo();
+        doc.undo();
+        let o = doc.object(id).unwrap();
+        assert!(!o.hidden && !o.locked && o.group.is_none());
+    }
+
+    #[test]
+    fn non_uniform_scale_turns_circles_into_nurbs() {
+        let c = Geometry::Arc(CircleArc::circle(forma_geom::Plane::TOP, 10.0));
+        let x = Xform::scale_axes(&forma_geom::Plane::TOP, 2.0, 1.0, 1.0);
+        let Geometry::Nurbs(n) = c.transformed(&x) else {
+            panic!("expected nurbs")
+        };
+        assert!(n.is_closed());
+        let b = Geometry::Nurbs(n).bounding_box();
+        assert!(
+            (b.max.x - 20.0).abs() < 1e-6 && (b.max.y - 10.0).abs() < 1e-6,
+            "{b:?}"
+        );
+        // Uniform scale keeps the circle.
+        assert!(matches!(
+            c.transformed(&Xform::scale(Point3::ORIGIN, 2.0)),
+            Geometry::Arc(_)
+        ));
+        // A polycurve with an arc too.
+        let pc = Geometry::PolyCurve(vec![
+            Seg::Line(Point3::new(10.0, 0.0, 0.0), Point3::new(20.0, 0.0, 0.0)),
+            Seg::Arc(
+                CircleArc::from_center_start_end(
+                    Point3::new(10.0, 0.0, 0.0),
+                    Point3::new(20.0, 0.0, 0.0),
+                    Point3::new(10.0, 10.0, 0.0),
+                    Vec3::Z,
+                )
+                .unwrap(),
+            ),
+        ]);
+        let g = pc.transformed(&x);
+        assert_eq!(g.kind(), "nurbs");
+        let pts = g.curve_points();
+        assert!(pts[0].distance_to(Point3::new(20.0, 0.0, 0.0)) < 1e-9);
+        assert!(
+            pts.last()
+                .unwrap()
+                .distance_to(Point3::new(20.0, 10.0, 0.0))
+                < 1e-9
+        );
+    }
+
+    #[test]
+    fn point_and_nurbs_basics() {
+        let p = Geometry::Point(Point3::new(1.0, 2.0, 3.0));
+        assert!(!p.is_curve());
+        assert!(p.to_chain().is_none());
+        assert_eq!(p.reversed(), p);
+        let n = Geometry::Nurbs(
+            NurbsCurve::clamped_uniform(
+                &[
+                    Point3::ORIGIN,
+                    Point3::new(1.0, 1.0, 0.0),
+                    Point3::new(2.0, 0.0, 0.0),
+                ],
+                3,
+            )
+            .unwrap(),
+        );
+        assert!(n.is_curve() && !n.is_closed_curve());
+        assert!(n.to_chain().unwrap().segs.len() > 2);
+        let r = n.reversed();
+        assert!(r.curve_points()[0].distance_to(Point3::new(2.0, 0.0, 0.0)) < 1e-12);
+        let mut doc = Document::new();
+        let mut t = doc.begin();
+        t.add(p);
+        t.add(n);
+        t.commit();
+        let d = doc.dump();
+        assert!(d.contains("#1 point [Default] 1,2,3"), "{d}");
+        assert!(d.contains("#2 nurbs [Default] degree 2 3 points"), "{d}");
     }
 
     #[test]

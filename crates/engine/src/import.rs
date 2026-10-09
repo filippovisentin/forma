@@ -41,6 +41,7 @@ pub fn open_3dm(path: &str) -> Result<Document, CommandError> {
             let geometry = match o.geometry {
                 Some(DisplayGeometry::Mesh(m)) => Geometry::Mesh(m),
                 Some(DisplayGeometry::Polyline(p)) => Geometry::Polyline(p),
+                Some(DisplayGeometry::Point(p)) => Geometry::Point(p),
                 None => continue,
             };
             let id = t.add_on_layer(geometry, layer);

@@ -72,7 +72,7 @@ impl SnapPoints {
     pub fn build(doc: &Document) -> SnapPoints {
         let mut points = Vec::new();
         for o in doc.objects() {
-            if !doc.layer(o.layer).visible {
+            if !doc.is_visible(o) {
                 continue;
             }
             match &o.geometry {
@@ -113,6 +113,11 @@ impl SnapPoints {
                             points.push((a.center(), SnapKind::Cen));
                         }
                     }
+                }
+                Geometry::Point(p) => points.push((*p, SnapKind::End)),
+                Geometry::Nurbs(n) => {
+                    points.push((n.start(), SnapKind::End));
+                    points.push((n.end(), SnapKind::End));
                 }
                 Geometry::Mesh(m) => {
                     // Corners and edge midpoints of small solids (boxes, extruded
@@ -243,9 +248,8 @@ fn ray_triangle(o: Point3, d: Vec3, a: Point3, b: Point3, c: Point3) -> Option<f
     (t > 0.0).then_some(t)
 }
 
-fn selectable(doc: &Document, layer: forma_doc::LayerId) -> bool {
-    let l = doc.layer(layer);
-    l.visible && !l.locked
+fn selectable(doc: &Document, o: &forma_doc::Object) -> bool {
+    doc.is_selectable(o)
 }
 
 /// Object under the cursor: curves within a few points win, otherwise the nearest
@@ -256,7 +260,7 @@ pub fn pick(doc: &Document, vp: &Viewport, pos: Pos2, origin: DVec3) -> Option<O
     let (ro, rd) = vp.ray(pos, origin);
     let mut best_mesh: Option<(f64, ObjectId)> = None;
     for o in doc.objects() {
-        if !selectable(doc, o.layer) {
+        if !selectable(doc, o) {
             continue;
         }
         match &o.geometry {
@@ -271,6 +275,14 @@ pub fn pick(doc: &Document, vp: &Viewport, pos: Pos2, origin: DVec3) -> Option<O
                         if best_mesh.is_none_or(|bm| tt < bm.0) {
                             best_mesh = Some((tt, o.id));
                         }
+                    }
+                }
+            }
+            Geometry::Point(p) => {
+                if let Some(sp) = vp.to_screen(*p, origin) {
+                    let d = sp.distance(pos);
+                    if d <= CURVE_RADIUS && best_curve.is_none_or(|bc| d < bc.0) {
+                        best_curve = Some((d, o.id));
                     }
                 }
             }
@@ -298,7 +310,7 @@ pub fn pick_curve_point(doc: &Document, vp: &Viewport, pos: Pos2, origin: DVec3)
     const RADIUS: f32 = 8.0;
     let mut best: Option<(f32, Point3)> = None;
     for o in doc.objects() {
-        if !selectable(doc, o.layer) || !o.geometry.is_curve() {
+        if !selectable(doc, o) || !o.geometry.is_curve() {
             continue;
         }
         let pts = o.geometry.curve_points();
@@ -334,7 +346,7 @@ pub fn window_select(
 ) -> Vec<ObjectId> {
     let mut out = Vec::new();
     for o in doc.objects() {
-        if !selectable(doc, o.layer) {
+        if !selectable(doc, o) {
             continue;
         }
         let bb = o.geometry.bounding_box();

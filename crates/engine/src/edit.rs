@@ -4,7 +4,8 @@ use crate::{Args, Command, CommandError, CommandResult, Context};
 use forma_doc::{Document, LayerId, LengthUnit, ObjectId};
 use forma_geom::{Vec3, Xform};
 
-fn parse_ids(tokens: Vec<&str>) -> Result<Vec<ObjectId>, CommandError> {
+/// Parse `#id` tokens (the `#` is optional).
+pub(crate) fn parse_ids(tokens: Vec<&str>) -> Result<Vec<ObjectId>, CommandError> {
     tokens
         .into_iter()
         .map(|t| {
@@ -17,7 +18,12 @@ fn parse_ids(tokens: Vec<&str>) -> Result<Vec<ObjectId>, CommandError> {
 }
 
 /// Apply `x` to the selection; `copy` adds transformed copies instead of moving.
-fn transform_selection(ctx: &mut Context, cmd: &str, x: &Xform, copy: bool) -> CommandResult {
+pub(crate) fn transform_selection(
+    ctx: &mut Context,
+    cmd: &str,
+    x: &Xform,
+    copy: bool,
+) -> CommandResult {
     let ids = ctx.selected(cmd)?;
     let mut t = ctx.doc.begin();
     for id in &ids {
@@ -158,7 +164,7 @@ simple_command!(
     SelAll,
     "SelAll",
     &[],
-    "SelAll — select all objects on visible layers"
+    "SelAll — select all visible, unlocked objects"
 );
 impl Command for SelAll {
     impl_meta!(SelAll);
@@ -166,10 +172,7 @@ impl Command for SelAll {
         let doc = &ctx.doc;
         ctx.selection = doc
             .objects()
-            .filter(|o| {
-                let l = doc.layer(o.layer);
-                l.visible && !l.locked
-            })
+            .filter(|o| doc.is_selectable(o))
             .map(|o| o.id)
             .collect();
         Ok(format!("{} selected", ctx.selection.len()))
@@ -189,7 +192,7 @@ simple_command!(
     Select,
     "Select",
     &["SelId"],
-    "Select #id … — add objects to the selection"
+    "Select #id … — add objects (and the rest of their groups) to the selection"
 );
 impl Command for Select {
     impl_meta!(Select);
@@ -200,6 +203,7 @@ impl Command for Select {
                 return Err(CommandError::Invalid(format!("no object #{}", id.0)));
             }
         }
+        let ids = crate::select::with_groups(&ctx.doc, &ids);
         ctx.selection.extend(ids);
         Ok(format!("{} selected", ctx.selection.len()))
     }
