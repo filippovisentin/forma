@@ -121,6 +121,14 @@ pub(crate) mod ffi {
             tri: *const u32,
             nt: c_int,
         ) -> c_int;
+        pub fn f3dm_object_color(m: *const Model, i: c_int, rgb: *mut u8) -> c_int;
+        pub fn f3dm_writer_color(w: *mut Writer, has: c_int, rgb: *const u8);
+        pub fn f3dm_writer_polycurve(
+            w: *mut Writer,
+            layer: c_int,
+            data: *const f64,
+            n: c_int,
+        ) -> c_int;
         pub fn f3dm_writer_save(w: *mut Writer, path: *const c_char) -> c_int;
         pub fn f3dm_write_line(
             path: *const c_char,

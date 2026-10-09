@@ -2,6 +2,7 @@
 
 use crate::{c_path, ffi, Error, Units};
 use forma_doc::{Document, Geometry, LengthUnit};
+use forma_geom::Seg;
 use std::collections::HashMap;
 use std::ffi::{c_int, CString};
 use std::path::Path;
@@ -77,6 +78,9 @@ pub fn write_document(path: impl AsRef<Path>, doc: &Document) -> Result<(), Erro
 
     for o in doc.objects() {
         let layer = layer_index.get(o.layer.0).copied().unwrap_or(-1);
+        let rgb = o.color.unwrap_or([0, 0, 0]);
+        // SAFETY: valid writer; rgb outlives the call.
+        unsafe { ffi::f3dm_writer_color(w.0, c_int::from(o.color.is_some()), rgb.as_ptr()) };
         // SAFETY (all calls): valid writer; buffers outlive the call.
         let ok = unsafe {
             match &o.geometry {
@@ -101,6 +105,24 @@ pub fn write_document(path: impl AsRef<Path>, doc: &Document) -> Result<(), Erro
                         a.radius,
                         a.sweep,
                     )
+                }
+                Geometry::PolyCurve(segs) => {
+                    let mut data: Vec<f64> = Vec::with_capacity(segs.len() * 12);
+                    for s in segs {
+                        match s {
+                            Seg::Line(a, b) => {
+                                data.extend([0.0, a.x, a.y, a.z, b.x, b.y, b.z]);
+                                data.extend([0.0; 5]);
+                            }
+                            Seg::Arc(a) => {
+                                let c = a.center();
+                                let (x, y) = (a.plane.x, a.plane.y);
+                                data.extend([1.0, c.x, c.y, c.z, x.x, x.y, x.z, y.x, y.y, y.z]);
+                                data.extend([a.radius, a.sweep]);
+                            }
+                        }
+                    }
+                    ffi::f3dm_writer_polycurve(w.0, layer, data.as_ptr(), segs.len() as c_int)
                 }
                 Geometry::Mesh(m) => {
                     let xyz: Vec<f64> = m.positions.iter().flat_map(|q| [q.x, q.y, q.z]).collect();

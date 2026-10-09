@@ -148,7 +148,7 @@ impl SceneCache {
             if !layer.visible {
                 continue;
             }
-            let e = self.entry(o, layer.color);
+            let e = self.entry(o, doc.display_color(o));
             append(&mut s, e, None, &mut first);
         }
         s
@@ -167,7 +167,7 @@ impl SceneCache {
             if !layer.visible {
                 continue;
             }
-            let e = self.entry(o, layer.color);
+            let e = self.entry(o, doc.display_color(o));
             append(&mut s, e, Some(HIGHLIGHT), &mut first);
         }
         s
@@ -186,9 +186,9 @@ fn append(s: &mut Scene, e: &Entry, highlight: Option<[f32; 4]>, first: &mut boo
                 let c = v.color;
                 MeshVertex {
                     color: [
-                        c[0] * 0.45 + h[0] * 0.55,
-                        c[1] * 0.45 + h[1] * 0.55,
-                        c[2] * 0.45 + h[2] * 0.55,
+                        c[0] * 0.72 + h[0] * 0.28,
+                        c[1] * 0.72 + h[1] * 0.28,
+                        c[2] * 0.72 + h[2] * 0.28,
                         1.0,
                     ],
                     ..*v

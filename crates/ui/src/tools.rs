@@ -2,7 +2,7 @@
 //! selection, then emit ordinary engine command lines (world coordinates), so
 //! everything still goes through `forma-engine`.
 
-use forma_geom::{CircleArc, Plane, Point3, Vec3, Xform};
+use forma_geom::{Chain, CircleArc, Plane, Point3, Vec3, Xform};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ToolKind {
@@ -20,6 +20,15 @@ pub enum ToolKind {
     Rotate,
     Scale,
     Mirror,
+    Offset,
+    Trim,
+    Extend,
+    Fillet,
+    FilletCorners,
+    Join,
+    Explode,
+    ArrayLinear,
+    ArrayPolar,
 }
 
 impl ToolKind {
@@ -36,13 +45,23 @@ impl ToolKind {
         ToolKind::Sphere,
         ToolKind::Extrude,
     ];
-    pub const TRANSFORMS: [ToolKind; 5] = [
+    pub const TRANSFORMS: [ToolKind; 7] = [
         ToolKind::Move,
         ToolKind::Copy,
         ToolKind::Rotate,
         ToolKind::Scale,
         ToolKind::Mirror,
+        ToolKind::ArrayLinear,
+        ToolKind::ArrayPolar,
     ];
+    pub const CURVE_TOOLS: [ToolKind; 5] = [
+        ToolKind::Offset,
+        ToolKind::Trim,
+        ToolKind::Extend,
+        ToolKind::Fillet,
+        ToolKind::FilletCorners,
+    ];
+    pub const EDIT: [ToolKind; 2] = [ToolKind::Join, ToolKind::Explode];
 
     pub fn name(self) -> &'static str {
         match self {
@@ -60,6 +79,15 @@ impl ToolKind {
             ToolKind::Rotate => "Rotate",
             ToolKind::Scale => "Scale",
             ToolKind::Mirror => "Mirror",
+            ToolKind::Offset => "Offset",
+            ToolKind::Trim => "Trim",
+            ToolKind::Extend => "Extend",
+            ToolKind::Fillet => "Fillet",
+            ToolKind::FilletCorners => "FilletCorners",
+            ToolKind::Join => "Join",
+            ToolKind::Explode => "Explode",
+            ToolKind::ArrayLinear => "ArrayLinear",
+            ToolKind::ArrayPolar => "ArrayPolar",
         }
     }
 
@@ -79,6 +107,15 @@ impl ToolKind {
             ToolKind::Rotate => "Rotate — center, angle or two reference points",
             ToolKind::Scale => "Scale — base point, factor or two reference points",
             ToolKind::Mirror => "Mirror — two points of the mirror line (copies)",
+            ToolKind::Offset => "Offset — parallel copy of curves at a distance",
+            ToolKind::Trim => "Trim — cut curves with cutting objects",
+            ToolKind::Extend => "Extend — lengthen curves to boundaries",
+            ToolKind::Fillet => "Fillet — round the corner between two lines",
+            ToolKind::FilletCorners => "FilletCorners — round all corners of polylines",
+            ToolKind::Join => "Join — join curves end to end / meshes into one",
+            ToolKind::Explode => "Explode — split into segments or faces",
+            ToolKind::ArrayLinear => "ArrayLinear — copies along a direction",
+            ToolKind::ArrayPolar => "ArrayPolar — copies around a centre",
         }
     }
 
@@ -99,6 +136,15 @@ impl ToolKind {
             "rotate" | "ro" => ToolKind::Rotate,
             "scale" | "sc" => ToolKind::Scale,
             "mirror" | "mi" => ToolKind::Mirror,
+            "offset" | "o" => ToolKind::Offset,
+            "trim" | "tr" => ToolKind::Trim,
+            "extend" | "ex" => ToolKind::Extend,
+            "fillet" | "f" => ToolKind::Fillet,
+            "filletcorners" | "fc" => ToolKind::FilletCorners,
+            "join" | "j" => ToolKind::Join,
+            "explode" | "x" => ToolKind::Explode,
+            "arraylinear" | "al" => ToolKind::ArrayLinear,
+            "arraypolar" | "ap" => ToolKind::ArrayPolar,
             _ => return None,
         })
     }
@@ -112,7 +158,20 @@ impl ToolKind {
                 | ToolKind::Rotate
                 | ToolKind::Scale
                 | ToolKind::Mirror
+                | ToolKind::Offset
+                | ToolKind::Trim
+                | ToolKind::Extend
+                | ToolKind::FilletCorners
+                | ToolKind::Join
+                | ToolKind::Explode
+                | ToolKind::ArrayLinear
+                | ToolKind::ArrayPolar
         )
+    }
+
+    /// Tools that are a single engine command once objects are selected.
+    pub fn instant(self) -> bool {
+        matches!(self, ToolKind::Join | ToolKind::Explode)
     }
 }
 
@@ -124,6 +183,10 @@ pub enum Want {
     Point,
     /// A point or a typed number (radius, angle, factor).
     PointOrNumber,
+    /// A typed number only (counts, radii).
+    Number,
+    /// Click on a curve (no snaps); a typed number changes the tool's distance.
+    Pick,
     /// A distance along a line (heights): picked on the line or typed.
     Height {
         from: Point3,
@@ -150,6 +213,12 @@ pub struct Tool {
     /// Wireframe of the selection, for transform previews.
     pub skeleton: Vec<[Point3; 2]>,
     reference: Option<Point3>,
+    /// Offset distance or fillet radius (remembered between uses by the app).
+    pub distance: f64,
+    /// Number of elements (arrays).
+    count: Option<usize>,
+    /// Selected curves with their own plane normal, for the Offset preview.
+    pub curves: Vec<(Chain, Option<Vec3>)>,
 }
 
 fn fmt_p(p: Point3) -> String {
@@ -186,17 +255,24 @@ impl Tool {
             anchor,
             skeleton,
             reference: None,
+            distance: 1.0,
+            count: None,
+            curves: Vec::new(),
         }
     }
 
     pub fn prompt(&self) -> String {
         use ToolKind::*;
         if self.selecting {
-            return format!(
-                "{} — select objects, press Enter when done",
-                self.kind.name()
-            );
+            let what = match self.kind {
+                Trim => "select cutting objects",
+                Extend => "select boundary objects",
+                Offset | FilletCorners => "select curves",
+                _ => "select objects",
+            };
+            return format!("{} — {what}, press Enter when done", self.kind.name());
         }
+        let d = round(self.distance);
         let n = self.pts.len();
         let p = match (self.kind, n) {
             (Line, 0) => "Start of line",
@@ -232,6 +308,22 @@ impl Tool {
             (Scale, _) => "Second reference point",
             (Mirror, 0) => "Start of mirror plane",
             (Mirror, _) => "End of mirror plane",
+            (Offset, _) => {
+                return format!("Offset — side to offset (distance {d}; type a number to change)")
+            }
+            (Trim, _) => "Click the part of a curve to cut away (Enter to finish)",
+            (Extend, _) => "Click near the end of a curve to extend (Enter to finish)",
+            (Fillet, 0) => {
+                return format!("Fillet — first line (radius {d}; type a number to change)")
+            }
+            (Fillet, _) => "Second line",
+            (FilletCorners, _) => "Fillet radius",
+            (Join | Explode, _) => "press Enter",
+            (ArrayLinear, _) if self.count.is_none() => "Number of elements",
+            (ArrayLinear, 0) => "First reference point",
+            (ArrayLinear, _) => "Second reference point (spacing and direction)",
+            (ArrayPolar, 0) => "Centre of polar array",
+            (ArrayPolar, _) => "Number of elements (full turn)",
         };
         format!("{} — {p}", self.kind.name())
     }
@@ -245,6 +337,11 @@ impl Tool {
         match (self.kind, n) {
             (Circle, 1) | (Sphere, 1) | (Cylinder, 1) => Want::PointOrNumber,
             (Rotate, 1) | (Scale, 1) if self.reference.is_none() => Want::PointOrNumber,
+            (Offset, _) => Want::PointOrNumber,
+            (Trim | Extend | Fillet, _) => Want::Pick,
+            (FilletCorners, _) => Want::Number,
+            (ArrayLinear, _) if self.count.is_none() => Want::Number,
+            (ArrayPolar, 1) => Want::Number,
             (Box, 2) => Want::Height {
                 from: self.pts[1],
                 dir: self.plane.z,
@@ -339,6 +436,27 @@ impl Tool {
                     self.n()
                 )])
             }
+            (Offset, _) => Step::Done(vec![format!(
+                "Offset {} {} {}",
+                round(self.distance),
+                fmt_p(p),
+                self.n()
+            )]),
+            (Trim, _) => Step::Emit(vec![format!("Trim {} {}", fmt_p(p), self.n())]),
+            (Extend, _) => Step::Emit(vec![format!("Extend {} {}", fmt_p(p), self.n())]),
+            (Fillet, 1) => Step::Done(vec![format!(
+                "Fillet {} {} {} {}",
+                round(self.distance),
+                fmt_p(self.pts[0]),
+                fmt_p(p),
+                self.n()
+            )]),
+            (ArrayLinear, 1) => Step::Done(vec![format!(
+                "ArrayLinear {} {} {}",
+                self.count.unwrap_or(2),
+                fmt_p(self.pts[0]),
+                fmt_p(p)
+            )]),
             (Scale, 1) => {
                 let r = self.reference.expect("reference").distance_to(self.pts[0]);
                 if r < 1e-12 {
@@ -411,6 +529,32 @@ impl Tool {
                 self.n()
             )]),
             (Scale, 1) => Step::Done(vec![format!("Scale {} {}", fmt_p(self.pts[0]), round(x))]),
+            (Offset | Fillet | Trim | Extend, _) => {
+                if x > 0.0 || (self.kind == Fillet && x >= 0.0) {
+                    self.distance = x;
+                }
+                Step::Continue
+            }
+            (FilletCorners, _) => Step::Done(vec![format!("FilletCorners {}", round(x.abs()))]),
+            (ArrayLinear, _) if self.count.is_none() => {
+                if x >= 2.0 {
+                    self.count = Some(x.round() as usize);
+                    Step::Continue
+                } else {
+                    Step::Cancel("at least 2 elements".into())
+                }
+            }
+            (ArrayPolar, 1) => {
+                if x < 2.0 {
+                    return Step::Cancel("at least 2 elements".into());
+                }
+                Step::Done(vec![format!(
+                    "ArrayPolar {} {} 360 {}",
+                    fmt_p(self.pts[0]),
+                    x.round(),
+                    self.n()
+                )])
+            }
             _ => Step::Cancel("a point is expected here".into()),
         }
     }
@@ -427,6 +571,9 @@ impl Tool {
     pub fn enter(&mut self, has_selection: bool) -> Step {
         if self.selecting {
             if has_selection {
+                if self.kind.instant() {
+                    return Step::Done(vec![self.kind.name().to_string()]);
+                }
                 self.selecting = false;
                 return Step::Continue;
             }
@@ -435,6 +582,7 @@ impl Tool {
         match self.kind {
             ToolKind::Polyline if self.pts.len() >= 2 => self.finish_polyline(false),
             ToolKind::Copy if !self.pts.is_empty() => Step::Done(Vec::new()),
+            ToolKind::Trim | ToolKind::Extend => Step::Done(Vec::new()),
             _ => Step::Cancel("cancelled".into()),
         }
     }
@@ -559,6 +707,29 @@ impl Tool {
                     xf(
                         &mut out,
                         &Xform::rotation(self.pts[0], self.plane.z, self.angle(cur).to_radians()),
+                    );
+                }
+            }
+            (Offset, _) => {
+                for (c, own) in &self.curves {
+                    let n = match own {
+                        Some(v) if v.dot(self.plane.z) < 0.0 => -*v,
+                        Some(v) => *v,
+                        None => self.plane.z,
+                    };
+                    let plane = Plane::from_normal(c.start(), n);
+                    let side = forma_geom::side_of(c, cur, &plane);
+                    if let Ok(o) = forma_geom::offset(c, self.distance, side, &plane, 1e-6) {
+                        poly(&mut out, &o.points());
+                    }
+                }
+            }
+            (ArrayLinear, 1) => {
+                out.push([self.pts[0], cur]);
+                for i in 1..self.count.unwrap_or(2) {
+                    xf(
+                        &mut out,
+                        &Xform::translation((cur - self.pts[0]) * i as f64),
                     );
                 }
             }

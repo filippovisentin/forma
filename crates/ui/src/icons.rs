@@ -205,6 +205,80 @@ pub fn paint(p: &Painter, r: Rect, icon: Icon, c: Color32) {
                 s,
             ));
         }
+        Icon::Tool(K::Offset) => {
+            let a = ellipse(
+                pos2(l, b),
+                m.width() * 0.55,
+                m.height() * 0.55,
+                0.0,
+                TAU / 4.0,
+            );
+            let o = ellipse(pos2(l, b), m.width(), m.height(), 0.0, TAU / 4.0);
+            p.add(Shape::line(a, thin));
+            p.add(Shape::line(o, s));
+        }
+        Icon::Tool(K::Trim) => {
+            p.line_segment([pos2(cx.x, t), pos2(cx.x, b)], s);
+            p.line_segment([pos2(l, cx.y), pos2(cx.x, cx.y)], s);
+            p.add(Shape::dashed_line(
+                &[pos2(cx.x, cx.y), pos2(rr, cx.y)],
+                thin,
+                2.0,
+                2.0,
+            ));
+            p.line_segment([pos2(rr - 5.0, cx.y - 4.0), pos2(rr, cx.y + 4.0)], thin);
+            p.line_segment([pos2(rr - 5.0, cx.y + 4.0), pos2(rr, cx.y - 4.0)], thin);
+        }
+        Icon::Tool(K::Extend) => {
+            p.line_segment([pos2(rr, t), pos2(rr, b)], s);
+            p.line_segment([pos2(l, cx.y), pos2(cx.x - 2.0, cx.y)], s);
+            arrow(p, pos2(cx.x - 2.0, cx.y), pos2(rr - 1.0, cx.y), thin);
+        }
+        Icon::Tool(K::Fillet) => {
+            p.line_segment([pos2(l, b), pos2(l, cx.y)], s);
+            p.line_segment([pos2(cx.x, t), pos2(rr, t)], s);
+            p.add(Shape::line(
+                ellipse(pos2(cx.x, cx.y), cx.x - l, cx.y - t, TAU / 4.0, TAU / 2.0),
+                s,
+            ));
+        }
+        Icon::Tool(K::FilletCorners) => {
+            let r0 = m.shrink2(vec2(0.0, m.height() * 0.12));
+            p.rect_stroke(r0, 5.0, s, StrokeKind::Middle);
+        }
+        Icon::Tool(K::Join) => {
+            p.line_segment([pos2(l, b), pos2(cx.x, cx.y)], s);
+            p.line_segment([pos2(cx.x, cx.y), pos2(rr, t)], s);
+            p.circle_stroke(cx, 3.0, thin);
+        }
+        Icon::Tool(K::Explode) => {
+            for (dx, dy) in [(-1.0f32, -1.0f32), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)] {
+                arrow(
+                    p,
+                    cx + vec2(dx, dy) * 3.0,
+                    cx + vec2(dx * m.width() * 0.48, dy * m.height() * 0.48),
+                    thin,
+                );
+            }
+        }
+        Icon::Tool(K::ArrayLinear) => {
+            for k in 0..3 {
+                let x0 = l + k as f32 * m.width() / 3.0;
+                p.rect_stroke(
+                    Rect::from_min_size(pos2(x0, cx.y - 3.0), vec2(m.width() / 4.0, 6.0)),
+                    0.0,
+                    s,
+                    StrokeKind::Middle,
+                );
+            }
+        }
+        Icon::Tool(K::ArrayPolar) => {
+            p.circle_stroke(cx, m.width() * 0.4, thin);
+            for k in 0..6 {
+                let a = k as f32 * TAU / 6.0;
+                p.circle_filled(cx + vec2(a.cos(), a.sin()) * m.width() * 0.4, 2.3, c);
+            }
+        }
         Icon::New => {
             p.rect_stroke(
                 m.shrink2(vec2(m.width() * 0.15, 0.0)),

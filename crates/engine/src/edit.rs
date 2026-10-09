@@ -24,7 +24,7 @@ fn transform_selection(ctx: &mut Context, cmd: &str, x: &Xform, copy: bool) -> C
         let obj = t.doc().object(*id).expect("selected exists").clone();
         let g = obj.geometry.transformed(x);
         if copy {
-            t.add_on_layer(g, obj.layer);
+            t.add_like(g, &obj);
         } else {
             t.replace(*id, g);
         }
@@ -35,31 +35,6 @@ fn transform_selection(ctx: &mut Context, cmd: &str, x: &Xform, copy: bool) -> C
         if copy { "copied" } else { "transformed" },
         ids.len()
     ))
-}
-
-macro_rules! simple_command {
-    ($ty:ident, $name:literal, $aliases:expr, $help:literal) => {
-        pub struct $ty;
-        impl $ty {
-            const NAME: &'static str = $name;
-            const ALIASES: &'static [&'static str] = $aliases;
-            const HELP: &'static str = $help;
-        }
-    };
-}
-
-macro_rules! impl_meta {
-    ($ty:ident) => {
-        fn name(&self) -> &'static str {
-            $ty::NAME
-        }
-        fn aliases(&self) -> &'static [&'static str] {
-            $ty::ALIASES
-        }
-        fn help(&self) -> &'static str {
-            $ty::HELP
-        }
-    };
 }
 
 simple_command!(
@@ -399,6 +374,10 @@ mod tests {
         e.run_line("Circle 0,0 50").unwrap();
         e.run_line("Polyline 0,0 100,0 100,100").unwrap();
         e.run_line("Line 0,0 0,0,100").unwrap();
+        e.run_line("SelNone").unwrap();
+        e.run_line("Select #3").unwrap();
+        e.run_line("FilletCorners 10").unwrap();
+        e.run_line("SetObjectColor 10,200,30").unwrap();
         e.run_line(&format!("Save {p}")).unwrap();
         let mut f = Engine::new();
         f.run_line(&format!("Open {p}")).unwrap();
@@ -411,6 +390,13 @@ mod tests {
         );
         let kinds: Vec<&str> = f.doc().objects().map(|o| o.geometry.kind()).collect();
         assert!(kinds.contains(&"mesh"), "{kinds:?}");
+        assert_eq!(
+            f.doc()
+                .objects()
+                .filter(|o| o.color == Some([10, 200, 30]))
+                .count(),
+            1
+        );
         let _ = std::fs::remove_dir_all(dir);
     }
 }

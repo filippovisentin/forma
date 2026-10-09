@@ -43,7 +43,10 @@ pub fn open_3dm(path: &str) -> Result<Document, CommandError> {
                 Some(DisplayGeometry::Polyline(p)) => Geometry::Polyline(p),
                 None => continue,
             };
-            t.add_on_layer(geometry, layer);
+            let id = t.add_on_layer(geometry, layer);
+            if o.color.is_some() {
+                t.set_color(id, o.color);
+            }
         }
         t.commit();
     }

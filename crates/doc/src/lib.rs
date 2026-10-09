@@ -3,7 +3,7 @@
 //! Every mutation goes through a [`Transaction`], which records the changes so
 //! they can be undone as one step.
 
-use forma_geom::{BoundingBox, CircleArc, LineCurve, Mesh, Point3, Vec3, Xform};
+use forma_geom::{BoundingBox, Chain, CircleArc, LineCurve, Mesh, Point3, Seg, Vec3, Xform};
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
@@ -23,6 +23,8 @@ pub enum Geometry {
     Polyline(Vec<Point3>),
     /// Circle or arc.
     Arc(CircleArc),
+    /// Chain of lines and arcs (result of Join, Fillet, Offset of mixed curves).
+    PolyCurve(Vec<Seg>),
     /// Triangle mesh (also the display form of imported breps and extrusions
     /// until the solid kernel lands, see ADR 0001).
     Mesh(Mesh),
@@ -35,6 +37,7 @@ impl Geometry {
             Geometry::Polyline(_) => "polyline",
             Geometry::Arc(a) if a.is_closed() => "circle",
             Geometry::Arc(_) => "arc",
+            Geometry::PolyCurve(_) => "polycurve",
             Geometry::Mesh(_) => "mesh",
         }
     }
@@ -50,7 +53,37 @@ impl Geometry {
                 p.len() > 3 && p[0].distance_to(*p.last().expect("len")) < 1e-9
             }
             Geometry::Arc(a) => a.is_closed(),
+            Geometry::PolyCurve(s) => {
+                s.len() > 1 && s[0].start().distance_to(s[s.len() - 1].end()) < 1e-9
+            }
             _ => false,
+        }
+    }
+
+    /// The curve as a chain of line/arc segments (None for meshes).
+    pub fn to_chain(&self) -> Option<Chain> {
+        match self {
+            Geometry::Line(l) => Some(Chain::new(vec![Seg::Line(l.from, l.to)])),
+            Geometry::Polyline(p) => Some(Chain::from_points(p)),
+            Geometry::Arc(a) => Some(Chain::new(vec![Seg::Arc(*a)])),
+            Geometry::PolyCurve(s) => Some(Chain::new(s.clone())),
+            Geometry::Mesh(_) => None,
+        }
+    }
+
+    /// The simplest geometry for a chain: line, arc, polyline or polycurve.
+    pub fn from_chain(c: Chain) -> Option<Geometry> {
+        let segs = c.segs;
+        match segs.as_slice() {
+            [] => None,
+            [Seg::Line(a, b)] => Some(Geometry::Line(LineCurve::new(*a, *b))),
+            [Seg::Arc(a)] => Some(Geometry::Arc(*a)),
+            s if s.iter().all(|x| matches!(x, Seg::Line(..))) => {
+                let mut pts = vec![s[0].start()];
+                pts.extend(s.iter().map(Seg::end));
+                Some(Geometry::Polyline(pts))
+            }
+            _ => Some(Geometry::PolyCurve(segs)),
         }
     }
 
@@ -60,6 +93,7 @@ impl Geometry {
             Geometry::Line(l) => vec![l.from, l.to],
             Geometry::Polyline(p) => p.clone(),
             Geometry::Arc(a) => a.points(96),
+            Geometry::PolyCurve(s) => Chain::new(s.clone()).points(),
             Geometry::Mesh(_) => Vec::new(),
         }
     }
@@ -70,6 +104,22 @@ impl Geometry {
             Geometry::Line(l) => Geometry::Line(LineCurve::new(x.point(l.from), x.point(l.to))),
             Geometry::Polyline(p) => Geometry::Polyline(p.iter().map(|q| x.point(*q)).collect()),
             Geometry::Arc(a) => Geometry::Arc(a.transformed(x)),
+            Geometry::PolyCurve(s) => Geometry::PolyCurve(
+                s.iter()
+                    .map(|g| match g {
+                        Seg::Line(a, b) => Seg::Line(x.point(*a), x.point(*b)),
+                        Seg::Arc(a) => {
+                            let t = a.transformed(x);
+                            // A mirror re-bases the arc so it runs the other way.
+                            if x.flips() {
+                                Seg::Arc(t).reversed()
+                            } else {
+                                Seg::Arc(t)
+                            }
+                        }
+                    })
+                    .collect(),
+            ),
             Geometry::Mesh(m) => {
                 let flip = x.flips();
                 Geometry::Mesh(Mesh {
@@ -114,6 +164,12 @@ impl Geometry {
                 max: Point3::ORIGIN,
             }),
             Geometry::Arc(a) => a.bounding_box(),
+            Geometry::PolyCurve(_) => {
+                BoundingBox::from_points(&self.curve_points()).unwrap_or(BoundingBox {
+                    min: Point3::ORIGIN,
+                    max: Point3::ORIGIN,
+                })
+            }
             Geometry::Mesh(m) => m.bounding_box().unwrap_or(BoundingBox {
                 min: Point3::ORIGIN,
                 max: Point3::ORIGIN,
@@ -127,6 +183,8 @@ pub struct Object {
     pub id: ObjectId,
     pub layer: LayerId,
     pub geometry: Geometry,
+    /// Display colour; `None` means "by layer".
+    pub color: Option<[u8; 3]>,
     /// Changes whenever this object's geometry or layer changes (for display caches).
     pub rev: u64,
 }
@@ -243,6 +301,18 @@ impl Document {
         &self.layers[id.0]
     }
 
+    /// Change a layer's colour, visibility or lock (not undoable, like Rhino's
+    /// layer panel) and notify the display.
+    pub fn edit_layer(&mut self, id: LayerId, f: impl FnOnce(&mut Layer)) {
+        f(&mut self.layers[id.0]);
+        self.version += 1;
+    }
+
+    /// Colour an object is displayed with: its own or its layer's.
+    pub fn display_color(&self, o: &Object) -> [u8; 3] {
+        o.color.unwrap_or(self.layers[o.layer.0].color)
+    }
+
     /// Bounding box of all objects on visible layers.
     pub fn visible_bounding_box(&self) -> Option<BoundingBox> {
         let pts: Vec<Point3> = self
@@ -337,6 +407,17 @@ impl Document {
                 Geometry::Polyline(p) => {
                     let _ = writeln!(out, "#{} polyline [{}] {} points", o.id.0, layer, p.len());
                 }
+                Geometry::PolyCurve(s) => {
+                    let _ = writeln!(
+                        out,
+                        "#{} polycurve [{}] {} segments {} -> {}",
+                        o.id.0,
+                        layer,
+                        s.len(),
+                        s[0].start(),
+                        s[s.len() - 1].end()
+                    );
+                }
                 Geometry::Arc(a) => {
                     let _ = writeln!(
                         out,
@@ -415,6 +496,7 @@ impl Transaction<'_> {
             id,
             layer,
             geometry,
+            color: None,
             rev,
         });
         self.doc.apply(&change);
@@ -465,6 +547,41 @@ impl Transaction<'_> {
         self.doc.apply(&change);
         self.changes.push(change);
         true
+    }
+
+    /// Set an object's display colour (`None` = by layer).
+    pub fn set_color(&mut self, id: ObjectId, color: Option<[u8; 3]>) -> bool {
+        let Some(before) = self.doc.objects.get(&id).cloned() else {
+            return false;
+        };
+        let rev = self.doc.take_rev();
+        let after = Object {
+            color,
+            rev,
+            ..before.clone()
+        };
+        let change = Change::Modified { before, after };
+        self.doc.apply(&change);
+        self.changes.push(change);
+        true
+    }
+
+    /// Add an object with the attributes (layer, colour) of `like`.
+    pub fn add_like(&mut self, geometry: Geometry, like: &Object) -> ObjectId {
+        let id = self.add_on_layer(geometry, like.layer);
+        if like.color.is_some() {
+            self.set_color_untracked(id, like.color);
+        }
+        id
+    }
+
+    fn set_color_untracked(&mut self, id: ObjectId, color: Option<[u8; 3]>) {
+        if let Some(Change::Added(o)) = self.changes.last_mut() {
+            if o.id == id {
+                o.color = color;
+                self.doc.objects.get_mut(&id).expect("just added").color = color;
+            }
+        }
     }
 
     /// Read access to the document while the transaction is open.

@@ -46,6 +46,7 @@ struct F3dmModel {
   std::vector<std::string> layer_paths;
   std::vector<F3dmLayer> layers;
   std::vector<F3dmObject> objects;
+  std::vector<long> object_colors;  // 0xRRGGBB, or -1 for "by layer"
   // Geometry of each object (owned by `model`), and a brep for breps/extrusions
   // (extrusions are converted on demand and owned by `owned_breps`).
   std::vector<const ON_Geometry*> geometry;
@@ -155,6 +156,12 @@ F3dmModel* f3dm_read(const char* path) {
       }
     }
     m->objects.push_back(o);
+    long rgb = -1;
+    if (a && a->ColorSource() == ON::color_from_object) {
+      const ON_Color col = a->m_color;
+      rgb = (static_cast<long>(col.Red()) << 16) | (col.Green() << 8) | col.Blue();
+    }
+    m->object_colors.push_back(rgb);
     m->geometry.push_back(g);
     const ON_Brep* brep = ON_Brep::Cast(g);
     if (!brep) {
@@ -181,6 +188,17 @@ void f3dm_layer_display(const F3dmModel* m, int i, unsigned char rgb[3], int* vi
   rgb[1] = m->layers[i].rgb[1];
   rgb[2] = m->layers[i].rgb[2];
   *visible = m->layers[i].visible;
+}
+
+// Object colour when set on the object (returns 1), else 0 (by layer).
+int f3dm_object_color(const F3dmModel* m, int i, unsigned char rgb[3]) {
+  if (i < 0 || static_cast<size_t>(i) >= m->object_colors.size()) return 0;
+  const long c = m->object_colors[i];
+  if (c < 0) return 0;
+  rgb[0] = static_cast<unsigned char>((c >> 16) & 255);
+  rgb[1] = static_cast<unsigned char>((c >> 8) & 255);
+  rgb[2] = static_cast<unsigned char>(c & 255);
+  return 1;
 }
 
 static const ON_Brep* brep_of(const F3dmModel* m, int obj) {
@@ -431,6 +449,8 @@ struct F3dmWriter {
   ONX_Model model;
   std::vector<ON_UUID> layer_ids;   // by writer layer index
   std::vector<int> layer_indices;   // model layer index by writer layer index
+  bool has_color = false;           // colour for the next objects (else by layer)
+  ON_Color color;
 };
 
 F3dmWriter* f3dm_writer_new(int unit_system, double abs_tol) {
@@ -469,8 +489,37 @@ static int add_object(F3dmWriter* w, int layer, ON_Object* geometry) {
   if (layer >= 0 && static_cast<size_t>(layer) < w->layer_indices.size()) {
     a->m_layer_index = w->layer_indices[layer];
   }
+  if (w->has_color) {
+    a->SetColorSource(ON::color_from_object);
+    a->m_color = w->color;
+  }
   ON_ModelComponentReference ref = w->model.AddManagedModelGeometryComponent(geometry, a);
   return ref.IsEmpty() ? 0 : 1;
+}
+
+// Colour for the objects added next: has = 0 means "by layer".
+void f3dm_writer_color(F3dmWriter* w, int has, const unsigned char rgb[3]) {
+  w->has_color = has != 0;
+  if (w->has_color) w->color = ON_Color(rgb[0], rgb[1], rgb[2]);
+}
+
+// Polycurve of n segments, 12 doubles each: kind (0 line, 1 arc), then
+// line: a[3] b[3]; arc: center[3] xaxis[3] yaxis[3] radius sweep.
+int f3dm_writer_polycurve(F3dmWriter* w, int layer, const double* data, int n) {
+  ON_PolyCurve* pc = new ON_PolyCurve(n);
+  for (int i = 0; i < n; i++) {
+    const double* d = data + 12 * i;
+    if (d[0] < 0.5) {
+      pc->Append(new ON_LineCurve(ON_3dPoint(d + 1), ON_3dPoint(d + 4)));
+    } else {
+      const ON_3dPoint o(d + 1);
+      const ON_3dVector vx(d + 4), vy(d + 7);
+      ON_Plane plane(o, vx, vy);
+      ON_Arc arc(plane, d[10], d[11]);
+      pc->Append(new ON_ArcCurve(arc));
+    }
+  }
+  return add_object(w, layer, pc);
 }
 
 int f3dm_writer_line(F3dmWriter* w, int layer, const double a[3], const double b[3]) {

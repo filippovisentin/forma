@@ -104,6 +104,16 @@ impl SnapPoints {
                         points.push((a.mid(), SnapKind::Mid));
                     }
                 }
+                Geometry::PolyCurve(segs) => {
+                    for s in segs {
+                        points.push((s.start(), SnapKind::End));
+                        points.push((s.end(), SnapKind::End));
+                        points.push((s.point_at(0.5), SnapKind::Mid));
+                        if let forma_geom::Seg::Arc(a) = s {
+                            points.push((a.center(), SnapKind::Cen));
+                        }
+                    }
+                }
                 Geometry::Mesh(m) => {
                     // Corners and edge midpoints of small solids (boxes, extruded
                     // rectangles); big imported meshes would only add noise.
@@ -280,6 +290,38 @@ pub fn pick(doc: &Document, vp: &Viewport, pos: Pos2, origin: DVec3) -> Option<O
         }
     }
     best_curve.map(|c| c.1).or(best_mesh.map(|m| m.1))
+}
+
+/// Point on the curve under the cursor (within a few screen points), used by
+/// Trim, Extend and Fillet to know which curve and which part was clicked.
+pub fn pick_curve_point(doc: &Document, vp: &Viewport, pos: Pos2, origin: DVec3) -> Option<Point3> {
+    const RADIUS: f32 = 8.0;
+    let mut best: Option<(f32, Point3)> = None;
+    for o in doc.objects() {
+        if !selectable(doc, o.layer) || !o.geometry.is_curve() {
+            continue;
+        }
+        let pts = o.geometry.curve_points();
+        for w in pts.windows(2) {
+            let (Some(a), Some(b)) = (vp.to_screen(w[0], origin), vp.to_screen(w[1], origin))
+            else {
+                continue;
+            };
+            let ab = b - a;
+            let len2 = ab.length_sq();
+            let t = if len2 < 1e-6 {
+                0.0
+            } else {
+                ((pos - a).dot(ab) / len2).clamp(0.0, 1.0)
+            };
+            let d = pos.distance(a + ab * t);
+            if d <= RADIUS && best.is_none_or(|bb| d < bb.0) {
+                let p = w[0] + (w[1] - w[0]) * f64::from(t);
+                best = Some((d, p));
+            }
+        }
+    }
+    best.map(|b| b.1)
 }
 
 /// Window (left→right: fully inside) or crossing (right→left: touching) selection.

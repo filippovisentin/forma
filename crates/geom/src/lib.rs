@@ -5,11 +5,16 @@
 //! the types defined here.
 
 mod arc;
+mod curve;
 mod plane;
 mod solids;
 mod xform;
 
 pub use arc::CircleArc;
+pub use curve::{
+    carrier_intersections, extend, fillet_corners, fillet_lines, join, offset, side_of, trim,
+    Chain, CurveError, ExtendTo, Seg,
+};
 pub use plane::Plane;
 pub use solids::{box_mesh, cylinder_mesh, extrude_mesh, sphere_mesh, triangulate_polygon};
 pub use xform::Xform;
@@ -303,6 +308,53 @@ impl Mesh {
         }
         self.triangles
             .extend(other.triangles.iter().map(|t| t.map(|i| i + base)));
+    }
+
+    /// Split into pieces whose triangles share vertices (the faces of a box built
+    /// face by face, the parts of a joined mesh).
+    pub fn components(&self) -> Vec<Mesh> {
+        let n = self.positions.len();
+        let mut parent: Vec<usize> = (0..n).collect();
+        fn find(p: &mut [usize], mut i: usize) -> usize {
+            while p[i] != i {
+                p[i] = p[p[i]];
+                i = p[i];
+            }
+            i
+        }
+        for t in &self.triangles {
+            let a = find(&mut parent, t[0] as usize);
+            for &v in &t[1..] {
+                let b = find(&mut parent, v as usize);
+                parent[b] = a;
+            }
+        }
+        let mut groups: std::collections::BTreeMap<usize, Vec<[u32; 3]>> = Default::default();
+        for t in &self.triangles {
+            let r = find(&mut parent, t[0] as usize);
+            groups.entry(r).or_default().push(*t);
+        }
+        let has_normals = self.normals.len() == n;
+        groups
+            .into_values()
+            .map(|tris| {
+                let mut map = std::collections::HashMap::new();
+                let mut m = Mesh::default();
+                for t in tris {
+                    let nt = t.map(|v| {
+                        *map.entry(v).or_insert_with(|| {
+                            m.positions.push(self.positions[v as usize]);
+                            if has_normals {
+                                m.normals.push(self.normals[v as usize]);
+                            }
+                            (m.positions.len() - 1) as u32
+                        })
+                    });
+                    m.triangles.push(nt);
+                }
+                m
+            })
+            .collect()
     }
 }
 

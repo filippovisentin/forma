@@ -1,4 +1,4 @@
-FORMA 0.2 — modellatore personale in stile Rhino
+FORMA 0.3 — modellatore personale in stile Rhino
 =================================================
 
 Avvio
@@ -7,8 +7,17 @@ Avvio
 
 Interfaccia
   4 viste (Top, Perspective, Front, Right). Doppio clic sul titolo di una vista
-  per ingrandirla / tornare a 4. A sinistra gli strumenti, a destra i layer,
-  in basso la riga di comando e la barra di stato.
+  per ingrandirla / tornare a 4. In alto i menu (con sottomenu come Rhino) e le
+  schede Standard / Curve Tools / Solid Tools / Transform / Set View; a sinistra
+  la barra strumenti; a destra i pannelli Properties (F3) e Layers; in basso la
+  riga di comando e la barra di stato.
+
+Gumball (oggetti selezionati)
+  Frecce rossa/verde/blu ..... trascina per spostare lungo X / Y / Z
+  Quadratini ................. trascina per spostare nel piano
+  Archi ...................... trascina per ruotare (a scatti di 5° con Grid Snap)
+  Clic su una maniglia ....... scrivi la distanza (o l'angolo) e Invio
+  Si attiva/disattiva dal pulsante "Gumball" (scheda Standard) o dal menu View.
 
 Mouse (come Rhino)
   Sinistro ................... seleziona / clicca punti
@@ -33,10 +42,22 @@ Coordinate (nel piano della vista attiva)
 Comandi
   Curve:     Line, Polyline (C chiude), Rectangle, Circle, Arc
   Solidi:    Box, Cylinder, Sphere, ExtrudeCrv (curve chiuse -> solido)
-  Modifica:  Move, Copy, Rotate, Scale, Mirror, Delete
+  Modifica:  Move, Copy, Rotate, Scale, Mirror, Delete,
+             Array (nx ny nz dx,dy,dz), ArrayLinear, ArrayPolar
+  Curve 2D:  Offset (scrivi la distanza, poi clicca il lato), Trim (seleziona i
+             tagli, Invio, poi clicca i pezzi da togliere), Extend (seleziona i
+             bordi, Invio, poi clicca vicino all'estremità), Fillet (raggio, poi
+             due linee), FilletCorners (raccorda tutti gli angoli di una polilinea)
+  Unisci:    Join (curve che si toccano -> polycurve; mesh -> una mesh),
+             Explode (polilinee/polycurve -> segmenti; box -> facce)
   Selezione: SelAll, SelNone
   Layer:     Layer <nome> (corrente), ChangeLayer <nome> (sposta la selezione)
-             oppure clic sul nome nel pannello / tasto destro
+             oppure clic sul nome nel pannello / tasto destro; nel pannello
+             Layers: occhio = mostra/nascondi, lucchetto = blocca, quadratino
+             colorato = colore del layer
+  Colori:    pannello Properties (F3): layer dell'oggetto, colore "By Layer" o
+             personalizzato; da riga di comando SetObjectColor rosso / 255,0,0 /
+             #ff0000 / ByLayer, LayerColor <colore> [layer]
   File:      New [mm|cm|m], Open, Save, Save As
   Viste:     ZE (zoom estensioni vista attiva), ZEA (tutte), Top, Front, Right,
              Perspective · Help = elenco completo
@@ -47,6 +68,9 @@ Snap (barra di stato)
 Note
   - Salvando un file aperto da Rhino, la prima volta Forma propone un nuovo nome
     (nome-forma.3dm): le superfici importate vengono salvate come mesh.
-  - Booleane e raccordi arriveranno con il kernel OpenCascade.
+  - Booleane (BooleanUnion/Difference) e raccordi sugli spigoli dei solidi
+    arriveranno con il kernel OpenCascade: nei menu sono visibili ma disattivati.
+  - Offset/Trim/Extend lavorano su linee, polilinee, archi e cerchi nel loro
+    piano (le curve importate da Rhino arrivano come polilinee).
 
 forma-cli.exe: versione a riga di comando (info, render in PNG, script).

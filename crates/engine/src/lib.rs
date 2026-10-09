@@ -3,9 +3,36 @@
 //! UI, MCP and CLI all end up calling [`Engine::run_line`] (text, Rhino-style
 //! command line) or [`Engine::execute`] (command name + argument tokens).
 
+macro_rules! simple_command {
+    ($ty:ident, $name:literal, $aliases:expr, $help:literal) => {
+        pub struct $ty;
+        impl $ty {
+            const NAME: &'static str = $name;
+            const ALIASES: &'static [&'static str] = $aliases;
+            const HELP: &'static str = $help;
+        }
+    };
+}
+
+macro_rules! impl_meta {
+    ($ty:ident) => {
+        fn name(&self) -> &'static str {
+            $ty::NAME
+        }
+        fn aliases(&self) -> &'static [&'static str] {
+            $ty::ALIASES
+        }
+        fn help(&self) -> &'static str {
+            $ty::HELP
+        }
+    };
+}
+
 mod args;
+mod attrs;
 mod commands;
 mod create;
+mod curves;
 mod edit;
 mod import;
 

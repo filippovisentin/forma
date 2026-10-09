@@ -33,6 +33,8 @@ pub struct ImportedObject {
     pub kind: ObjectKind,
     /// Index into [`Import::layers`].
     pub layer: Option<usize>,
+    /// Object colour, `None` = by layer.
+    pub color: Option<[u8; 3]>,
     /// `None` for objects that cannot be displayed yet (block instances, annotations…).
     pub geometry: Option<DisplayGeometry>,
 }
@@ -87,9 +89,12 @@ pub fn import_display(path: impl AsRef<Path>) -> Result<Import, Error> {
                 }
                 _ => None,
             };
+            let mut rgb = [0u8; 3];
+            let has = unsafe { ffi::f3dm_object_color(m, obj, rgb.as_mut_ptr()) } != 0;
             ImportedObject {
                 kind: info.kind,
                 layer: info.layer,
+                color: has.then_some(rgb),
                 geometry,
             }
         })

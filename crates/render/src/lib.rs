@@ -111,6 +111,7 @@ pub struct View {
 pub struct Renderer {
     mesh_pipeline: wgpu::RenderPipeline,
     line_pipeline: wgpu::RenderPipeline,
+    grid_pipeline: wgpu::RenderPipeline,
     bind_group_layout: wgpu::BindGroupLayout,
     scene: Buffers,
     highlight: Buffers,
@@ -151,7 +152,8 @@ impl Renderer {
                         stride: usize,
                         attrs: &[wgpu::VertexAttribute],
                         topology: wgpu::PrimitiveTopology,
-                        bias: wgpu::DepthBiasState| {
+                        bias: wgpu::DepthBiasState,
+                        write_depth: bool| {
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some(label),
                 layout: Some(&layout),
@@ -172,7 +174,7 @@ impl Renderer {
                 },
                 depth_stencil: Some(wgpu::DepthStencilState {
                     format: DEPTH_FORMAT,
-                    depth_write_enabled: Some(true),
+                    depth_write_enabled: Some(write_depth),
                     depth_compare: Some(wgpu::CompareFunction::LessEqual),
                     stencil: Default::default(),
                     bias,
@@ -208,6 +210,7 @@ impl Renderer {
                 slope_scale: 1.5,
                 clamp: 0.0,
             },
+            true,
         );
         let line_pipeline = pipeline(
             "forma lines",
@@ -217,11 +220,24 @@ impl Renderer {
             &line_attrs,
             wgpu::PrimitiveTopology::LineList,
             Default::default(),
+            true,
+        );
+        // The grid never hides anything (like Rhino, objects below it stay visible).
+        let grid_pipeline = pipeline(
+            "forma grid",
+            "vs_line",
+            "fs_line",
+            std::mem::size_of::<LineVertex>(),
+            &line_attrs,
+            wgpu::PrimitiveTopology::LineList,
+            Default::default(),
+            false,
         );
 
         Renderer {
             mesh_pipeline,
             line_pipeline,
+            grid_pipeline,
             bind_group_layout: bgl,
             scene: Buffers::default(),
             highlight: Buffers::default(),
@@ -408,7 +424,12 @@ impl Renderer {
                 }
             };
             if self.show_grid {
-                draw_lines(&mut pass, &self.grids[grid.index()]);
+                let b = &self.grids[grid.index()];
+                if let Some(l) = &b.lines {
+                    pass.set_pipeline(&self.grid_pipeline);
+                    pass.set_vertex_buffer(0, l.slice(..));
+                    pass.draw(0..b.line_count, 0..1);
+                }
             }
             draw_mesh(&mut pass, &self.scene);
             draw_lines(&mut pass, &self.scene);
