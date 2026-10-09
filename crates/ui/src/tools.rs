@@ -360,6 +360,17 @@ impl ToolKind {
     }
 }
 
+/// A live measurement next to the cursor.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Measure {
+    /// A length with an optional short label (model units).
+    Len(&'static str, f64),
+    /// Degrees.
+    Angle(f64),
+    /// Scale factor.
+    Factor(f64),
+}
+
 /// What the current step accepts.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Want {
@@ -980,6 +991,97 @@ impl Tool {
             return Some(Step::Continue);
         }
         None
+    }
+
+    /// Live measurements for the cursor position (shown next to the cursor).
+    pub fn measure(&self, cur: Point3) -> Vec<Measure> {
+        use ToolKind::*;
+        if self.selecting {
+            return Vec::new();
+        }
+        let n = self.pts.len();
+        let pl = |o: Point3| self.plane.moved_to(o);
+        let in_plane_angle = |a: Point3, b: Point3| {
+            let d = b - a;
+            let (u, v) = (d.dot(self.plane.x), d.dot(self.plane.y));
+            if u.hypot(v) < 1e-12 {
+                0.0
+            } else {
+                v.atan2(u).to_degrees()
+            }
+        };
+        let height = |from: Point3| (cur - from).dot(self.plane.z);
+        match (self.kind, n) {
+            (Rectangle | Box, 1) => {
+                let (u, v, _) = pl(self.pts[0]).coords(cur);
+                vec![Measure::Len("W", u.abs()), Measure::Len("H", v.abs())]
+            }
+            (Box, 2) => vec![Measure::Len("Height", height(self.pts[1]))],
+            (Cylinder, 2) => vec![Measure::Len("Height", height(self.pts[0]))],
+            (Extrude | ExtrudeSrf, _) => vec![Measure::Len("Height", height(self.anchor))],
+            (Circle | Cylinder, 1) => {
+                let r = pl(self.pts[0]).project(cur).distance_to(self.pts[0]);
+                vec![Measure::Len("R", r), Measure::Len("Ø", 2.0 * r)]
+            }
+            (Sphere, 1) => {
+                let r = cur.distance_to(self.pts[0]);
+                vec![Measure::Len("R", r), Measure::Len("Ø", 2.0 * r)]
+            }
+            (Arc, 1) => vec![Measure::Len("R", cur.distance_to(self.pts[0]))],
+            (Arc, 2) => {
+                let mut a =
+                    in_plane_angle(self.pts[0], cur) - in_plane_angle(self.pts[0], self.pts[1]);
+                if a <= 0.0 {
+                    a += 360.0;
+                }
+                vec![Measure::Angle(a)]
+            }
+            (Ellipse, 1) => vec![Measure::Len("A", cur.distance_to(self.pts[0]))],
+            (Ellipse, 2) => {
+                let a = self.pts[1] - self.pts[0];
+                let v = cur - self.pts[0];
+                let b = a
+                    .normalized()
+                    .map_or(v.length(), |u| (v - u * v.dot(u)).length());
+                vec![Measure::Len("B", b)]
+            }
+            (Polygon, 1) => {
+                let r = cur.distance_to(self.pts[0]);
+                let k = self.count.unwrap_or(5) as f64;
+                vec![
+                    Measure::Len("R", r),
+                    Measure::Len("Side", 2.0 * r * (std::f64::consts::PI / k).sin()),
+                ]
+            }
+            (Rotate, 1) => match self.reference {
+                Some(_) => vec![Measure::Angle(self.angle(cur))],
+                None => vec![Measure::Angle(in_plane_angle(self.pts[0], cur))],
+            },
+            (Scale | Scale2D, 1) => match self.reference {
+                Some(r) if r.distance_to(self.pts[0]) > 1e-12 => vec![Measure::Factor(
+                    cur.distance_to(self.pts[0]) / r.distance_to(self.pts[0]),
+                )],
+                _ => vec![Measure::Len("", cur.distance_to(self.pts[0]))],
+            },
+            (Scale1D, 1) => match self.reference {
+                Some(r) if r.distance_to(self.pts[0]) > 1e-12 => {
+                    let d = r.distance_to(self.pts[0]);
+                    vec![Measure::Factor(
+                        (cur - self.pts[0]).dot((r - self.pts[0]) * (1.0 / d)) / d,
+                    )]
+                }
+                _ => vec![Measure::Len("", cur.distance_to(self.pts[0]))],
+            },
+            (Point | Trim | Extend | Fillet | Chamfer | Sweep1 | MatchProperties, _) => Vec::new(),
+            (_, k) if k >= 1 => {
+                let b = self.base().unwrap_or(self.pts[k - 1]);
+                vec![
+                    Measure::Len("", cur.distance_to(b)),
+                    Measure::Angle(in_plane_angle(b, cur)),
+                ]
+            }
+            _ => Vec::new(),
+        }
     }
 
     /// Rubber-band preview segments for the cursor position.

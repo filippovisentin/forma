@@ -1,4 +1,4 @@
-FORMA 0.4 — modellatore personale in stile Rhino 8
+FORMA 0.5 — modellatore personale in stile Rhino 8
 ==================================================
 
 Avvio
@@ -31,7 +31,20 @@ Tastiera
 
 Gumball (oggetti selezionati)
   Frecce: sposta lungo X/Y/Z · quadratini: sposta nel piano · archi: ruota
+  Pallino su ogni freccia: ESTRUDI lungo quell'asse (curve -> superfici o
+  solidi se chiuse, superfici piane -> solidi).
   Clic su una maniglia: scrivi distanza o angolo e Invio.
+  Durante il trascinamento gli osnap guidano lo spostamento.
+
+Misure e snap
+  Mentre disegni, accanto al cursore compare la misura in tempo reale
+  (lunghezza e angolo, larghezza × altezza, raggio, altezza…) nelle unità del
+  documento: i nuovi documenti sono in centimetri. La barra di stato mostra
+  coordinate e distanza dall'ultimo punto.
+  Grid Snap (F9), Ortho (F8 o Shift), Planar, Osnap e SmartTrack: fermati
+  un attimo su un punto con un osnap, poi muoviti: compaiono linee
+  tratteggiate allineate a quel punto (in orizzontale e verticale) e il
+  cursore ci si aggancia, anche all'incrocio di due allineamenti.
 
 Comandi principali (si scrivono come in Rhino)
   Curve:      Point, Line, Polyline, Curve, InterpCrv, Rectangle, Circle, Arc,

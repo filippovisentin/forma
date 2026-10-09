@@ -35,7 +35,7 @@ agents, with Filippo as architect, reviewer and only user. Read `ARCHITECTURE.md
 - Errors: `thiserror` in libraries (once its ADR lands), `anyhow` only in apps/xtask.
 - Command names follow Rhino's spelling where one exists (`Line`, `Polyline`, `ExtrudeCrv`,
   `BooleanUnion`), case-insensitive, with short aliases (`L`, `PL`).
-- Units: millimetres by default (interior design workflow).
+- Units: centimetres by default in the app and for `New` (Filippo works in cm); `Document::default()` stays mm for tests.
 - Code, comments and docs in English. Conversations with Filippo may be in Italian.
 
 ## Setup

@@ -268,13 +268,18 @@ impl Command for ChangeLayer {
     }
 }
 
-simple_command!(New, "New", &[], "New [mm|cm|m] — start an empty document");
+simple_command!(
+    New,
+    "New",
+    &[],
+    "New [cm|mm|m] — start an empty document (centimetres by default)"
+);
 impl Command for New {
     impl_meta!(New);
     fn run(&self, ctx: &mut Context, args: &mut Args) -> CommandResult {
         let units = match args.next_token().map(str::to_lowercase).as_deref() {
-            None | Some("mm") => LengthUnit::Millimeters,
-            Some("cm") => LengthUnit::Centimeters,
+            Some("mm") => LengthUnit::Millimeters,
+            None | Some("cm") => LengthUnit::Centimeters,
             Some("m") => LengthUnit::Meters,
             Some(u) => return Err(CommandError::BadInput(format!("unknown unit {u}"))),
         };

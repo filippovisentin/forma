@@ -84,6 +84,8 @@ pub struct SnapSettings {
     pub ortho: bool,
     /// New points stay on the plane of the first point of the command.
     pub planar: bool,
+    /// SmartTrack: horizontal / vertical alignment with recent snap points.
+    pub smart: bool,
     /// Grid snap step in model units.
     pub step: f64,
 }
@@ -108,6 +110,7 @@ impl Default for SnapSettings {
             grid: true,
             ortho: false,
             planar: true,
+            smart: true,
             step: 10.0,
         }
     }
@@ -359,6 +362,74 @@ impl SnapPoints {
         }
         best.map(|(_, p, k)| (p, k))
     }
+}
+
+/// SmartTrack: align `p` (in `plane`) with the construction-plane axes through
+/// the tracking points, when the cursor is within a few points of such a line.
+/// `lock` keeps one coordinate (Ortho from a base point: `true` = moving along
+/// the plane's x). Returns the aligned point and the tracking lines to draw.
+pub fn smart_track(
+    vp: &Viewport,
+    pos: Pos2,
+    origin: DVec3,
+    plane: &Plane,
+    p: Point3,
+    tracks: &[Point3],
+    lock: Option<(Point3, bool)>,
+) -> Option<(Point3, Vec<[Point3; 2]>)> {
+    const RADIUS: f32 = 8.0;
+    let (pu, pv, pw) = plane.coords(p);
+    let screen_d = |u: f64, v: f64| {
+        vp.to_screen(plane.point_at(u, v, pw), origin)
+            .map_or(f32::INFINITY, |s| s.distance(pos))
+    };
+    // Best horizontal line (fixes v) and vertical line (fixes u).
+    let mut best_h: Option<(f32, f64, Point3)> = None;
+    let mut best_v: Option<(f32, f64, Point3)> = None;
+    for t in tracks {
+        let (tu, tv, _) = plane.coords(*t);
+        if (tv - pv).abs() > 1e-9 || (tu - pu).abs() > 1e-9 {
+            let dh = screen_d(pu, tv);
+            if dh < RADIUS && best_h.is_none_or(|b| dh < b.0) {
+                best_h = Some((dh, tv, *t));
+            }
+            let dv = screen_d(tu, pv);
+            if dv < RADIUS && best_v.is_none_or(|b| dv < b.0) {
+                best_v = Some((dv, tu, *t));
+            }
+        }
+    }
+    let (u, v) = match lock {
+        Some((b, true)) => {
+            let (_, bv, _) = plane.coords(b);
+            (best_v?.1, bv)
+        }
+        Some((b, false)) => {
+            let (bu, _, _) = plane.coords(b);
+            (bu, best_h?.1)
+        }
+        None => match (best_h, best_v) {
+            (Some(h), Some(vv)) => (vv.1, h.1),
+            (Some(h), None) => (pu, h.1),
+            (None, Some(vv)) => (vv.1, pv),
+            (None, None) => return None,
+        },
+    };
+    let q = plane.point_at(u, v, pw);
+    let mut lines = Vec::new();
+    for (b, fixed_v) in [(best_h, true), (best_v, false)] {
+        if let Some((_, c, t)) = b {
+            let on = if fixed_v {
+                (v - c).abs() < 1e-9
+            } else {
+                (u - c).abs() < 1e-9
+            };
+            if on {
+                lines.push([t, q]);
+            }
+        }
+    }
+    Some((q, lines))
 }
 
 /// Parameter on `a0→a1` where it crosses `b0→b1` in screen space.

@@ -58,6 +58,8 @@ struct Hover {
     point: Point3,
     snap: Option<SnapKind>,
     pos: Pos2,
+    /// SmartTrack lines to draw (from a tracking point to the cursor).
+    tracks: Vec<[Point3; 2]>,
 }
 
 struct DragSelect {
@@ -72,6 +74,8 @@ struct GumballDrag {
     start: gumball::Grip,
     motion: Option<gumball::Motion>,
     skeleton: Vec<[Point3; 2]>,
+    /// Object snap the drag is following, if any.
+    snapped: Option<(Point3, SnapKind)>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -203,6 +207,8 @@ struct FormaApp {
     saved_at: std::time::Instant,
     /// An engine command waiting for its arguments (run on Enter), and what it asks for.
     pending: Option<(String, &'static str)>,
+    /// SmartTrack points: object snaps the cursor rested on during this command.
+    track_points: Vec<Point3>,
 }
 
 const CMD_ID: &str = "forma-command-line";
@@ -272,8 +278,11 @@ impl FormaApp {
             show_osnap: true,
             saved_at: std::time::Instant::now(),
             pending: None,
+            track_points: Vec::new(),
         };
         theme::apply(&cc.egui_ctx);
+        // Interior design in centimetres, like Filippo's Rhino files.
+        let _ = app.engine.run_line("New cm");
         app.reset_document_view();
         app.log(
             LogKind::Normal,
@@ -496,6 +505,9 @@ impl FormaApp {
     }
 
     fn handle_step(&mut self, step: Step) {
+        if matches!(step, Step::Done(_) | Step::Cancel(_)) {
+            self.track_points.clear();
+        }
         if let Some(t) = &self.tool {
             match t.kind {
                 ToolKind::Offset => self.offset_distance = t.distance,
@@ -639,8 +651,9 @@ impl FormaApp {
         if let Some((h, center)) = self.gumball_typed.take() {
             match toks[0].parse::<f64>() {
                 Ok(v) => {
-                    let line = gumball::typed_command(center, h, v);
-                    self.run_engine(&line);
+                    for line in self.gumball_lines(gumball::typed_motion(h, v), center) {
+                        self.run_engine(&line);
+                    }
                 }
                 Err(_) => self.log(LogKind::Error, format!("a number is expected: {}", toks[0])),
             }
@@ -1091,6 +1104,7 @@ impl FormaApp {
                 point: on_curve.unwrap_or_else(|| vp.cplane_point(pos, origin)),
                 snap: None,
                 pos,
+                tracks: Vec::new(),
             };
         }
         if let Some(Want::Height { from, dir }) = want {
@@ -1110,6 +1124,7 @@ impl FormaApp {
                 point: p,
                 snap: kind,
                 pos,
+                tracks: Vec::new(),
             };
         }
         if let Some((p, k)) = osnap {
@@ -1118,6 +1133,7 @@ impl FormaApp {
                 point: p,
                 snap: Some(k),
                 pos,
+                tracks: Vec::new(),
             };
         }
         let tool_plane = self
@@ -1136,12 +1152,27 @@ impl FormaApp {
                 }
             }
         }
+        let raw = p;
         if self.snap.grid {
             p = snap::grid_snap(p, &plane, self.snap.step);
         }
-        if let Some(base) = self.tool.as_ref().and_then(|t| t.base()) {
+        let base = self.tool.as_ref().and_then(|t| t.base());
+        let mut lock = None;
+        if let Some(b) = base {
             if self.snap.ortho != shift {
-                p = snap::ortho(p, base, &plane);
+                p = snap::ortho(p, b, &plane);
+                let d = p - b;
+                lock = Some((b, d.dot(plane.x).abs() >= d.dot(plane.y).abs()));
+            }
+        }
+        // SmartTrack: line up with recent snap points (and the base point).
+        let mut tracks = Vec::new();
+        if self.snap.smart && !self.snap.disabled && picking {
+            let mut pts = self.track_points.clone();
+            pts.extend(base);
+            if let Some((q, lines)) = snap::smart_track(vp, pos, origin, &plane, raw, &pts, lock) {
+                p = q;
+                tracks = lines;
             }
         }
         Hover {
@@ -1149,6 +1180,7 @@ impl FormaApp {
             point: p,
             snap: None,
             pos,
+            tracks,
         }
     }
 
@@ -1272,7 +1304,20 @@ impl FormaApp {
 
         // Cursor point (snaps etc).
         if let Some(pos) = resp.hover_pos() {
-            self.hover = Some(self.compute_hover(vi, pos, mods.shift));
+            let h = self.compute_hover(vi, pos, mods.shift);
+            if let (Some(_), true) = (h.snap, self.snap.smart) {
+                if !self
+                    .track_points
+                    .iter()
+                    .any(|q| q.distance_to(h.point) < 1e-9)
+                {
+                    self.track_points.push(h.point);
+                    if self.track_points.len() > 6 {
+                        self.track_points.remove(0);
+                    }
+                }
+            }
+            self.hover = Some(h);
         }
 
         // Gumball handles (only without a running tool).
@@ -1281,8 +1326,24 @@ impl FormaApp {
         if let Some(d) = self.gumball_drag.as_mut() {
             if d.viewport == vi {
                 if let Some(pos) = resp.interact_pointer_pos().or(resp.hover_pos()) {
-                    let g = gumball::grip(&self.viewports[vi], d.center, d.handle, origin, pos);
-                    let step = if self.snap.grid { self.snap.step } else { 0.0 };
+                    let vp = &self.viewports[vi];
+                    // Object snaps steer the drag: the snapped point is projected
+                    // on the axis (or plane) being dragged.
+                    let snapped = if matches!(d.handle, gumball::Handle::Rotate(_)) {
+                        None
+                    } else {
+                        self.snaps.find(vp, pos, origin, &self.snap, 14.0, None)
+                    };
+                    d.snapped = snapped;
+                    let g = match snapped {
+                        Some((q, _)) => Some(gumball::project_grip(d.center, d.handle, q)),
+                        None => gumball::grip(vp, d.center, d.handle, origin, pos),
+                    };
+                    let step = if self.snap.grid && snapped.is_none() {
+                        self.snap.step
+                    } else {
+                        0.0
+                    };
                     let angle_step = if self.snap.grid != mods.shift {
                         5.0
                     } else {
@@ -1295,14 +1356,22 @@ impl FormaApp {
                 if resp.drag_stopped_by(PointerButton::Primary) {
                     let d = self.gumball_drag.take().expect("dragging");
                     if let Some(m) = d.motion {
-                        self.run_engine(&m.command(d.center));
+                        for line in self.gumball_lines(m, d.center) {
+                            self.run_engine(&line);
+                        }
                     }
                 }
                 return;
             }
         }
         if let (Some(center), None) = (gumball_center, self.tool.as_ref()) {
-            let hot = resp.hover_pos().and_then(|pos| {
+            // A drag starts where the button went down, not where it is now.
+            let at = if resp.drag_started_by(PointerButton::Primary) {
+                ui.input(|i| i.pointer.press_origin()).or(resp.hover_pos())
+            } else {
+                resp.hover_pos()
+            };
+            let hot = at.and_then(|pos| {
                 let l = gumball::layout(&self.viewports[vi], center, origin)?;
                 gumball::hit(&self.viewports[vi], &l, origin, pos)
             });
@@ -1311,7 +1380,7 @@ impl FormaApp {
             }
             if let Some(h) = hot {
                 if resp.drag_started_by(PointerButton::Primary) {
-                    let pos = resp.interact_pointer_pos().unwrap_or_default();
+                    let pos = at.unwrap_or_default();
                     if let Some(start) = gumball::grip(&self.viewports[vi], center, h, origin, pos)
                     {
                         self.gumball_drag = Some(GumballDrag {
@@ -1324,6 +1393,7 @@ impl FormaApp {
                                 self.engine.doc(),
                                 &self.engine.ctx.selection,
                             ),
+                            snapped: None,
                         });
                     }
                     return;
@@ -1332,6 +1402,7 @@ impl FormaApp {
                     let unit = self.engine.doc().units.abbreviation();
                     let what = match h {
                         gumball::Handle::Rotate(_) => "angle in degrees".to_string(),
+                        gumball::Handle::Extrude(_) => format!("extrusion distance ({unit})"),
                         _ => format!("distance ({unit})"),
                     };
                     self.log(
@@ -1415,6 +1486,57 @@ impl FormaApp {
         if resp.double_clicked_by(PointerButton::Middle) {
             self.fit(Some(vi));
         }
+    }
+
+    /// Engine lines for a gumball motion. Extrusion makes solids from the
+    /// selected curves (ExtrudeCrv) and from open surfaces (ExtrudeSrf).
+    fn gumball_lines(&self, m: gumball::Motion, center: Point3) -> Vec<String> {
+        let gumball::Motion::Extrude(d, ax) = m else {
+            return vec![m.command(center)];
+        };
+        let doc = self.engine.doc();
+        let sel: Vec<_> = self
+            .engine
+            .ctx
+            .selection
+            .iter()
+            .filter_map(|id| doc.object(*id))
+            .collect();
+        let curves: Vec<String> = sel
+            .iter()
+            .filter(|o| o.geometry.is_curve())
+            .map(|o| format!("#{}", o.id.0))
+            .collect();
+        let surfaces: Vec<String> = sel
+            .iter()
+            .filter(|o| matches!(o.geometry, forma_doc::Geometry::Mesh(_)))
+            .map(|o| format!("#{}", o.id.0))
+            .collect();
+        let dir = format!("{},{},{}", ax.x, ax.y, ax.z);
+        let d = (d * 1e6).round() / 1e6;
+        let mut out = Vec::new();
+        if !curves.is_empty() {
+            out.push("SelNone".to_string());
+            out.push(format!("Select {}", curves.join(" ")));
+            out.push(format!("Extrude {d} {dir}"));
+        }
+        if !surfaces.is_empty() {
+            out.push("SelNone".to_string());
+            out.push(format!("Select {}", surfaces.join(" ")));
+            out.push(format!("ExtrudeSrf {d} {dir}"));
+        }
+        out
+    }
+
+    /// A length in document units, for live readouts.
+    fn fmt_len(&self, v: f64) -> String {
+        let u = self.engine.doc().units.abbreviation();
+        let decimals = match self.engine.doc().units {
+            LengthUnit::Millimeters => 1,
+            LengthUnit::Meters => 3,
+            _ => 2,
+        };
+        format!("{v:.decimals$} {u}")
     }
 
     /// Where the gumball sits: centre of the selection (when enabled).
@@ -1526,6 +1648,52 @@ impl FormaApp {
             for [a, b] in t.preview(h.point) {
                 seg(a, b, st);
             }
+            // SmartTrack lines and points.
+            let track = Stroke::new(1.0, Color32::WHITE);
+            for [a, b] in &h.tracks {
+                if let (Some(sa), Some(sb)) = (vp.to_screen(*a, origin), vp.to_screen(*b, origin)) {
+                    p.extend(egui::Shape::dashed_line(&[sa, sb], track, 4.0, 3.0));
+                }
+            }
+            for q in &self.track_points {
+                if let Some(sq) = vp.to_screen(*q, origin) {
+                    p.line_segment(
+                        [sq - egui::vec2(4.0, 0.0), sq + egui::vec2(4.0, 0.0)],
+                        track,
+                    );
+                    p.line_segment(
+                        [sq - egui::vec2(0.0, 4.0), sq + egui::vec2(0.0, 4.0)],
+                        track,
+                    );
+                }
+            }
+            // Live measurement next to the cursor (Rhino's dynamic readout).
+            if h.viewport == vi {
+                let text: Vec<String> = t
+                    .measure(h.point)
+                    .into_iter()
+                    .map(|m| match m {
+                        tools::Measure::Len("", v) => self.fmt_len(v),
+                        tools::Measure::Len(l, v) => format!("{l} {}", self.fmt_len(v)),
+                        tools::Measure::Angle(a) => format!("∠ {a:.1}°"),
+                        tools::Measure::Factor(f) => format!("× {f:.3}"),
+                    })
+                    .collect();
+                if let (false, Some(s)) = (text.is_empty(), vp.to_screen(h.point, origin)) {
+                    let font = egui::FontId::proportional(12.5);
+                    let galley = p.layout_no_wrap(text.join("   "), font, Color32::BLACK);
+                    let at = s + egui::vec2(14.0, 10.0);
+                    let bg = Rect::from_min_size(at, galley.size() + egui::vec2(10.0, 5.0));
+                    p.rect_filled(bg, 3.0, Color32::from_rgba_unmultiplied(255, 255, 255, 230));
+                    p.rect_stroke(
+                        bg,
+                        3.0,
+                        Stroke::new(1.0, Color32::from_gray(120)),
+                        StrokeKind::Inside,
+                    );
+                    p.galley(at + egui::vec2(5.0, 2.5), galley, Color32::BLACK);
+                }
+            }
             if let Some(s) = vp.to_screen(h.point, origin) {
                 if !t.selecting {
                     p.circle_filled(s, 3.0, ink);
@@ -1552,17 +1720,40 @@ impl FormaApp {
             }
         }
         if let Some(d) = &self.gumball_drag {
+            if let Some((q, k)) = d.snapped {
+                if let Some(sq) = vp.to_screen(q, origin) {
+                    let r = Rect::from_center_size(sq, egui::vec2(10.0, 10.0));
+                    p.rect_stroke(r, 0.0, Stroke::new(1.5, Color32::WHITE), StrokeKind::Middle);
+                    p.text(
+                        sq + egui::vec2(9.0, -9.0),
+                        egui::Align2::LEFT_BOTTOM,
+                        k.label(),
+                        egui::FontId::proportional(12.0),
+                        Color32::WHITE,
+                    );
+                }
+            }
             if let Some(m) = d.motion {
                 let x: Xform = m.xform(d.center);
                 let st = Stroke::new(1.2, ink);
                 for [a, b] in &d.skeleton {
                     seg(x.point(*a), x.point(*b), st);
                 }
+                if matches!(m, gumball::Motion::Extrude(..)) {
+                    // Side edges of the extrusion.
+                    let step = (d.skeleton.len() / 24).max(1);
+                    for [a, _] in d.skeleton.iter().step_by(step) {
+                        seg(*a, x.point(*a), st);
+                    }
+                }
                 if d.viewport == vi {
                     if let Some(s) = vp.to_screen(x.point(d.center), origin) {
                         let label = match m {
-                            gumball::Motion::Translate(v) => format!("{:.2}", v.length()),
+                            gumball::Motion::Translate(v) => self.fmt_len(v.length()),
                             gumball::Motion::Rotate(a, _) => format!("{a:.1}°"),
+                            gumball::Motion::Extrude(h, _) => {
+                                format!("Extrude {}", self.fmt_len(h))
+                            }
                         };
                         let font = egui::FontId::proportional(13.0);
                         let galley = p.layout_no_wrap(label, font, Color32::BLACK);
@@ -2288,8 +2479,8 @@ impl FormaApp {
         egui::MenuBar::new().ui(ui, |ui| {
             ui.menu_button("File", |ui| {
                 ui.menu_button("New", |ui| {
-                    item(ui, &mut act, "Millimetres", "Ctrl+N", Act::Cmd("New mm"));
-                    item(ui, &mut act, "Centimetres", "", Act::Cmd("New cm"));
+                    item(ui, &mut act, "Centimetres", "Ctrl+N", Act::Cmd("New cm"));
+                    item(ui, &mut act, "Millimetres", "", Act::Cmd("New mm"));
                     item(ui, &mut act, "Metres", "", Act::Cmd("New m"));
                 });
                 item(ui, &mut act, "Open…", "Ctrl+O", Act::Open);
@@ -3111,10 +3302,17 @@ impl FormaApp {
                 None => ("CPlane", "x —   y —   z —".to_string()),
             };
             ui.label(egui::RichText::new(plane_name).size(12.5));
+            let dist = match (&self.hover, self.tool.as_ref().and_then(Tool::base)) {
+                (Some(h), Some(b)) => Some(h.point.distance_to(b)),
+                _ => None,
+            };
             ui.add_sized(
                 [250.0, 18.0],
                 egui::Label::new(egui::RichText::new(coords).monospace().size(12.5)),
             );
+            if let Some(d) = dist {
+                ui.label(egui::RichText::new(format!("Distance {}", self.fmt_len(d))).size(12.5));
+            }
             ui.separator();
             let units = match self.engine.doc().units {
                 LengthUnit::Millimeters => "Millimeters",
@@ -3185,11 +3383,12 @@ impl FormaApp {
             let mut osnap_on = !self.snap.disabled;
             pane(ui, &mut osnap_on, "Osnap", "Object snaps on / off");
             self.snap.disabled = !osnap_on;
-            ui.add_enabled(
-                false,
-                egui::Button::new(egui::RichText::new("SmartTrack").size(12.5)).frame(false),
-            )
-            .on_disabled_hover_text("Not available yet");
+            pane(
+                ui,
+                &mut self.snap.smart,
+                "SmartTrack",
+                "Line up with points you rested on with an object snap",
+            );
             pane(
                 ui,
                 &mut self.gumball_on,

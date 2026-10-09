@@ -25,12 +25,14 @@ pub enum Handle {
     Plane(usize),
     /// Rotate around axis 0/1/2.
     Rotate(usize),
+    /// Extrude the selection along axis 0/1/2 (the dot on each arrow).
+    Extrude(usize),
 }
 
 impl Handle {
     pub fn axis(self) -> usize {
         match self {
-            Handle::Axis(i) | Handle::Plane(i) | Handle::Rotate(i) => i,
+            Handle::Axis(i) | Handle::Plane(i) | Handle::Rotate(i) | Handle::Extrude(i) => i,
         }
     }
 
@@ -45,6 +47,9 @@ impl Handle {
             Handle::Rotate(0) => "Rotate around X",
             Handle::Rotate(1) => "Rotate around Y",
             Handle::Rotate(_) => "Rotate around Z",
+            Handle::Extrude(0) => "Extrude along X",
+            Handle::Extrude(1) => "Extrude along Y",
+            Handle::Extrude(_) => "Extrude along Z",
         }
     }
 }
@@ -103,6 +108,9 @@ fn plane_square(l: &Layout, axis: usize) -> [Point3; 4] {
     ]
 }
 
+/// Where the extrude dot sits on an arrow (fraction of the arrow length).
+const DOT_AT: f64 = 0.72;
+
 fn dist_seg(p: Pos2, a: Pos2, b: Pos2) -> f32 {
     let ab = b - a;
     let t = if ab.length_sq() < 1e-6 {
@@ -127,7 +135,14 @@ pub fn hit(vp: &Viewport, l: &Layout, origin: DVec3, pos: Pos2) -> Option<Handle
     for i in 0..3 {
         if l.visible[i] {
             if let Some(tip) = s(l.center + AXES[i] * l.size) {
-                consider(dist_seg(pos, c, tip), Handle::Axis(i));
+                consider(dist_seg(pos, c, tip) + 0.5, Handle::Axis(i));
+            }
+            if let Some(dot) = s(l.center + AXES[i] * (l.size * DOT_AT)) {
+                // The dot wins over the arrow it sits on.
+                let d = dot.distance(pos);
+                if d < 6.5 {
+                    consider(0.0, Handle::Extrude(i));
+                }
             }
         }
         let (j, k) = ((i + 1) % 3, (i + 2) % 3);
@@ -201,6 +216,12 @@ pub fn draw(p: &Painter, vp: &Viewport, l: &Layout, origin: DVec3, hot: Option<H
             color,
             Stroke::NONE,
         ));
+        // Extrude dot, like Rhino's gumball.
+        if let Some(dot) = s(l.center + AXES[i] * (l.size * DOT_AT)) {
+            let dc = col(Handle::Extrude(i));
+            p.circle_filled(dot, 4.2, dc);
+            p.circle_stroke(dot, 4.2, Stroke::new(1.0, Color32::WHITE));
+        }
     }
     p.circle_filled(c, 3.5, Color32::WHITE);
     p.circle_stroke(c, 3.5, Stroke::new(1.0, Color32::from_gray(40)));
@@ -217,7 +238,9 @@ pub fn grip(vp: &Viewport, center: Point3, h: Handle, origin: DVec3, pos: Pos2) 
     let (o, d) = vp.ray(pos, origin);
     let i = h.axis();
     match h {
-        Handle::Axis(_) => Some(Grip::Point(closest_on_line(center, AXES[i], o, d))),
+        Handle::Axis(_) | Handle::Extrude(_) => {
+            Some(Grip::Point(closest_on_line(center, AXES[i], o, d)))
+        }
         Handle::Plane(_) | Handle::Rotate(_) => {
             let plane = Plane {
                 origin: center,
@@ -246,6 +269,8 @@ pub enum Motion {
     Translate(Vec3),
     /// Degrees around an axis through the centre.
     Rotate(f64, Vec3),
+    /// Extrusion distance (signed) along an axis.
+    Extrude(f64, Vec3),
 }
 
 impl Motion {
@@ -253,6 +278,7 @@ impl Motion {
         match self {
             Motion::Translate(v) => Xform::translation(v),
             Motion::Rotate(deg, axis) => Xform::rotation(center, axis, deg.to_radians()),
+            Motion::Extrude(d, axis) => Xform::translation(axis * d),
         }
     }
 
@@ -288,6 +314,8 @@ impl Motion {
                 ax.y,
                 ax.z
             ),
+            // Curves; the app adds ExtrudeSrf for surfaces.
+            Motion::Extrude(d, ax) => format!("Extrude {} {},{},{}", r(d), ax.x, ax.y, ax.z),
         }
     }
 }
@@ -298,7 +326,7 @@ pub fn motion(h: Handle, a: &Grip, b: &Grip, step: f64, angle_step: f64) -> Opti
     match (a, b) {
         (Grip::Point(p), Grip::Point(q)) => {
             let mut v = *q - *p;
-            if let Handle::Axis(i) = h {
+            if let Handle::Axis(i) | Handle::Extrude(i) = h {
                 v = AXES[i] * v.dot(AXES[i]);
             }
             if step > 0.0 {
@@ -308,7 +336,13 @@ pub fn motion(h: Handle, a: &Grip, b: &Grip, step: f64, angle_step: f64) -> Opti
                     (v.z / step).round() * step,
                 );
             }
-            (v.length() > 1e-9).then_some(Motion::Translate(v))
+            if v.length() <= 1e-9 {
+                return None;
+            }
+            Some(match h {
+                Handle::Extrude(i) => Motion::Extrude(v.dot(AXES[i]), AXES[i]),
+                _ => Motion::Translate(v),
+            })
         }
         (Grip::Angle(a0), Grip::Angle(a1)) => {
             let mut deg = (a1 - a0).to_degrees();
@@ -326,10 +360,30 @@ pub fn motion(h: Handle, a: &Grip, b: &Grip, step: f64, angle_step: f64) -> Opti
     }
 }
 
+/// Grip for a snapped world point: its projection on the dragged axis or plane.
+pub fn project_grip(center: Point3, h: Handle, q: Point3) -> Grip {
+    let a = AXES[h.axis()];
+    match h {
+        Handle::Plane(_) => Grip::Point(q - a * (q - center).dot(a)),
+        _ => Grip::Point(center + a * (q - center).dot(a)),
+    }
+}
+
+/// Motion for a typed value on a handle (distance or angle).
+pub fn typed_motion(h: Handle, value: f64) -> Motion {
+    match h {
+        Handle::Rotate(i) => Motion::Rotate(value, AXES[i]),
+        Handle::Extrude(i) => Motion::Extrude(value, AXES[i]),
+        Handle::Axis(i) | Handle::Plane(i) => Motion::Translate(AXES[i] * value),
+    }
+}
+
 /// Command for a typed value on a handle (distance or angle).
+#[cfg(test)]
 pub fn typed_command(center: Point3, h: Handle, value: f64) -> String {
     match h {
         Handle::Rotate(i) => Motion::Rotate(value, AXES[i]),
+        Handle::Extrude(i) => Motion::Extrude(value, AXES[i]),
         Handle::Axis(i) | Handle::Plane(i) => Motion::Translate(AXES[i] * value),
     }
     .command(center)
