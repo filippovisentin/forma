@@ -76,6 +76,24 @@ struct GumballDrag {
     skeleton: Vec<[Point3; 2]>,
     /// Object snap the drag is following, if any.
     snapped: Option<(Point3, SnapKind)>,
+    /// Faces of selected solids that an extrude dot pushes / pulls (preview).
+    faces: Vec<Vec<[Point3; 2]>>,
+}
+
+/// A face picked with Ctrl+Shift+click (Rhino's sub-object selection).
+struct FaceSel {
+    id: ObjectId,
+    center: Point3,
+    normal: Vec3,
+    outline: Vec<[Point3; 2]>,
+}
+
+/// Dragging the push / pull arrow of a picked face.
+struct FaceDrag {
+    viewport: usize,
+    start: f64,
+    distance: f64,
+    snapped: Option<(Point3, SnapKind)>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -192,6 +210,11 @@ struct FormaApp {
     gumball_drag: Option<GumballDrag>,
     /// A gumball handle was clicked: the next typed number moves/rotates by it.
     gumball_typed: Option<(gumball::Handle, Point3)>,
+    face_sel: Option<FaceSel>,
+    face_drag: Option<FaceDrag>,
+    /// The face arrow was clicked: the next typed number pushes / pulls it.
+    face_typed: bool,
+    face_hot: bool,
     offset_distance: f64,
     fillet_radius: f64,
     chamfer_distance: f64,
@@ -263,6 +286,10 @@ impl FormaApp {
             gumball_hot: None,
             gumball_drag: None,
             gumball_typed: None,
+            face_sel: None,
+            face_drag: None,
+            face_typed: false,
+            face_hot: false,
             offset_distance: 10.0,
             fillet_radius: 5.0,
             chamfer_distance: 5.0,
@@ -592,8 +619,10 @@ impl FormaApp {
     fn cancel(&mut self) {
         let gumball = self.gumball_typed.take().is_some()
             | self.gumball_drag.take().is_some()
-            | self.pending.take().is_some();
-        if gumball || self.tool.take().is_some() {
+            | self.pending.take().is_some()
+            | self.face_drag.take().is_some()
+            | std::mem::take(&mut self.face_typed);
+        if gumball || self.tool.take().is_some() || self.face_sel.take().is_some() {
             self.log(LogKind::Normal, "cancelled");
         } else if !self.command.is_empty() {
             self.command.clear();
@@ -646,6 +675,17 @@ impl FormaApp {
                 return;
             }
             self.enter_action();
+            return;
+        }
+        if std::mem::take(&mut self.face_typed) {
+            match (toks[0].parse::<f64>(), self.face_sel.as_ref()) {
+                (Ok(v), Some(f)) => {
+                    let line = face_command(f, v);
+                    self.run_engine(&line);
+                    self.refresh_face_sel();
+                }
+                _ => self.log(LogKind::Error, format!("a number is expected: {}", toks[0])),
+            }
             return;
         }
         if let Some((h, center)) = self.gumball_typed.take() {
@@ -1320,6 +1360,82 @@ impl FormaApp {
             self.hover = Some(h);
         }
 
+        // Push / pull arrow of a picked face.
+        if let Some((fc, fnorm)) = self.face_sel.as_ref().map(|f| (f.center, f.normal)) {
+            let step = self.snap.step;
+            let grid = self.snap.grid;
+            if let Some(d) = self.face_drag.as_mut() {
+                if d.viewport == vi {
+                    if let Some(pos) = resp.interact_pointer_pos().or(resp.hover_pos()) {
+                        let vp = &self.viewports[vi];
+                        let snapped = self.snaps.find(vp, pos, origin, &self.snap, 14.0, None);
+                        let q = match snapped {
+                            Some((q, _)) => q,
+                            None => {
+                                let (o, dd) = vp.ray(pos, origin);
+                                closest_on_line(fc, fnorm, o, dd)
+                            }
+                        };
+                        let mut t = (q - fc).dot(fnorm);
+                        if snapped.is_none() {
+                            t -= d.start;
+                            if grid && step > 0.0 {
+                                t = (t / step).round() * step;
+                            }
+                        }
+                        d.distance = t;
+                        d.snapped = snapped;
+                    }
+                    if resp.drag_stopped_by(PointerButton::Primary) {
+                        let d = self.face_drag.take().expect("dragging");
+                        if d.distance.abs() > 1e-9 {
+                            if let Some(f) = self.face_sel.as_ref() {
+                                let line = face_command(f, d.distance);
+                                self.run_engine(&line);
+                                self.refresh_face_sel();
+                            }
+                        }
+                    }
+                    return;
+                }
+            }
+            if self.tool.is_none() {
+                let at = if resp.drag_started_by(PointerButton::Primary) {
+                    ui.input(|i| i.pointer.press_origin()).or(resp.hover_pos())
+                } else {
+                    resp.hover_pos()
+                };
+                let vp = &self.viewports[vi];
+                if let Some((base, tip)) = gumball::face_handle(vp, fc, fnorm, origin) {
+                    let hot = at.is_some_and(|p| gumball::face_handle_hit(base, tip, p));
+                    if resp.hovered() {
+                        self.face_hot = hot;
+                    }
+                    if hot && resp.drag_started_by(PointerButton::Primary) {
+                        let (o, dd) = vp.ray(at.unwrap_or_default(), origin);
+                        let start = (closest_on_line(fc, fnorm, o, dd) - fc).dot(fnorm);
+                        self.face_drag = Some(FaceDrag {
+                            viewport: vi,
+                            start,
+                            distance: 0.0,
+                            snapped: None,
+                        });
+                        return;
+                    }
+                    if hot && resp.clicked_by(PointerButton::Primary) {
+                        let unit = self.engine.doc().units.abbreviation();
+                        self.log(
+                            LogKind::Normal,
+                            format!("Push / pull face — type the distance ({unit}, negative pushes in) and press Enter"),
+                        );
+                        self.face_typed = true;
+                        self.focus_command = true;
+                        return;
+                    }
+                }
+            }
+        }
+
         // Gumball handles (only without a running tool).
         let tool_wants_points = self.tool.as_ref().is_some_and(|t| !t.selecting);
         let gumball_center = self.gumball_center();
@@ -1394,6 +1510,7 @@ impl FormaApp {
                                 &self.engine.ctx.selection,
                             ),
                             snapped: None,
+                            faces: self.push_pull_preview(h),
                         });
                     }
                     return;
@@ -1476,7 +1593,13 @@ impl FormaApp {
                     let step = t.feed_point(h.point);
                     self.handle_step(step);
                 }
+            } else if mods.command && mods.shift {
+                // Sub-object selection: a face of a solid.
+                if !self.pick_face(vi, pos) {
+                    self.face_sel = None;
+                }
             } else {
+                self.face_sel = None;
                 self.click_select(vi, pos, mods);
             }
         }
@@ -1507,9 +1630,19 @@ impl FormaApp {
             .filter(|o| o.geometry.is_curve())
             .map(|o| format!("#{}", o.id.0))
             .collect();
+        let tol = doc.absolute_tolerance.max(1e-6);
+        let is_solid =
+            |g: &forma_doc::Geometry| matches!(g, forma_doc::Geometry::Mesh(m) if m.is_closed(tol));
         let surfaces: Vec<String> = sel
             .iter()
-            .filter(|o| matches!(o.geometry, forma_doc::Geometry::Mesh(_)))
+            .filter(|o| {
+                matches!(o.geometry, forma_doc::Geometry::Mesh(_)) && !is_solid(&o.geometry)
+            })
+            .map(|o| format!("#{}", o.id.0))
+            .collect();
+        let solids: Vec<String> = sel
+            .iter()
+            .filter(|o| is_solid(&o.geometry))
             .map(|o| format!("#{}", o.id.0))
             .collect();
         let dir = format!("{},{},{}", ax.x, ax.y, ax.z);
@@ -1525,7 +1658,98 @@ impl FormaApp {
             out.push(format!("Select {}", surfaces.join(" ")));
             out.push(format!("ExtrudeSrf {d} {dir}"));
         }
+        if !solids.is_empty() {
+            // A solid grows or shrinks: its face on that side is pushed / pulled.
+            out.push("SelNone".to_string());
+            out.push(format!("Select {}", solids.join(" ")));
+            out.push(format!("PushPull {dir} {d}"));
+        }
         out
+    }
+
+    /// Outlines of the faces an extrude dot would push / pull, for the preview.
+    fn push_pull_preview(&self, h: gumball::Handle) -> Vec<Vec<[Point3; 2]>> {
+        let gumball::Handle::Extrude(i) = h else {
+            return Vec::new();
+        };
+        let dir = [Vec3::X, Vec3::Y, Vec3::Z][i];
+        let doc = self.engine.doc();
+        let tol = doc.absolute_tolerance.max(1e-6);
+        self.engine
+            .ctx
+            .selection
+            .iter()
+            .filter_map(|id| doc.object(*id))
+            .filter_map(|o| match &o.geometry {
+                forma_doc::Geometry::Mesh(m) if m.is_closed(tol) => {
+                    m.extreme_face(dir, tol).map(|f| m.face_outline(&f, tol))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Pick the face of a solid under the cursor (Ctrl+Shift+click).
+    fn pick_face(&mut self, vi: usize, pos: Pos2) -> bool {
+        let doc = self.engine.doc();
+        let Some((id, _hit, tri)) = snap::pick_face(doc, &self.viewports[vi], pos, self.origin())
+        else {
+            return false;
+        };
+        let Some(forma_doc::Geometry::Mesh(m)) = doc.object(id).map(|o| &o.geometry) else {
+            return false;
+        };
+        let tol = doc.absolute_tolerance.max(1e-6);
+        let Some(face) = m.planar_face(tri, tol) else {
+            return false;
+        };
+        self.face_sel = Some(FaceSel {
+            id,
+            center: face.center,
+            normal: face.normal,
+            outline: m.face_outline(&face, tol),
+        });
+        self.engine.ctx.selection.clear();
+        self.log(
+            LogKind::Normal,
+            "Face selected — drag the orange arrow to push / pull it, or click it and type a distance",
+        );
+        true
+    }
+
+    /// Re-read the picked face after it moved (it keeps its normal).
+    fn refresh_face_sel(&mut self) {
+        let Some(f) = self.face_sel.as_ref() else {
+            return;
+        };
+        let doc = self.engine.doc();
+        let tol = doc.absolute_tolerance.max(1e-6);
+        let Some(forma_doc::Geometry::Mesh(m)) = doc.object(f.id).map(|o| &o.geometry) else {
+            self.face_sel = None;
+            return;
+        };
+        // The face moved along its normal: look for it near the old centre.
+        let best = m
+            .planar_faces(tol)
+            .into_iter()
+            .filter(|g| g.normal.dot(f.normal) > 0.999)
+            .min_by(|a, b| {
+                let da = (a.center - f.center).cross(f.normal).length();
+                let db = (b.center - f.center).cross(f.normal).length();
+                da.total_cmp(&db)
+            });
+        match best {
+            Some(g) => {
+                let outline = m.face_outline(&g, tol);
+                self.face_sel = Some(FaceSel {
+                    id: f.id,
+                    center: g.center,
+                    normal: g.normal,
+                    outline,
+                });
+            }
+            None => self.face_sel = None,
+        }
     }
 
     /// A length in document units, for live readouts.
@@ -1719,6 +1943,54 @@ impl FormaApp {
                 }
             }
         }
+        if let Some(f) = &self.face_sel {
+            let st = Stroke::new(3.0, Color32::from_rgb(255, 200, 0));
+            for [a, b] in &f.outline {
+                seg(*a, *b, st);
+            }
+            let dist = self.face_drag.as_ref().map_or(0.0, |d| d.distance);
+            if dist.abs() > 1e-9 {
+                let v = f.normal * dist;
+                let st = Stroke::new(1.3, ink);
+                for [a, b] in &f.outline {
+                    seg(*a + v, *b + v, st);
+                    seg(*a, *a + v, st);
+                }
+                let here = self.face_drag.as_ref().is_some_and(|d| d.viewport == vi);
+                if let Some(s) = vp.to_screen(f.center + v, origin).filter(|_| here) {
+                    let label = format!(
+                        "{} {}",
+                        if dist > 0.0 { "Pull" } else { "Push" },
+                        self.fmt_len(dist.abs())
+                    );
+                    let font = egui::FontId::proportional(13.0);
+                    let galley = p.layout_no_wrap(label, font, Color32::BLACK);
+                    let at = s + egui::vec2(12.0, -26.0);
+                    let bg = Rect::from_min_size(at, galley.size() + egui::vec2(8.0, 4.0));
+                    p.rect_filled(bg, 2.0, Color32::from_rgb(255, 255, 225));
+                    p.galley(at + egui::vec2(4.0, 2.0), galley, Color32::BLACK);
+                }
+            }
+            if let Some((q, k)) = self.face_drag.as_ref().and_then(|d| d.snapped) {
+                if let Some(sq) = vp.to_screen(q, origin) {
+                    let r = Rect::from_center_size(sq, egui::vec2(10.0, 10.0));
+                    p.rect_stroke(r, 0.0, Stroke::new(1.5, Color32::WHITE), StrokeKind::Middle);
+                    p.text(
+                        sq + egui::vec2(9.0, -9.0),
+                        egui::Align2::LEFT_BOTTOM,
+                        k.label(),
+                        egui::FontId::proportional(12.0),
+                        Color32::WHITE,
+                    );
+                }
+            }
+            if self.tool.is_none() {
+                let moved = f.center + f.normal * dist;
+                if let Some((base, tip)) = gumball::face_handle(vp, moved, f.normal, origin) {
+                    gumball::draw_face_handle(&p, base, tip, self.face_hot || self.face_typed);
+                }
+            }
+        }
         if let Some(d) = &self.gumball_drag {
             if let Some((q, k)) = d.snapped {
                 if let Some(sq) = vp.to_screen(q, origin) {
@@ -1736,10 +2008,27 @@ impl FormaApp {
             if let Some(m) = d.motion {
                 let x: Xform = m.xform(d.center);
                 let st = Stroke::new(1.2, ink);
-                for [a, b] in &d.skeleton {
-                    seg(x.point(*a), x.point(*b), st);
+                // Solids grow from one face: no moved copy of the whole object.
+                let push_pull = matches!(m, gumball::Motion::Extrude(..)) && !d.faces.is_empty();
+                if !push_pull {
+                    for [a, b] in &d.skeleton {
+                        seg(x.point(*a), x.point(*b), st);
+                    }
                 }
-                if matches!(m, gumball::Motion::Extrude(..)) {
+                if let gumball::Motion::Extrude(h, ax) = m {
+                    let v = ax * h;
+                    for outline in &d.faces {
+                        for [a, b] in outline {
+                            seg(
+                                *a + v,
+                                *b + v,
+                                Stroke::new(1.6, Color32::from_rgb(255, 200, 0)),
+                            );
+                            seg(*a, *a + v, st);
+                        }
+                    }
+                }
+                if matches!(m, gumball::Motion::Extrude(..)) && !push_pull {
                     // Side edges of the extrusion.
                     let step = (d.skeleton.len() / 24).max(1);
                     for [a, _] in d.skeleton.iter().step_by(step) {
@@ -2694,6 +2983,17 @@ impl FormaApp {
                     tool(ui, &mut act, "Straight", K::Extrude);
                 });
                 tool(ui, &mut act, "Extrude Surface", K::ExtrudeSrf);
+                if ui
+                    .button("Push / Pull Face…")
+                    .on_hover_text("Ctrl+Shift+click a face of a solid, then drag its orange arrow (MoveFace)")
+                    .clicked()
+                {
+                    act = Some(Act::Prefill(
+                        "",
+                        "Push / pull: Ctrl+Shift+click a flat face of a solid, then drag the orange arrow or click it and type a distance",
+                    ));
+                    ui.close();
+                }
                 tool(ui, &mut act, "Cap Planar Holes", K::OnSel("Cap"));
                 ui.separator();
                 kernel(ui, "Union");
@@ -3429,6 +3729,20 @@ impl FormaApp {
             );
         });
     }
+}
+
+/// Engine line pushing / pulling a picked face by `d`.
+fn face_command(f: &FaceSel, d: f64) -> String {
+    let c = f.center;
+    let r = |x: f64| (x * 1e6).round() / 1e6;
+    format!(
+        "MoveFace #{} {},{},{} {}",
+        f.id.0,
+        r(c.x),
+        r(c.y),
+        r(c.z),
+        r(d)
+    )
 }
 
 /// Rhino-style Align command for the active construction plane.

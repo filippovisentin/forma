@@ -21,6 +21,8 @@ pub fn builtin() -> Vec<Box<dyn Command>> {
         Box::new(crate::edit::Scale),
         Box::new(crate::edit::Mirror),
         Box::new(crate::edit::Delete),
+        Box::new(crate::solid::MoveFace),
+        Box::new(crate::solid::PushPull),
         Box::new(crate::curves::Offset),
         Box::new(crate::curves::Trim),
         Box::new(crate::curves::Extend),

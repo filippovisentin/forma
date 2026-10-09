@@ -1,4 +1,4 @@
-FORMA 0.5 — modellatore personale in stile Rhino 8
+FORMA 0.6 — modellatore personale in stile Rhino 8
 ==================================================
 
 Avvio
@@ -34,6 +34,16 @@ Gumball (oggetti selezionati)
   Pallino su ogni freccia: ESTRUDI lungo quell'asse (curve -> superfici o
   solidi se chiuse, superfici piane -> solidi).
   Clic su una maniglia: scrivi distanza o angolo e Invio.
+  Su un SOLIDO il pallino tira o spinge la faccia rivolta da quella parte
+  (box selezionato + pallino blu = il box diventa più alto o più basso).
+
+Push / pull di una faccia (come Rhino: Ctrl+Shift+clic)
+  Ctrl+Shift+clic su una faccia piana di un solido: la faccia si colora di
+  giallo e compare una freccia arancione perpendicolare. Trascina la freccia
+  (o cliccala e scrivi la distanza, negativa per spingere dentro): la faccia
+  si sposta e le facce attorno si allungano. Esc per deselezionare.
+  Da riga di comando: MoveFace #id <punto sulla faccia> <distanza>,
+  PushPull <direzione> <distanza> sugli oggetti selezionati.
   Durante il trascinamento gli osnap guidano lo spostamento.
 
 Misure e snap

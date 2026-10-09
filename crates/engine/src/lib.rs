@@ -38,6 +38,7 @@ mod edit;
 mod files;
 mod import;
 mod select;
+mod solid;
 mod surfaces;
 mod transform;
 

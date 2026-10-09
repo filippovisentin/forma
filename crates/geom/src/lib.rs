@@ -6,6 +6,7 @@
 
 mod arc;
 mod curve;
+mod faces;
 mod nurbs;
 mod plane;
 mod solids;
@@ -17,6 +18,7 @@ pub use curve::{
     carrier_intersections, chamfer_lines, crossings, extend, fillet_corners, fillet_lines, join,
     offset, side_of, split, trim, Chain, CurveError, ExtendTo, Seg,
 };
+pub use faces::MeshFace;
 pub use nurbs::{Bezier2, NurbsCurve};
 pub use plane::Plane;
 pub use solids::{box_mesh, cylinder_mesh, extrude_mesh, sphere_mesh, triangulate_polygon};

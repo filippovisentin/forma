@@ -544,6 +544,38 @@ fn selectable(doc: &Document, o: &forma_doc::Object) -> bool {
     doc.is_selectable(o)
 }
 
+/// Surface under the cursor: (object, hit point, triangle), nearest to the eye.
+pub fn pick_face(
+    doc: &Document,
+    vp: &Viewport,
+    pos: Pos2,
+    origin: DVec3,
+) -> Option<(ObjectId, Point3, usize)> {
+    let (ro, rd) = vp.ray(pos, origin);
+    let mut best: Option<(f64, ObjectId, usize)> = None;
+    for o in doc.objects() {
+        if !doc.is_selectable(o) {
+            continue;
+        }
+        let Geometry::Mesh(m) = &o.geometry else {
+            continue;
+        };
+        let Some(bb) = m.bounding_box() else { continue };
+        if !ray_box(ro, rd, bb.min, bb.max) {
+            continue;
+        }
+        for (i, t) in m.triangles.iter().enumerate() {
+            let [a, b, c] = t.map(|k| m.positions[k as usize]);
+            if let Some(tt) = ray_triangle(ro, rd, a, b, c) {
+                if best.is_none_or(|bb| tt < bb.0) {
+                    best = Some((tt, o.id, i));
+                }
+            }
+        }
+    }
+    best.map(|(t, id, tri)| (id, ro + rd * t, tri))
+}
+
 /// Object under the cursor: curves within a few points win, otherwise the nearest
 /// surface hit by the ray.
 pub fn pick(doc: &Document, vp: &Viewport, pos: Pos2, origin: DVec3) -> Option<ObjectId> {

@@ -379,6 +379,49 @@ pub fn typed_motion(h: Handle, value: f64) -> Motion {
 }
 
 /// Command for a typed value on a handle (distance or angle).
+/// Push / pull handle of a sub-object face: an arrow along the face normal with
+/// a dot, drawn from the face centre. Returns (base, tip) on screen.
+pub fn face_handle(
+    vp: &Viewport,
+    center: Point3,
+    normal: Vec3,
+    origin: DVec3,
+) -> Option<(Pos2, Pos2)> {
+    let c = vp.to_screen(center, origin)?;
+    let one = vp.to_screen(center + normal, origin)?;
+    let len = one.distance(c);
+    if len < 1e-6 {
+        // Seen end-on: show it pointing up the screen.
+        return Some((c, c - egui::vec2(0.0, ARROW_PX * 0.3)));
+    }
+    Some((c, c + (one - c) * (ARROW_PX / len)))
+}
+
+pub fn face_handle_hit(base: Pos2, tip: Pos2, pos: Pos2) -> bool {
+    dist_seg(pos, base, tip) < 8.0 || pos.distance(tip) < 10.0
+}
+
+pub fn draw_face_handle(p: &Painter, base: Pos2, tip: Pos2, hot: bool) {
+    let color = if hot {
+        HOT
+    } else {
+        Color32::from_rgb(230, 120, 20)
+    };
+    p.line_segment([base, tip], Stroke::new(2.5, color));
+    let d = (tip - base).normalized();
+    let dot = base + (tip - base) * DOT_AT as f32;
+    p.circle_filled(dot, 4.8, color);
+    p.circle_stroke(dot, 4.8, Stroke::new(1.0, Color32::WHITE));
+    let n = egui::vec2(-d.y, d.x);
+    p.add(egui::Shape::convex_polygon(
+        vec![tip + d * 9.0, tip + n * 4.5, tip - n * 4.5],
+        color,
+        Stroke::NONE,
+    ));
+    p.circle_filled(base, 3.5, Color32::WHITE);
+    p.circle_stroke(base, 3.5, Stroke::new(1.0, Color32::from_gray(40)));
+}
+
 #[cfg(test)]
 pub fn typed_command(center: Point3, h: Handle, value: f64) -> String {
     match h {
