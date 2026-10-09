@@ -57,7 +57,7 @@ Commands not on that list are out of scope until requested.
 - [x] Document with undo/redo
 - [x] `forma-cli run --script ... --dump`
 - [x] Spike S1: openNURBS builds and reads Filippo's `.3dm` files on Linux (counts match rhino3dm); `forma-cli info` — ADR 0002
-- [ ] S1 on Windows (MSVC): verified by the CI Windows job
+- [x] S1 on Windows (MSVC): builds, links and passes tests in the CI Windows job
 - [ ] S1 black-box check: a file written by Forma opens correctly in Rhino
 - [ ] Spike S2: kernel choice — boolean + fillet on Filippo's test cases
-- [ ] GitHub Actions running `cargo xtask ci` on Windows and Linux
+- [x] GitHub Actions running `cargo xtask ci` on Windows and Linux
