@@ -6,6 +6,7 @@ on:
 jobs:
   ci:
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
@@ -17,4 +18,13 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
-      - run: cargo xtask ci
+      - name: cargo xtask ci
+        shell: bash
+        run: |
+          set -o pipefail
+          if ! cargo xtask ci 2>&1 | tee ci.log; then
+            # Surface the relevant lines as one annotation (readable via the API).
+            msg=$(grep -E "error|LNK[0-9]|fatal|failed|panicked|undefined" ci.log | grep -v "warning C" | tail -40 | sed ':a;N;$!ba;s/%/%25/g;s/\r//g;s/\n/%0A/g')
+            echo "::error title=xtask ci::${msg}"
+            exit 1
+          fi
