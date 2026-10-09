@@ -5,6 +5,11 @@ on:
   push:
     tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      version:
+        description: "Release tag to create, e.g. v0.1.0 (empty = build-N prerelease)"
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -38,8 +43,9 @@ jobs:
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || format('build-{0}', github.run_number) }}
-          name: ${{ github.ref_type == 'tag' && format('Forma {0}', github.ref_name) || format('Forma build {0}', github.run_number) }}
+          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || inputs.version || format('build-{0}', github.run_number) }}
+          target_commitish: ${{ github.sha }}
+          name: ${{ format('Forma {0}', github.ref_type == 'tag' && github.ref_name || inputs.version || format('build {0}', github.run_number)) }}
           prerelease: true
           files: |
             dist/Forma-windows.zip
