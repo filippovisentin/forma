@@ -10,7 +10,7 @@ Estimates are rough agent wall-clock hours, to be corrected as we measure.
 | # | Milestone | Status | Est. hours |
 |---|---|---|---|
 | M0 | Skeleton: workspace, command engine, document + undo, CLI, CI gates; spikes S1 (openNURBS) and S2 (kernel) | **done** — S1: openNURBS `.3dm` I/O (ADR 0002); S2: OpenCascade chosen for solids (ADR 0001). Open: Rhino black-box check of a written file | — |
-| M1 | Viewport & precision: egui app, 3D viewport (orbit/pan/zoom, top/front/right/perspective), grid, CPlane, osnaps (end, mid, cen, int, perp), ortho, typed coordinates; `Polyline`, `Curve`, `Arc`, `Circle`, `Rectangle`. **Target demo: open `gggg.3dm` read-only and orbit it** (needs S1 + render meshes of breps/extrusions) | todo | 30 |
+| M1 | Viewport & precision (**v0.1.0 shipped**: window, `Open`, shaded/curve display of `.3dm`, layers panel, orbit/pan/zoom, standard views, command line — ADR 0003; still to do: osnaps, CPlane, drawing commands in the viewport): egui app, 3D viewport (orbit/pan/zoom, top/front/right/perspective), grid, CPlane, osnaps (end, mid, cen, int, perp), ortho, typed coordinates; `Polyline`, `Curve`, `Arc`, `Circle`, `Rectangle`. **Target demo reached: `gggg.3dm` opens and orbits.** | **in progress** | 20 |
 | M2 | Surfaces & solids: `Extrude`, `ExtrudeCrv`, `Loft`, `Revolve`, `Sweep1`, `Box`, `Cylinder`, `PlanarSrf`, shaded display | todo | 30 |
 | M3 | Transform & edit: `Move`, `Copy`, `Rotate`, `Scale`, `Mirror`, `Array`, `Join`, `Explode`, `Trim`, `Split`, gumball, layers panel | todo | 25 |
 | M4 | Hard kernel (OpenCascade behind `forma-geom`, feature `occt`; starts with spike **S3: `.3dm` brep ↔ OCCT conversion**): `BooleanUnion/Difference/Intersection`, `FilletEdge`, `Offset`, `OffsetSrf`, `Cap` | todo | 40 |

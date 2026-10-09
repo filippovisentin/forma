@@ -4,6 +4,7 @@
 //! forma-cli run --script "Line 0,0 @100,0; Undo" [--file script.txt] [--dump]
 //! forma-cli commands
 //! forma-cli info model.3dm
+//! forma-cli render model.3dm out.png [--view perspective|top|front|right] [--size 1600x1000]
 //! ```
 
 use std::process::ExitCode;
@@ -29,6 +30,7 @@ fn main() -> ExitCode {
             Some(path) => info(path),
             None => usage(),
         },
+        Some("render") => render(&args[1..]),
         Some("run") => {
             let mut script = String::new();
             let mut dump = false;
@@ -116,4 +118,59 @@ fn info(path: &str) -> ExitCode {
         );
     }
     ExitCode::SUCCESS
+}
+
+fn render(args: &[String]) -> ExitCode {
+    use forma_render::StandardView;
+    let (Some(input), Some(output)) = (args.first(), args.get(1)) else {
+        return usage();
+    };
+    let mut view = StandardView::Perspective;
+    let mut size = (1600u32, 1000u32);
+    let mut it = args[2..].iter();
+    while let Some(a) = it.next() {
+        match (a.as_str(), it.next().map(String::as_str)) {
+            ("--view", Some("perspective")) => view = StandardView::Perspective,
+            ("--view", Some("top")) => view = StandardView::Top,
+            ("--view", Some("front")) => view = StandardView::Front,
+            ("--view", Some("right")) => view = StandardView::Right,
+            ("--size", Some(s)) => match s.split_once('x').map(|(w, h)| (w.parse(), h.parse())) {
+                Some((Ok(w), Ok(h))) => size = (w, h),
+                _ => return usage(),
+            },
+            _ => return usage(),
+        }
+    }
+    let mut engine = forma_engine::Engine::new();
+    if let Err(e) = engine.run_line(&format!("Open {input}")) {
+        eprintln!("{e}");
+        return ExitCode::FAILURE;
+    }
+    let Some(pixels) = forma_render::screenshot(engine.doc(), view, size) else {
+        eprintln!("no GPU adapter available for offscreen rendering");
+        return ExitCode::FAILURE;
+    };
+    let file = match std::fs::File::create(output) {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!("cannot create {output}: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let mut enc = png::Encoder::new(std::io::BufWriter::new(file), size.0, size.1);
+    enc.set_color(png::ColorType::Rgba);
+    enc.set_depth(png::BitDepth::Eight);
+    let result = enc
+        .write_header()
+        .and_then(|mut w| w.write_image_data(&pixels));
+    match result {
+        Ok(()) => {
+            eprintln!("wrote {output}");
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("png: {e}");
+            ExitCode::FAILURE
+        }
+    }
 }

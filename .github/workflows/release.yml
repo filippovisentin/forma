@@ -1,0 +1,54 @@
+name: release
+# Builds forma.exe on Windows and publishes it as a GitHub Release.
+# Trigger: push a tag like v0.1.0, or run manually from the Actions tab.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build
+        shell: bash
+        run: |
+          set -o pipefail
+          if ! cargo build --release -p forma -p forma-cli 2>&1 | tee build.log; then
+            msg=$(grep -E "error|LNK[0-9]|fatal" build.log | tail -30 | sed ':a;N;$!ba;s/%/%25/g;s/\r//g;s/\n/%0A/g')
+            echo "::error title=release build::${msg}"
+            exit 1
+          fi
+      - name: Package
+        shell: bash
+        run: |
+          mkdir -p dist/Forma
+          cp target/release/forma.exe target/release/forma-cli.exe dist/Forma/
+          cp packaging/LEGGIMI.txt dist/Forma/
+          cp LICENSE-MIT LICENSE-APACHE ATTRIBUTION.md dist/Forma/
+          cd dist && 7z a -tzip Forma-windows.zip Forma > /dev/null
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || format('build-{0}', github.run_number) }}
+          name: ${{ github.ref_type == 'tag' && format('Forma {0}', github.ref_name) || format('Forma build {0}', github.run_number) }}
+          prerelease: true
+          files: |
+            dist/Forma-windows.zip
+            dist/Forma/forma.exe
+          body: |
+            **Download `Forma-windows.zip`**, extract it and double-click `forma.exe`.
+            Open a `.3dm` with Ctrl+O or drag it onto the window.
+
+            Windows may show "Windows protected your PC" because the app is not signed:
+            click **More info → Run anyway**.
+
+            Built from ${{ github.sha }}.

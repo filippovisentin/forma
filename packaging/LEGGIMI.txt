@@ -1,0 +1,30 @@
+FORMA — modellatore personale in stile Rhino
+============================================
+
+Avvio
+  Fai doppio clic su forma.exe.
+  Se Windows mostra "PC protetto da Windows": clic su "Ulteriori informazioni"
+  e poi "Esegui comunque" (l'app non è firmata digitalmente).
+
+Aprire un file
+  Ctrl+O, oppure trascina un file .3dm sulla finestra.
+  Puoi anche trascinare un .3dm sopra forma.exe in Esplora risorse.
+
+Navigazione (come in Rhino)
+  Tasto destro + trascina ........ ruota la vista
+  Shift + tasto destro / rotella premuta + trascina ... sposta (pan)
+  Rotella ........................ zoom
+  Doppio clic con la rotella ..... zoom estensioni
+
+Riga di comando (in basso)
+  Help .......................... elenco comandi
+  ZE ............................ zoom estensioni
+  Top / Front / Right / Perspective .. viste standard
+  Line 0,0,0 @100,0 ............. linea (coordinate relative con @, polari con @d<angolo)
+  Polyline 0,0 100,0 100,50 c ... polilinea chiusa
+  Undo / Redo
+
+Pannello Layers (a sinistra)
+  Spunta per mostrare/nascondere un layer.
+
+forma-cli.exe è la versione a riga di comando (info, render in PNG, script).

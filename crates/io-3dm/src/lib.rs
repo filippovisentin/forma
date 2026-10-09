@@ -3,12 +3,16 @@
 //! Spike S1 scope: read a [`Summary`] of a file and write a file with one line.
 //! Full import into `forma-doc` arrives with milestones M1/M5.
 
+mod display;
+
+pub use display::{import_display, DisplayGeometry, Import, ImportedLayer, ImportedObject};
+
 use forma_geom::{BoundingBox, Point3};
 use std::ffi::{c_char, c_int, CString};
 use std::fmt;
 use std::path::Path;
 
-mod ffi {
+pub(crate) mod ffi {
     use std::ffi::{c_char, c_int};
 
     #[repr(C)]
@@ -39,6 +43,38 @@ mod ffi {
         pub fn f3dm_layer_path(m: *const Model, i: c_int, buf: *mut c_char, cap: usize) -> usize;
         pub fn f3dm_object_count(m: *const Model) -> c_int;
         pub fn f3dm_object(m: *const Model, i: c_int, out: *mut Object) -> c_int;
+        pub fn f3dm_layer_display(m: *const Model, i: c_int, rgb: *mut u8, visible: *mut c_int);
+        pub fn f3dm_face_count(m: *const Model, obj: c_int) -> c_int;
+        pub fn f3dm_face_info(
+            m: *const Model,
+            obj: c_int,
+            face: c_int,
+            domain: *mut f64,
+            spans: *mut c_int,
+            degree: *mut c_int,
+            reversed: *mut c_int,
+        ) -> c_int;
+        pub fn f3dm_face_loops(m: *mut Model, obj: c_int, face: c_int) -> c_int;
+        pub fn f3dm_loop_points(
+            m: *const Model,
+            k: c_int,
+            uv: *mut f64,
+            cap_points: c_int,
+            is_outer: *mut c_int,
+        ) -> c_int;
+        pub fn f3dm_face_eval(
+            m: *const Model,
+            obj: c_int,
+            face: c_int,
+            n: c_int,
+            uv: *const f64,
+            xyz: *mut f64,
+            nrm: *mut f64,
+        ) -> c_int;
+        pub fn f3dm_curve_points(m: *mut Model, obj: c_int) -> c_int;
+        pub fn f3dm_points_copy(m: *const Model, xyz: *mut f64, cap_points: c_int) -> c_int;
+        pub fn f3dm_mesh_data(m: *mut Model, obj: c_int, nv: *mut c_int, nt: *mut c_int) -> c_int;
+        pub fn f3dm_mesh_copy(m: *const Model, xyz: *mut f64, tri: *mut u32);
         pub fn f3dm_write_line(
             path: *const c_char,
             a: *const f64,
@@ -201,20 +237,41 @@ fn c_path(path: &Path) -> Result<CString, Error> {
     CString::new(s).map_err(|_| Error::BadPath(s.to_string()))
 }
 
+/// Owned openNURBS model, freed on drop.
+pub(crate) struct ModelHandle(*mut ffi::Model);
+
+impl ModelHandle {
+    pub(crate) fn open(path: &Path) -> Result<Self, Error> {
+        let cpath = c_path(path)?;
+        // SAFETY: valid NUL-terminated path; ownership of the result moves into self.
+        let m = unsafe { ffi::f3dm_read(cpath.as_ptr()) };
+        if m.is_null() {
+            Err(Error::ReadFailed(path.display().to_string()))
+        } else {
+            Ok(Self(m))
+        }
+    }
+
+    pub(crate) fn ptr(&self) -> *mut ffi::Model {
+        self.0
+    }
+
+    pub(crate) fn summary(&self) -> Summary {
+        // SAFETY: the model is valid for the lifetime of self.
+        unsafe { summarise(self.0) }
+    }
+}
+
+impl Drop for ModelHandle {
+    fn drop(&mut self) {
+        // SAFETY: allocated by f3dm_read and freed exactly once.
+        unsafe { ffi::f3dm_free(self.0) }
+    }
+}
+
 /// Read a `.3dm` file and summarise its contents.
 pub fn read_summary(path: impl AsRef<Path>) -> Result<Summary, Error> {
-    let path = path.as_ref();
-    let cpath = c_path(path)?;
-    // SAFETY: cpath is a valid NUL-terminated string; the returned model is owned
-    // here and freed exactly once below.
-    let m = unsafe { ffi::f3dm_read(cpath.as_ptr()) };
-    if m.is_null() {
-        return Err(Error::ReadFailed(path.display().to_string()));
-    }
-    // SAFETY: m is non-null and valid until f3dm_free.
-    let summary = unsafe { summarise(m) };
-    unsafe { ffi::f3dm_free(m) };
-    Ok(summary)
+    Ok(ModelHandle::open(path.as_ref())?.summary())
 }
 
 unsafe fn summarise(m: *const ffi::Model) -> Summary {

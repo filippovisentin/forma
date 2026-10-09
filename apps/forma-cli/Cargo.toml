@@ -8,3 +8,5 @@ license.workspace = true
 forma-engine.workspace = true
 forma-doc.workspace = true
 forma-io-3dm.workspace = true
+forma-render.workspace = true
+png = "0.18"

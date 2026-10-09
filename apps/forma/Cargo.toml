@@ -5,5 +5,4 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-forma-engine.workspace = true
 forma-ui.workspace = true

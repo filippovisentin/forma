@@ -3,7 +3,7 @@
 //! Every mutation goes through a [`Transaction`], which records the changes so
 //! they can be undone as one step.
 
-use forma_geom::{BoundingBox, LineCurve};
+use forma_geom::{BoundingBox, LineCurve, Mesh, Point3};
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
@@ -19,18 +19,33 @@ pub struct LayerId(pub usize);
 #[derive(Debug, Clone, PartialEq)]
 pub enum Geometry {
     Line(LineCurve),
+    /// Open or closed polyline (also used to display imported curves).
+    Polyline(Vec<Point3>),
+    /// Triangle mesh (also the display form of imported breps and extrusions
+    /// until the solid kernel lands, see ADR 0001).
+    Mesh(Mesh),
 }
 
 impl Geometry {
     pub fn kind(&self) -> &'static str {
         match self {
             Geometry::Line(_) => "line",
+            Geometry::Polyline(_) => "polyline",
+            Geometry::Mesh(_) => "mesh",
         }
     }
 
     pub fn bounding_box(&self) -> BoundingBox {
         match self {
             Geometry::Line(l) => l.bounding_box(),
+            Geometry::Polyline(p) => BoundingBox::from_points(p).unwrap_or(BoundingBox {
+                min: Point3::ORIGIN,
+                max: Point3::ORIGIN,
+            }),
+            Geometry::Mesh(m) => m.bounding_box().unwrap_or(BoundingBox {
+                min: Point3::ORIGIN,
+                max: Point3::ORIGIN,
+            }),
         }
     }
 }
@@ -56,9 +71,35 @@ enum Change {
     Removed(Object),
 }
 
+/// Length unit of a document.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LengthUnit {
+    Millimeters,
+    Centimeters,
+    Meters,
+    Inches,
+    Feet,
+}
+
+impl LengthUnit {
+    pub fn abbreviation(self) -> &'static str {
+        match self {
+            LengthUnit::Millimeters => "mm",
+            LengthUnit::Centimeters => "cm",
+            LengthUnit::Meters => "m",
+            LengthUnit::Inches => "in",
+            LengthUnit::Feet => "ft",
+        }
+    }
+}
+
 /// The modelling document.
 #[derive(Debug, Clone)]
 pub struct Document {
+    pub units: LengthUnit,
+    pub absolute_tolerance: f64,
+    /// Where the document was opened from, if anywhere.
+    pub path: Option<String>,
     objects: BTreeMap<ObjectId, Object>,
     pub layers: Vec<Layer>,
     pub current_layer: LayerId,
@@ -70,6 +111,9 @@ pub struct Document {
 impl Default for Document {
     fn default() -> Self {
         Self {
+            units: LengthUnit::Millimeters,
+            absolute_tolerance: 0.001,
+            path: None,
             objects: BTreeMap::new(),
             layers: vec![Layer {
                 name: "Default".into(),
@@ -92,6 +136,35 @@ impl Document {
 
     pub fn objects(&self) -> impl Iterator<Item = &Object> {
         self.objects.values()
+    }
+
+    /// Add a layer (full path, e.g. `muri::colonne`) and return its id.
+    pub fn add_layer(&mut self, name: &str, color: [u8; 3], visible: bool) -> LayerId {
+        self.layers.push(Layer {
+            name: name.to_string(),
+            color,
+            visible,
+            locked: false,
+        });
+        LayerId(self.layers.len() - 1)
+    }
+
+    pub fn layer(&self, id: LayerId) -> &Layer {
+        &self.layers[id.0]
+    }
+
+    /// Bounding box of all objects on visible layers.
+    pub fn visible_bounding_box(&self) -> Option<BoundingBox> {
+        let pts: Vec<Point3> = self
+            .objects
+            .values()
+            .filter(|o| self.layers[o.layer.0].visible)
+            .flat_map(|o| {
+                let b = o.geometry.bounding_box();
+                [b.min, b.max]
+            })
+            .collect();
+        BoundingBox::from_points(&pts)
     }
 
     pub fn object(&self, id: ObjectId) -> Option<&Object> {
@@ -122,6 +195,12 @@ impl Document {
 
     pub fn can_redo(&self) -> bool {
         !self.redo.is_empty()
+    }
+
+    /// Forget all undo/redo steps (e.g. after opening a file).
+    pub fn clear_history(&mut self) {
+        self.undo.clear();
+        self.redo.clear();
     }
 
     /// Undo the last committed transaction. Returns false if there was nothing to undo.
@@ -163,6 +242,18 @@ impl Document {
                         layer,
                         l.from,
                         l.to
+                    );
+                }
+                Geometry::Polyline(p) => {
+                    let _ = writeln!(out, "#{} polyline [{}] {} points", o.id.0, layer, p.len());
+                }
+                Geometry::Mesh(m) => {
+                    let _ = writeln!(
+                        out,
+                        "#{} mesh [{}] {} triangles",
+                        o.id.0,
+                        layer,
+                        m.triangles.len()
                     );
                 }
             }
@@ -211,6 +302,20 @@ impl Transaction<'_> {
             geometry,
         };
         let change = Change::Added(obj);
+        self.doc.apply(&change);
+        self.changes.push(change);
+        id
+    }
+
+    /// Add geometry on a specific layer and return its id.
+    pub fn add_on_layer(&mut self, geometry: Geometry, layer: LayerId) -> ObjectId {
+        let id = ObjectId(self.doc.next_id);
+        self.doc.next_id += 1;
+        let change = Change::Added(Object {
+            id,
+            layer,
+            geometry,
+        });
         self.doc.apply(&change);
         self.changes.push(change);
         id

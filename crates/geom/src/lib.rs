@@ -71,6 +71,12 @@ impl Vec3 {
         self.x * o.x + self.y * o.y + self.z * o.z
     }
 
+    /// Unit vector in the same direction, or `None` for a zero-length vector.
+    pub fn normalized(self) -> Option<Vec3> {
+        let l = self.length();
+        (l > 1e-300).then(|| self * (1.0 / l))
+    }
+
     pub fn cross(self, o: Vec3) -> Vec3 {
         Vec3::new(
             self.y * o.z - self.z * o.y,
@@ -167,6 +173,37 @@ impl LineCurve {
     }
 }
 
+/// Triangle mesh used for display (and later for export).
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Mesh {
+    pub positions: Vec<Point3>,
+    /// Per-vertex unit normals; empty means "compute flat normals".
+    pub normals: Vec<Vec3>,
+    /// Counter-clockwise triangles seen from outside.
+    pub triangles: Vec<[u32; 3]>,
+}
+
+impl Mesh {
+    pub fn bounding_box(&self) -> Option<BoundingBox> {
+        BoundingBox::from_points(&self.positions)
+    }
+
+    /// Append another mesh, re-indexing its triangles.
+    pub fn append(&mut self, other: &Mesh) {
+        let base = self.positions.len() as u32;
+        let keep_normals = self.normals.len() == self.positions.len()
+            && other.normals.len() == other.positions.len();
+        self.positions.extend_from_slice(&other.positions);
+        if keep_normals {
+            self.normals.extend_from_slice(&other.normals);
+        } else {
+            self.normals.clear();
+        }
+        self.triangles
+            .extend(other.triangles.iter().map(|t| t.map(|i| i + base)));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -184,6 +221,22 @@ mod tests {
     fn degenerate_line() {
         let l = LineCurve::new(Point3::ORIGIN, Point3::new(0.0005, 0.0, 0.0));
         assert!(l.is_degenerate(Tolerance::default()));
+    }
+
+    #[test]
+    fn mesh_append_reindexes() {
+        let tri = Mesh {
+            positions: vec![
+                Point3::ORIGIN,
+                Point3::new(1.0, 0.0, 0.0),
+                Point3::new(0.0, 1.0, 0.0),
+            ],
+            normals: vec![],
+            triangles: vec![[0, 1, 2]],
+        };
+        let mut m = tri.clone();
+        m.append(&tri);
+        assert_eq!(m.triangles, vec![[0, 1, 2], [3, 4, 5]]);
     }
 
     #[test]

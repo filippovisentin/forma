@@ -11,7 +11,42 @@ pub fn builtin() -> Vec<Box<dyn Command>> {
         Box::new(Delete),
         Box::new(Undo),
         Box::new(Redo),
+        Box::new(Open),
     ]
+}
+
+/// `Open <path.3dm>` — replace the document with a Rhino file (display geometry).
+pub struct Open;
+
+impl Command for Open {
+    fn name(&self) -> &'static str {
+        "Open"
+    }
+    fn help(&self) -> &'static str {
+        "Open <file.3dm> — open a Rhino file (replaces the current document)"
+    }
+    fn run(&self, ctx: &mut Context, args: &mut Args) -> CommandResult {
+        let mut parts = Vec::new();
+        while let Some(t) = args.next_token() {
+            parts.push(t);
+        }
+        let path = parts.join(" ");
+        let path = path.trim().trim_matches('"');
+        if path.is_empty() {
+            return Err(CommandError::MissingInput("file path"));
+        }
+        let doc = crate::import::open_3dm(path)?;
+        let msg = format!(
+            "opened {} — {} objects, {} layers, units {}",
+            path,
+            doc.len(),
+            doc.layers.len(),
+            doc.units.abbreviation()
+        );
+        ctx.doc = doc;
+        ctx.last_point = None;
+        Ok(msg)
+    }
 }
 
 /// `Line <start> <end>`
@@ -209,6 +244,30 @@ mod tests {
         assert!(e.doc().is_empty());
         e.run_line("Redo").unwrap();
         assert_eq!(e.doc().len(), 4);
+    }
+
+    #[test]
+    fn open_needs_a_path_and_a_real_file() {
+        let mut e = Engine::new();
+        assert!(e.run_line("Open").is_err());
+        assert!(e.run_line("Open /not/there.3dm").is_err());
+    }
+
+    #[test]
+    fn open_real_file_if_present() {
+        let p = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../tests/data/private/binario.3dm"
+        );
+        if !std::path::Path::new(p).exists() {
+            return;
+        }
+        let mut e = Engine::new();
+        e.run_line(&format!("Open {p}")).unwrap();
+        assert_eq!(e.doc().units.abbreviation(), "cm");
+        assert_eq!(e.doc().layers.len(), 9);
+        assert!(e.doc().len() > 1100);
+        assert!(!e.doc().can_undo());
     }
 
     #[test]

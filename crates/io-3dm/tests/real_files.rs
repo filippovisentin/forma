@@ -65,3 +65,38 @@ fn gggg() {
     let e = s.extents().unwrap();
     assert!((e.max.x - e.min.x - 7002.0).abs() < 1.0);
 }
+
+#[test]
+fn gggg_display() {
+    use forma_io_3dm::{import_display, DisplayGeometry};
+    let Some(p) = private("gggg.3dm") else {
+        return;
+    };
+    let t = std::time::Instant::now();
+    let imp = import_display(p).unwrap();
+    let elapsed = t.elapsed();
+    let mut meshes = 0;
+    let mut tris = 0;
+    let mut lines = 0;
+    let mut missing = std::collections::BTreeMap::new();
+    for o in &imp.objects {
+        match &o.geometry {
+            Some(DisplayGeometry::Mesh(m)) => {
+                meshes += 1;
+                tris += m.triangles.len();
+                assert!(m
+                    .positions
+                    .iter()
+                    .all(|p| p.x.is_finite() && p.y.is_finite() && p.z.is_finite()));
+            }
+            Some(DisplayGeometry::Polyline(_)) => lines += 1,
+            None => *missing.entry(format!("{:?}", o.kind)).or_insert(0) += 1,
+        }
+    }
+    eprintln!("gggg: {meshes} meshes ({tris} triangles), {lines} polylines, not displayed: {missing:?}, {elapsed:?}");
+    assert_eq!(imp.layers.len(), 14);
+    assert_eq!(meshes + lines + missing.values().sum::<usize>(), 953);
+    // Every brep, extrusion and mesh must produce triangles.
+    assert_eq!(meshes, 262 + 368 + 11);
+    assert_eq!(lines, 1 + 73 + 205 + 30);
+}

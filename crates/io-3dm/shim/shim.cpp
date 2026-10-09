@@ -36,10 +36,31 @@ struct F3dmObject {
   double bbox[6];   // min xyz, max xyz; all zero if invalid
 };
 
+struct F3dmLayer {
+  unsigned char rgb[3];
+  int visible;
+};
+
 struct F3dmModel {
   ONX_Model model;
   std::vector<std::string> layer_paths;
+  std::vector<F3dmLayer> layers;
   std::vector<F3dmObject> objects;
+  // Geometry of each object (owned by `model`), and a brep for breps/extrusions
+  // (extrusions are converted on demand and owned by `owned_breps`).
+  std::vector<const ON_Geometry*> geometry;
+  std::vector<const ON_Brep*> breps;
+  std::vector<ON_Brep*> owned_breps;
+  // Scratch buffers for the two-call "size, then copy" pattern.
+  std::vector<std::vector<double>> scratch_loops;  // uv pairs per loop
+  std::vector<int> scratch_loop_outer;
+  std::vector<double> scratch_points;              // xyz triples
+  std::vector<double> scratch_mesh_v;               // xyz triples
+  std::vector<unsigned int> scratch_mesh_t;         // triangle indices
+
+  ~F3dmModel() {
+    for (ON_Brep* b : owned_breps) delete b;
+  }
 };
 
 static int kind_of(const ON_Geometry* g) {
@@ -81,6 +102,13 @@ F3dmModel* f3dm_read(const char* path) {
     const ON_Layer* layer = ON_Layer::Cast(c);
     if (!layer) continue;
     layers.push_back({layer->Id(), layer->ParentLayerId(), utf8(layer->Name()), layer->Index()});
+    const ON_Color col = layer->Color();
+    F3dmLayer info{};
+    info.rgb[0] = static_cast<unsigned char>(col.Red());
+    info.rgb[1] = static_cast<unsigned char>(col.Green());
+    info.rgb[2] = static_cast<unsigned char>(col.Blue());
+    info.visible = layer->IsVisible() ? 1 : 0;
+    m->layers.push_back(info);
   }
   std::map<int, int> index_to_pos;
   for (size_t i = 0; i < layers.size(); i++) {
@@ -127,8 +155,201 @@ F3dmModel* f3dm_read(const char* path) {
       }
     }
     m->objects.push_back(o);
+    m->geometry.push_back(g);
+    const ON_Brep* brep = ON_Brep::Cast(g);
+    if (!brep) {
+      if (const ON_Extrusion* ex = ON_Extrusion::Cast(g)) {
+        ON_Brep* converted = ex->BrepForm(nullptr);
+        if (converted) {
+          m->owned_breps.push_back(converted);
+          brep = converted;
+        }
+      }
+    }
+    m->breps.push_back(brep);
   }
   return m;
+}
+
+// ---------------------------------------------------------------------------
+// Display data. Rhino files often carry no render meshes, and public openNURBS
+// cannot mesh breps, so Rust triangulates faces from these samples.
+
+void f3dm_layer_display(const F3dmModel* m, int i, unsigned char rgb[3], int* visible) {
+  if (i < 0 || static_cast<size_t>(i) >= m->layers.size()) return;
+  rgb[0] = m->layers[i].rgb[0];
+  rgb[1] = m->layers[i].rgb[1];
+  rgb[2] = m->layers[i].rgb[2];
+  *visible = m->layers[i].visible;
+}
+
+static const ON_Brep* brep_of(const F3dmModel* m, int obj) {
+  if (obj < 0 || static_cast<size_t>(obj) >= m->breps.size()) return nullptr;
+  return m->breps[obj];
+}
+
+// Number of faces of a brep or extrusion (0 for anything else).
+int f3dm_face_count(const F3dmModel* m, int obj) {
+  const ON_Brep* b = brep_of(m, obj);
+  return b ? b->m_F.Count() : 0;
+}
+
+// Face parameter domain, span counts and degrees, and orientation flag.
+int f3dm_face_info(const F3dmModel* m, int obj, int face, double domain[4], int spans[2],
+                   int degree[2], int* reversed) {
+  const ON_Brep* b = brep_of(m, obj);
+  if (!b || face < 0 || face >= b->m_F.Count()) return 0;
+  const ON_BrepFace& f = b->m_F[face];
+  for (int dir = 0; dir < 2; dir++) {
+    ON_Interval d = f.Domain(dir);
+    domain[2 * dir] = d.Min();
+    domain[2 * dir + 1] = d.Max();
+    spans[dir] = f.SpanCount(dir);
+    degree[dir] = f.Degree(dir);
+  }
+  *reversed = f.m_bRev ? 1 : 0;
+  return 1;
+}
+
+// Sample a parameter-space or 3D curve into points (excluding the end point when
+// `skip_last`), appending (x, y, z) triples.
+static void sample_curve(const ON_Curve* c, bool skip_last, std::vector<double>& out, int per_span) {
+  if (!c) return;
+  ON_SimpleArray<ON_3dPoint> pline;
+  if (c->IsPolyline(&pline) && pline.Count() >= 2) {
+    const int n = pline.Count() - (skip_last ? 1 : 0);
+    for (int i = 0; i < n; i++) {
+      out.push_back(pline[i].x);
+      out.push_back(pline[i].y);
+      out.push_back(pline[i].z);
+    }
+    return;
+  }
+  const int spans = c->SpanCount();
+  std::vector<double> knots(spans + 1);
+  c->GetSpanVector(knots.data());
+  for (int s = 0; s < spans; s++) {
+    for (int k = 0; k < per_span; k++) {
+      const double t = knots[s] + (knots[s + 1] - knots[s]) * k / per_span;
+      ON_3dPoint p = c->PointAt(t);
+      out.push_back(p.x);
+      out.push_back(p.y);
+      out.push_back(p.z);
+    }
+  }
+  if (!skip_last) {
+    ON_3dPoint p = c->PointAtEnd();
+    out.push_back(p.x);
+    out.push_back(p.y);
+    out.push_back(p.z);
+  }
+}
+
+// Tessellate the trimming loops of a face in (u, v). Returns the number of loops;
+// fetch each with f3dm_loop_points.
+int f3dm_face_loops(F3dmModel* m, int obj, int face) {
+  m->scratch_loops.clear();
+  m->scratch_loop_outer.clear();
+  const ON_Brep* b = brep_of(m, obj);
+  if (!b || face < 0 || face >= b->m_F.Count()) return 0;
+  const ON_BrepFace& f = b->m_F[face];
+  for (int li = 0; li < f.m_li.Count(); li++) {
+    const ON_BrepLoop& loop = b->m_L[f.m_li[li]];
+    if (loop.m_type != ON_BrepLoop::outer && loop.m_type != ON_BrepLoop::inner) continue;
+    std::vector<double> xyz;
+    for (int ti = 0; ti < loop.m_ti.Count(); ti++) {
+      sample_curve(&b->m_T[loop.m_ti[ti]], true, xyz, 12);
+    }
+    std::vector<double> uv;
+    for (size_t k = 0; k + 2 < xyz.size(); k += 3) {
+      uv.push_back(xyz[k]);
+      uv.push_back(xyz[k + 1]);
+    }
+    m->scratch_loops.push_back(uv);
+    m->scratch_loop_outer.push_back(loop.m_type == ON_BrepLoop::outer ? 1 : 0);
+  }
+  return static_cast<int>(m->scratch_loops.size());
+}
+
+// Copy loop `k` from the last f3dm_face_loops call: (u, v) pairs. Returns the point count.
+int f3dm_loop_points(const F3dmModel* m, int k, double* uv, int cap_points, int* is_outer) {
+  if (k < 0 || static_cast<size_t>(k) >= m->scratch_loops.size()) return 0;
+  const std::vector<double>& l = m->scratch_loops[k];
+  const int n = static_cast<int>(l.size() / 2);
+  *is_outer = m->scratch_loop_outer[k];
+  if (uv && cap_points >= n) std::memcpy(uv, l.data(), l.size() * sizeof(double));
+  return n;
+}
+
+// Evaluate `n` (u, v) samples of a face into points and unit normals (normals already
+// account for the face orientation flag).
+int f3dm_face_eval(const F3dmModel* m, int obj, int face, int n, const double* uv, double* xyz,
+                   double* nrm) {
+  const ON_Brep* b = brep_of(m, obj);
+  if (!b || face < 0 || face >= b->m_F.Count()) return 0;
+  const ON_BrepFace& f = b->m_F[face];
+  const double sign = f.m_bRev ? -1.0 : 1.0;
+  for (int i = 0; i < n; i++) {
+    ON_3dPoint p;
+    ON_3dVector v;
+    if (!f.EvNormal(uv[2 * i], uv[2 * i + 1], p, v)) {
+      p = f.PointAt(uv[2 * i], uv[2 * i + 1]);
+      v = ON_3dVector::ZeroVector;
+    }
+    xyz[3 * i] = p.x; xyz[3 * i + 1] = p.y; xyz[3 * i + 2] = p.z;
+    nrm[3 * i] = sign * v.x; nrm[3 * i + 1] = sign * v.y; nrm[3 * i + 2] = sign * v.z;
+  }
+  return 1;
+}
+
+// Sample a curve object into a polyline. Returns the point count; fetch with
+// f3dm_points_copy.
+int f3dm_curve_points(F3dmModel* m, int obj) {
+  m->scratch_points.clear();
+  if (obj < 0 || static_cast<size_t>(obj) >= m->geometry.size()) return 0;
+  const ON_Curve* c = ON_Curve::Cast(m->geometry[obj]);
+  if (!c) return 0;
+  sample_curve(c, false, m->scratch_points, 16);
+  return static_cast<int>(m->scratch_points.size() / 3);
+}
+
+int f3dm_points_copy(const F3dmModel* m, double* xyz, int cap_points) {
+  const int n = static_cast<int>(m->scratch_points.size() / 3);
+  if (xyz && cap_points >= n) std::memcpy(xyz, m->scratch_points.data(), m->scratch_points.size() * sizeof(double));
+  return n;
+}
+
+// Triangles of a mesh object (quads split). Returns 1 if the object is a mesh;
+// sizes are written to *nv and *nt; fetch with f3dm_mesh_copy.
+int f3dm_mesh_data(F3dmModel* m, int obj, int* nv, int* nt) {
+  m->scratch_mesh_v.clear();
+  m->scratch_mesh_t.clear();
+  *nv = 0;
+  *nt = 0;
+  if (obj < 0 || static_cast<size_t>(obj) >= m->geometry.size()) return 0;
+  const ON_Mesh* mesh = ON_Mesh::Cast(m->geometry[obj]);
+  if (!mesh) return 0;
+  for (int i = 0; i < mesh->m_V.Count(); i++) {
+    ON_3dPoint p = mesh->Vertex(i);
+    m->scratch_mesh_v.push_back(p.x);
+    m->scratch_mesh_v.push_back(p.y);
+    m->scratch_mesh_v.push_back(p.z);
+  }
+  for (int i = 0; i < mesh->m_F.Count(); i++) {
+    const ON_MeshFace& f = mesh->m_F[i];
+    m->scratch_mesh_t.insert(m->scratch_mesh_t.end(), {(unsigned)f.vi[0], (unsigned)f.vi[1], (unsigned)f.vi[2]});
+    if (f.IsQuad()) {
+      m->scratch_mesh_t.insert(m->scratch_mesh_t.end(), {(unsigned)f.vi[0], (unsigned)f.vi[2], (unsigned)f.vi[3]});
+    }
+  }
+  *nv = static_cast<int>(m->scratch_mesh_v.size() / 3);
+  *nt = static_cast<int>(m->scratch_mesh_t.size() / 3);
+  return 1;
+}
+
+void f3dm_mesh_copy(const F3dmModel* m, double* xyz, unsigned int* tri) {
+  std::memcpy(xyz, m->scratch_mesh_v.data(), m->scratch_mesh_v.size() * sizeof(double));
+  std::memcpy(tri, m->scratch_mesh_t.data(), m->scratch_mesh_t.size() * sizeof(unsigned int));
 }
 
 void f3dm_free(F3dmModel* m) { delete m; }
