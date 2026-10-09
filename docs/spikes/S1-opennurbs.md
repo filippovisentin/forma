@@ -15,6 +15,10 @@ Windows (MSVC) and Linux.
 5. Test on Filippo's sample files in `tests/data/` (not committed if private; use a
    `.gitignore`d folder and a synthetic file for CI).
 
+6. Run `read_summary` on `tests/data/private/binario.3dm` and `gggg.3dm` and check the
+   counts against `ROADMAP.md` ("What Filippo's real files contain"): object types,
+   nested layer paths, units (cm), tolerances, block instances.
+
 ## Success criteria
 
 - `cargo test -p forma-io-3dm` passes on Windows and Linux.
