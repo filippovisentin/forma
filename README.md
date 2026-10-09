@@ -3,12 +3,14 @@
 A personal, Rhino-style NURBS modeller written in Rust — built for my own interior-design
 workflow and as an experiment in building a real CAD tool with AI agents.
 
-> Status: **v0.3.0** — Rhino-style modelling: four viewports with CPlanes, snaps, Ortho,
-> curves (Line, Polyline, Rectangle, Circle, Arc), curve tools (Offset, Trim, Extend, Fillet,
-> FilletCorners, Join, Explode), solids (Box, Cylinder, Sphere, ExtrudeCrv), transforms
-> (Move, Copy, Rotate, Scale, Mirror, arrays) with a gumball, layers and object colours,
-> Rhino-like menus and toolbar tabs, open/save `.3dm`. Download it from
-> [Releases](https://github.com/filippovisentin/forma/releases). See [ROADMAP.md](ROADMAP.md).
+> Status: **v0.4.0** — a Rhino 8-like interface (light theme, command line on top, toolbar
+> tabs, viewport menus and display modes, 11 object snaps, gumball) with about 90 commands:
+> curves (incl. NURBS Curve/InterpCrv/Ellipse), curve tools (Offset, Trim, Split, Extend, Fillet,
+> Chamfer, Join, Explode), mesh surfaces (PlanarSrf, Loft, Revolve, Sweep1, ExtrudeSrf, Cap),
+> solids (Box, Cylinder, Sphere, ExtrudeCrv), transforms (incl. Scale1D/2D, Orient, Align,
+> arrays), visibility, groups, layers and colours, analysis, open/save/import/export `.3dm`.
+> Download it from [Releases](https://github.com/filippovisentin/forma/releases).
+> See [ROADMAP.md](ROADMAP.md).
 
 ## Try it
 

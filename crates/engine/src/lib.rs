@@ -172,6 +172,19 @@ impl Engine {
         v
     }
 
+    /// For a bare command name, what its first required argument is (from its
+    /// help text: `Name <arg> …`), or `None` when it can run without arguments.
+    /// Lets a UI wait for arguments instead of failing.
+    pub fn missing_input(&self, name: &str) -> Option<&'static str> {
+        let idx = *self.lookup.get(&name.to_lowercase())?;
+        let help: &'static str = self.commands[idx].help();
+        let rest = help.split_once(' ').map_or("", |(_, r)| r).trim_start();
+        if let Some(inner) = rest.strip_prefix('<') {
+            return inner.split_once('>').map(|(a, _)| a);
+        }
+        rest.starts_with('#').then_some("object ids")
+    }
+
     /// Run a command by name with pre-split argument tokens.
     pub fn execute(&mut self, name: &str, tokens: &[&str]) -> CommandResult {
         let idx = *self
@@ -236,6 +249,15 @@ impl Engine {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn missing_input_from_help() {
+        let e = Engine::new();
+        assert_eq!(e.missing_input("Layer"), Some("name"));
+        assert_eq!(e.missing_input("select"), Some("object ids"));
+        assert_eq!(e.missing_input("SelAll"), None);
+        assert_eq!(e.missing_input("Delete"), None);
+    }
 
     #[test]
     fn unknown_command() {

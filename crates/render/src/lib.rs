@@ -25,9 +25,9 @@ const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 const SAMPLES: u32 = 4;
 /// Viewport background (linear RGB), close to Rhino's default grey.
 const BACKGROUND: wgpu::Color = wgpu::Color {
-    r: 0.40,
-    g: 0.41,
-    b: 0.43,
+    r: 0.352,
+    g: 0.352,
+    b: 0.352,
     a: 1.0,
 };
 
@@ -100,6 +100,33 @@ fn buffer(
     })
 }
 
+/// How a viewport draws objects (Rhino's display modes).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DisplayMode {
+    Wireframe,
+    Shaded,
+    Ghosted,
+    XRay,
+}
+
+impl DisplayMode {
+    pub const ALL: [DisplayMode; 4] = [
+        DisplayMode::Wireframe,
+        DisplayMode::Shaded,
+        DisplayMode::Ghosted,
+        DisplayMode::XRay,
+    ];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            DisplayMode::Wireframe => "Wireframe",
+            DisplayMode::Shaded => "Shaded",
+            DisplayMode::Ghosted => "Ghosted",
+            DisplayMode::XRay => "X-Ray",
+        }
+    }
+}
+
 /// One viewport's render target and camera uniforms.
 pub struct View {
     uniforms: wgpu::Buffer,
@@ -112,6 +139,8 @@ pub struct Renderer {
     mesh_pipeline: wgpu::RenderPipeline,
     line_pipeline: wgpu::RenderPipeline,
     grid_pipeline: wgpu::RenderPipeline,
+    ghost_pipeline: wgpu::RenderPipeline,
+    xray_line_pipeline: wgpu::RenderPipeline,
     bind_group_layout: wgpu::BindGroupLayout,
     scene: Buffers,
     highlight: Buffers,
@@ -153,7 +182,8 @@ impl Renderer {
                         attrs: &[wgpu::VertexAttribute],
                         topology: wgpu::PrimitiveTopology,
                         bias: wgpu::DepthBiasState,
-                        write_depth: bool| {
+                        write_depth: bool,
+                        compare: wgpu::CompareFunction| {
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some(label),
                 layout: Some(&layout),
@@ -175,7 +205,7 @@ impl Renderer {
                 depth_stencil: Some(wgpu::DepthStencilState {
                     format: DEPTH_FORMAT,
                     depth_write_enabled: Some(write_depth),
-                    depth_compare: Some(wgpu::CompareFunction::LessEqual),
+                    depth_compare: Some(compare),
                     stencil: Default::default(),
                     bias,
                 }),
@@ -211,6 +241,7 @@ impl Renderer {
                 clamp: 0.0,
             },
             true,
+            wgpu::CompareFunction::LessEqual,
         );
         let line_pipeline = pipeline(
             "forma lines",
@@ -221,6 +252,7 @@ impl Renderer {
             wgpu::PrimitiveTopology::LineList,
             Default::default(),
             true,
+            wgpu::CompareFunction::LessEqual,
         );
         // The grid never hides anything (like Rhino, objects below it stay visible).
         let grid_pipeline = pipeline(
@@ -232,12 +264,43 @@ impl Renderer {
             wgpu::PrimitiveTopology::LineList,
             Default::default(),
             false,
+            wgpu::CompareFunction::LessEqual,
+        );
+        // Ghosted surfaces: translucent, still hiding what is behind them a little.
+        let ghost_pipeline = pipeline(
+            "forma ghost",
+            "vs_mesh",
+            "fs_mesh_ghost",
+            std::mem::size_of::<MeshVertex>(),
+            &mesh_attrs,
+            wgpu::PrimitiveTopology::TriangleList,
+            wgpu::DepthBiasState {
+                constant: 2,
+                slope_scale: 1.5,
+                clamp: 0.0,
+            },
+            true,
+            wgpu::CompareFunction::LessEqual,
+        );
+        // X-Ray: wires drawn through everything.
+        let xray_line_pipeline = pipeline(
+            "forma x-ray lines",
+            "vs_line",
+            "fs_line",
+            std::mem::size_of::<LineVertex>(),
+            &line_attrs,
+            wgpu::PrimitiveTopology::LineList,
+            Default::default(),
+            false,
+            wgpu::CompareFunction::Always,
         );
 
         Renderer {
             mesh_pipeline,
             line_pipeline,
             grid_pipeline,
+            ghost_pipeline,
+            xray_line_pipeline,
             bind_group_layout: bgl,
             scene: Buffers::default(),
             highlight: Buffers::default(),
@@ -356,6 +419,7 @@ impl Renderer {
 
     /// Render a view and return its texture in [`DISPLAY_FORMAT`] (gamma-encoded
     /// values, as egui expects for native textures).
+    #[allow(clippy::too_many_arguments)]
     pub fn render<'v>(
         &self,
         device: &wgpu::Device,
@@ -364,6 +428,7 @@ impl Renderer {
         size: (u32, u32),
         camera: &Camera,
         grid: GridPlane,
+        mode: DisplayMode,
     ) -> &'v wgpu::TextureView {
         let size = (size.0.max(1), size.1.max(1));
         Self::ensure_targets(view, device, size);
@@ -408,21 +473,26 @@ impl Renderer {
                 multiview_mask: None,
             });
             pass.set_bind_group(0, &view.bind_group, &[]);
+            let draw_lines_with =
+                |pass: &mut wgpu::RenderPass<'_>, b: &Buffers, p: &wgpu::RenderPipeline| {
+                    if let Some(l) = &b.lines {
+                        pass.set_pipeline(p);
+                        pass.set_vertex_buffer(0, l.slice(..));
+                        pass.draw(0..b.line_count, 0..1);
+                    }
+                };
             let draw_lines = |pass: &mut wgpu::RenderPass<'_>, b: &Buffers| {
-                if let Some(l) = &b.lines {
-                    pass.set_pipeline(&self.line_pipeline);
-                    pass.set_vertex_buffer(0, l.slice(..));
-                    pass.draw(0..b.line_count, 0..1);
-                }
+                draw_lines_with(pass, b, &self.line_pipeline);
             };
-            let draw_mesh = |pass: &mut wgpu::RenderPass<'_>, b: &Buffers| {
-                if let (Some(v), Some(i)) = (&b.mesh_vertices, &b.mesh_indices) {
-                    pass.set_pipeline(&self.mesh_pipeline);
-                    pass.set_vertex_buffer(0, v.slice(..));
-                    pass.set_index_buffer(i.slice(..), wgpu::IndexFormat::Uint32);
-                    pass.draw_indexed(0..b.index_count, 0, 0..1);
-                }
-            };
+            let draw_mesh_with =
+                |pass: &mut wgpu::RenderPass<'_>, b: &Buffers, p: &wgpu::RenderPipeline| {
+                    if let (Some(v), Some(i)) = (&b.mesh_vertices, &b.mesh_indices) {
+                        pass.set_pipeline(p);
+                        pass.set_vertex_buffer(0, v.slice(..));
+                        pass.set_index_buffer(i.slice(..), wgpu::IndexFormat::Uint32);
+                        pass.draw_indexed(0..b.index_count, 0, 0..1);
+                    }
+                };
             if self.show_grid {
                 let b = &self.grids[grid.index()];
                 if let Some(l) = &b.lines {
@@ -431,11 +501,33 @@ impl Renderer {
                     pass.draw(0..b.line_count, 0..1);
                 }
             }
-            draw_mesh(&mut pass, &self.scene);
-            draw_lines(&mut pass, &self.scene);
-            // Same geometry drawn again: equal depth passes LessEqual, so it lands on top.
-            draw_mesh(&mut pass, &self.highlight);
-            draw_lines(&mut pass, &self.highlight);
+            let draw_mesh = |pass: &mut wgpu::RenderPass<'_>, b: &Buffers| {
+                draw_mesh_with(pass, b, &self.mesh_pipeline);
+            };
+            match mode {
+                DisplayMode::Wireframe => {
+                    draw_lines(&mut pass, &self.scene);
+                    draw_lines(&mut pass, &self.highlight);
+                }
+                DisplayMode::Shaded => {
+                    draw_mesh(&mut pass, &self.scene);
+                    draw_lines(&mut pass, &self.scene);
+                    // Same geometry drawn again: equal depth passes LessEqual, so it lands on top.
+                    draw_mesh(&mut pass, &self.highlight);
+                    draw_lines(&mut pass, &self.highlight);
+                }
+                DisplayMode::Ghosted => {
+                    // Wires first, then translucent surfaces over them.
+                    draw_lines(&mut pass, &self.scene);
+                    draw_mesh_with(&mut pass, &self.scene, &self.ghost_pipeline);
+                    draw_lines_with(&mut pass, &self.highlight, &self.xray_line_pipeline);
+                }
+                DisplayMode::XRay => {
+                    draw_mesh_with(&mut pass, &self.scene, &self.ghost_pipeline);
+                    draw_lines_with(&mut pass, &self.scene, &self.xray_line_pipeline);
+                    draw_lines_with(&mut pass, &self.highlight, &self.xray_line_pipeline);
+                }
+            }
         }
         queue.submit([enc.finish()]);
         &view.targets.as_ref().expect("targets").display_view
@@ -531,7 +623,15 @@ pub fn screenshot(
     let mut v = r.new_view(&device);
     let mut cam = Camera::view(view);
     cam.fit(scene.min, scene.max, size.0 as f64 / size.1 as f64);
-    r.render(&device, &queue, &mut v, size, &cam, grid_plane_for(view));
+    r.render(
+        &device,
+        &queue,
+        &mut v,
+        size,
+        &cam,
+        grid_plane_for(view),
+        DisplayMode::Shaded,
+    );
     r.read_pixels(&device, &queue, &v)
 }
 

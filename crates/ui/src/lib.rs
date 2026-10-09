@@ -5,6 +5,7 @@
 mod gumball;
 mod icons;
 mod snap;
+mod theme;
 mod tools;
 mod viewport;
 
@@ -14,12 +15,12 @@ use forma_doc::{LengthUnit, ObjectId};
 use forma_engine::Engine;
 use forma_geom::{Point3, Vec3, Xform};
 use forma_render::glam::DVec3;
-use forma_render::{grid_plane_for, model_center, Renderer, SceneCache, StandardView};
+use forma_render::{grid_plane_for, model_center, DisplayMode, Renderer, SceneCache, StandardView};
 use icons::Icon;
 use snap::{SnapKind, SnapPoints, SnapSettings};
 use std::collections::BTreeSet;
 use tools::{parse_typed_point, Step, Tool, ToolKind, Want};
-use viewport::{closest_on_line, to_d, Viewport};
+use viewport::{closest_on_line, to_d, to_p, Viewport};
 
 /// Start the desktop app, optionally opening a file.
 pub fn run(open: Option<String>) -> eframe::Result {
@@ -77,6 +78,7 @@ struct GumballDrag {
 enum SidePanel {
     Properties,
     Layers,
+    Help,
 }
 
 /// A menu / toolbar action, applied after the UI pass.
@@ -93,6 +95,10 @@ enum Act {
     Help,
     Maximize,
     Panel(SidePanel),
+    /// Set the active viewport's display mode.
+    Mode(DisplayMode),
+    /// Copy / paste through the engine clipboard.
+    Clip(&'static str),
 }
 
 const ARRAY_PREFILL: Act = Act::Prefill(
@@ -119,13 +125,36 @@ const SWATCHES: [[u8; 3]; 14] = [
 ];
 
 /// Rhino-style toolbar tabs above the viewports.
-const TABS: [&str; 5] = [
+const TABS: [&str; 10] = [
     "Standard",
-    "Curve Tools",
-    "Solid Tools",
-    "Transform",
     "Set View",
+    "Display",
+    "Select",
+    "Visibility",
+    "Transform",
+    "Curve Tools",
+    "Surface Tools",
+    "Solid Tools",
+    "Analyze",
 ];
+
+/// What a click can select (Rhino's selection Filter).
+#[derive(Clone, Copy)]
+struct SelFilter {
+    curves: bool,
+    surfaces: bool,
+    points: bool,
+}
+
+impl SelFilter {
+    fn accepts(self, g: &forma_doc::Geometry) -> bool {
+        match g {
+            forma_doc::Geometry::Point(_) => self.points,
+            forma_doc::Geometry::Mesh(_) => self.surfaces,
+            _ => self.curves,
+        }
+    }
+}
 
 struct FormaApp {
     engine: Engine,
@@ -161,10 +190,19 @@ struct FormaApp {
     gumball_typed: Option<(gumball::Handle, Point3)>,
     offset_distance: f64,
     fillet_radius: f64,
+    chamfer_distance: f64,
     side_panel: SidePanel,
     tab: usize,
     /// Colour being edited in the Properties panel.
     color_edit: [u8; 3],
+    /// Viewport whose title menu is open.
+    title_menu: Option<(usize, Pos2)>,
+    filter: SelFilter,
+    show_osnap: bool,
+    /// Last open / save, for "minutes from last save".
+    saved_at: std::time::Instant,
+    /// An engine command waiting for its arguments (run on Enter), and what it asks for.
+    pending: Option<(String, &'static str)>,
 }
 
 const CMD_ID: &str = "forma-command-line";
@@ -221,10 +259,21 @@ impl FormaApp {
             gumball_typed: None,
             offset_distance: 10.0,
             fillet_radius: 5.0,
+            chamfer_distance: 5.0,
             side_panel: SidePanel::Properties,
             tab: 0,
             color_edit: [200, 60, 60],
+            title_menu: None,
+            filter: SelFilter {
+                curves: true,
+                surfaces: true,
+                points: true,
+            },
+            show_osnap: true,
+            saved_at: std::time::Instant::now(),
+            pending: None,
         };
+        theme::apply(&cc.egui_ctx);
         app.reset_document_view();
         app.log(
             LogKind::Normal,
@@ -343,9 +392,11 @@ impl FormaApp {
                 if first == "open" || first == "new" {
                     self.reset_document_view();
                     self.saved_by_forma = false;
+                    self.saved_at = std::time::Instant::now();
                 }
                 if first == "save" || first == "saveas" {
                     self.saved_by_forma = true;
+                    self.saved_at = std::time::Instant::now();
                 }
                 if !matches!(
                     first.as_str(),
@@ -365,12 +416,13 @@ impl FormaApp {
     fn start_tool(&mut self, kind: ToolKind) {
         self.tool = None;
         self.gumball_typed = None;
+        let plane = self.viewports[self.active].cplane();
         if kind.instant() && self.has_selection() {
+            let line = Tool::new(kind, plane, true, Point3::ORIGIN, Vec::new()).instant_line();
             self.last_command = Some(kind.name().to_string());
-            self.run_engine(kind.name());
+            self.run_engine(&line);
             return;
         }
-        let plane = self.viewports[self.active].cplane();
         let doc = self.engine.doc();
         let sel = &self.engine.ctx.selection;
         let anchor = snap::selection_center(doc, sel).unwrap_or(Point3::ORIGIN);
@@ -386,6 +438,7 @@ impl FormaApp {
         tool.distance = match kind {
             ToolKind::Offset => self.offset_distance,
             ToolKind::Fillet => self.fillet_radius,
+            ToolKind::Chamfer => self.chamfer_distance,
             _ => tool.distance,
         };
         tool.curves = self.selected_curves();
@@ -434,7 +487,7 @@ impl FormaApp {
             if let Some(a) = anchor {
                 t.anchor = a;
             }
-            if t.kind == ToolKind::Extrude {
+            if matches!(t.kind, ToolKind::Extrude) {
                 if let Some(a) = ext {
                     t.anchor = a;
                 }
@@ -447,6 +500,7 @@ impl FormaApp {
             match t.kind {
                 ToolKind::Offset => self.offset_distance = t.distance,
                 ToolKind::Fillet => self.fillet_radius = t.distance,
+                ToolKind::Chamfer => self.chamfer_distance = t.distance,
                 _ => {}
             }
         }
@@ -480,6 +534,35 @@ impl FormaApp {
     /// Enter, Space or right click.
     fn enter_action(&mut self) {
         let has_sel = self.has_selection();
+        // Split: first the objects to split, then the cutting objects.
+        if let Some(t) = self.tool.as_mut().filter(|t| t.kind == ToolKind::Split) {
+            if t.phase == 0 {
+                if !has_sel {
+                    self.tool = None;
+                    self.log(LogKind::Normal, "nothing selected");
+                    return;
+                }
+                t.stash = self.engine.ctx.selection.iter().map(|i| i.0).collect();
+                t.phase = 1;
+                self.engine.ctx.selection.clear();
+                return;
+            }
+            let ids: Vec<String> = t.stash.iter().map(|i| format!("#{i}")).collect();
+            let cutters: Vec<String> = self
+                .engine
+                .ctx
+                .selection
+                .iter()
+                .map(|i| format!("#{}", i.0))
+                .collect();
+            let cmds = vec![
+                "SelNone".to_string(),
+                format!("Select {}", ids.join(" ")),
+                format!("Split {}", cutters.join(" ")).trim().to_string(),
+            ];
+            self.handle_step(Step::Done(cmds));
+            return;
+        }
         if let Some(t) = self.tool.as_mut() {
             let was_selecting = t.selecting;
             let step = t.enter(has_sel);
@@ -495,7 +578,9 @@ impl FormaApp {
     }
 
     fn cancel(&mut self) {
-        let gumball = self.gumball_typed.take().is_some() | self.gumball_drag.take().is_some();
+        let gumball = self.gumball_typed.take().is_some()
+            | self.gumball_drag.take().is_some()
+            | self.pending.take().is_some();
         if gumball || self.tool.take().is_some() {
             self.log(LogKind::Normal, "cancelled");
         } else if !self.command.is_empty() {
@@ -506,8 +591,44 @@ impl FormaApp {
     }
 
     /// Text from the command line (one or more tokens).
+    /// Text ended by a space (Rhino: space works like Enter, except that a
+    /// command that needs arguments keeps collecting them until Enter).
+    fn submit_space(&mut self, text: &str) {
+        let toks: Vec<&str> = text.split_whitespace().collect();
+        if toks.is_empty() {
+            self.submit(text);
+            return;
+        }
+        if let Some((line, _)) = self.pending.as_mut() {
+            line.push(' ');
+            line.push_str(&toks.join(" "));
+            return;
+        }
+        if self.pending.is_none() && self.tool.is_none() && self.gumball_typed.is_none() {
+            let first = toks[0];
+            let is_tool = ToolKind::from_name(first).is_some()
+                || ToolKind::selection_command(first).is_some();
+            if !is_tool {
+                if let Some(what) = self.engine.missing_input(first) {
+                    self.pending = Some((toks.join(" "), what));
+                    return;
+                }
+            }
+        }
+        self.submit(text);
+    }
+
     fn submit(&mut self, text: &str) {
         let toks: Vec<String> = text.split_whitespace().map(String::from).collect();
+        // A command waiting for arguments: collect them until Enter.
+        if let Some((mut line, _)) = self.pending.take() {
+            if !toks.is_empty() {
+                line.push(' ');
+                line.push_str(&toks.join(" "));
+            }
+            self.run_engine(&line);
+            return;
+        }
         if toks.is_empty() {
             if self.gumball_typed.take().is_some() {
                 return;
@@ -535,6 +656,16 @@ impl FormaApp {
             return;
         }
         let first = toks[0].to_lowercase();
+        if toks.len() == 1 && !self.has_selection() {
+            if let Some(kind) = ToolKind::selection_command(&first) {
+                self.start_tool(kind);
+                return;
+            }
+        }
+        if toks.len() == 1 && first == "projecttocplane" {
+            self.start_tool(ToolKind::OnSel("ProjectToCPlane"));
+            return;
+        }
         if let Some(kind) = ToolKind::from_name(&first) {
             self.start_tool(kind);
             for t in &toks[1..] {
@@ -564,12 +695,63 @@ impl FormaApp {
             }
             "ortho" => self.snap.ortho = !self.snap.ortho,
             "snap" | "gridsnap" => self.snap.grid = !self.snap.grid,
+            "planar" => self.snap.planar = !self.snap.planar,
+            "osnap" => self.snap.disabled = !self.snap.disabled,
+            "gumball" => self.gumball_on = !self.gumball_on,
+            "zs" | "zoomselected" => self.zoom_selected(),
+            "wireframe" | "setdisplaymode-wireframe" => self.set_mode(DisplayMode::Wireframe),
+            "shaded" => self.set_mode(DisplayMode::Shaded),
+            "ghosted" => self.set_mode(DisplayMode::Ghosted),
+            "xray" | "x-ray" => self.set_mode(DisplayMode::XRay),
+            "maxviewport" | "maximize" => self.toggle_maximize(),
             _ => {
+                // A bare engine command that needs arguments waits for them.
+                if toks.len() == 1 {
+                    if let Some(what) = self.engine.missing_input(text.trim()) {
+                        self.pending = Some((text.trim().to_string(), what));
+                        return;
+                    }
+                }
                 self.run_engine(text);
                 return;
             }
         }
         self.log(LogKind::Command, format!("Command: {text}"));
+    }
+
+    fn set_mode(&mut self, m: DisplayMode) {
+        let vp = &mut self.viewports[self.active];
+        vp.mode = m;
+        vp.dirty = true;
+    }
+
+    /// Fit the selection in the active view (Rhino's ZS).
+    fn zoom_selected(&mut self) {
+        let doc = self.engine.doc();
+        let pts: Vec<Point3> = self
+            .engine
+            .ctx
+            .selection
+            .iter()
+            .filter_map(|id| doc.object(*id))
+            .flat_map(|o| {
+                let b = o.geometry.bounding_box();
+                [b.min, b.max]
+            })
+            .collect();
+        let Some(bb) = forma_geom::BoundingBox::from_points(&pts) else {
+            self.log(LogKind::Normal, "nothing selected");
+            return;
+        };
+        let o = self.origin();
+        let vp = &mut self.viewports[self.active];
+        let aspect = if vp.rect.is_positive() {
+            vp.aspect()
+        } else {
+            1.5
+        };
+        vp.camera.fit(to_d(bb.min) - o, to_d(bb.max) - o, aspect);
+        vp.dirty = true;
     }
 
     fn set_active_view(&mut self, v: StandardView) {
@@ -641,6 +823,13 @@ impl FormaApp {
                         "a number is expected"
                     };
                     self.log(LogKind::Error, format!("{msg}: {tok}"));
+                    return;
+                }
+            },
+            Want::PickObject => match tok.trim_start_matches('#').parse::<u64>() {
+                Ok(id) => t.feed_object(id),
+                Err(_) => {
+                    self.log(LogKind::Error, "click on an object in a view (or type #id)");
                     return;
                 }
             },
@@ -736,6 +925,40 @@ impl FormaApp {
                 if i.consume_key(Modifiers::NONE, Key::Delete) {
                     actions.push("delete");
                 }
+                let ctrl_alt = Modifiers::COMMAND | Modifiers::ALT;
+                let ctrl_shift = Modifiers::COMMAND | Modifiers::SHIFT;
+                for (m, k, a) in [
+                    (ctrl_alt, Key::H, "Show"),
+                    (ctrl_alt, Key::L, "Unlock"),
+                    (ctrl_shift, Key::G, "Ungroup"),
+                    (Modifiers::COMMAND, Key::H, "Hide"),
+                    (Modifiers::COMMAND, Key::L, "Lock"),
+                    (Modifiers::COMMAND, Key::G, "Group"),
+                    (Modifiers::COMMAND, Key::J, "Join"),
+                ] {
+                    if i.consume_key(m, k) {
+                        actions.push(a);
+                    }
+                }
+                // Copy / cut / paste arrive as clipboard events, not keys.
+                i.events.retain(|e| match e {
+                    egui::Event::Copy => {
+                        actions.push("CopyToClipboard");
+                        false
+                    }
+                    egui::Event::Cut => {
+                        actions.push("Cut");
+                        false
+                    }
+                    egui::Event::Paste(_) => {
+                        actions.push("Paste");
+                        false
+                    }
+                    _ => true,
+                });
+                if i.consume_key(Modifiers::NONE, Key::F1) {
+                    actions.push("help");
+                }
             });
             for a in actions {
                 match a {
@@ -744,6 +967,13 @@ impl FormaApp {
                     "selall" => self.run_engine("SelAll"),
                     "delete" if self.has_selection() && self.tool.is_none() => {
                         self.run_engine("Delete")
+                    }
+                    "help" => self.act(ctx, Act::Help),
+                    "Show" | "Unlock" | "Paste" => self.run_engine(a),
+                    "Hide" | "Lock" | "Group" | "Ungroup" | "Join" | "CopyToClipboard" | "Cut"
+                        if self.tool.is_none() =>
+                    {
+                        self.act(ctx, Act::Clip(a));
                     }
                     _ => {}
                 }
@@ -817,7 +1047,7 @@ impl FormaApp {
             for ch in typed.chars() {
                 if ch == ' ' {
                     let text = std::mem::take(&mut self.command);
-                    self.submit(&text);
+                    self.submit_space(&text);
                 } else {
                     self.command.push(ch);
                     self.focus_command = true;
@@ -839,8 +1069,17 @@ impl FormaApp {
             want,
             Some(Want::Point | Want::PointOrNumber | Want::Height { .. })
         );
+        let base = self.tool.as_ref().and_then(Tool::base);
         let osnap = if picking {
-            self.snaps.find(vp, pos, origin, &self.snap, 14.0)
+            self.snaps
+                .find(vp, pos, origin, &self.snap, 14.0, base)
+                .map(|(p, k)| {
+                    if self.snap.project {
+                        (vp.cplane().project(p), k)
+                    } else {
+                        (p, k)
+                    }
+                })
         } else {
             None
         };
@@ -884,7 +1123,7 @@ impl FormaApp {
         let tool_plane = self
             .tool
             .as_ref()
-            .filter(|t| !t.pts.is_empty())
+            .filter(|t| !t.pts.is_empty() && self.snap.planar)
             .map(|t| t.plane.moved_to(t.pts[0]));
         let plane = tool_plane.unwrap_or_else(|| vp.cplane());
         let mut p = vp.cplane_point(pos, origin);
@@ -913,20 +1152,50 @@ impl FormaApp {
         }
     }
 
+    /// Objects plus the other members of their groups, through the filter.
+    fn expand_groups(&self, ids: Vec<ObjectId>) -> Vec<ObjectId> {
+        let doc = self.engine.doc();
+        let ids: Vec<ObjectId> = ids
+            .into_iter()
+            .filter(|id| {
+                doc.object(*id)
+                    .is_some_and(|o| self.filter.accepts(&o.geometry))
+            })
+            .collect();
+        let groups: BTreeSet<u32> = ids
+            .iter()
+            .filter_map(|id| doc.object(*id).and_then(|o| o.group))
+            .collect();
+        if groups.is_empty() {
+            return ids;
+        }
+        let mut out: BTreeSet<ObjectId> = ids.into_iter().collect();
+        for o in doc.objects() {
+            if o.group.is_some_and(|g| groups.contains(&g)) && doc.is_selectable(o) {
+                out.insert(o.id);
+            }
+        }
+        out.into_iter().collect()
+    }
+
     fn click_select(&mut self, vi: usize, pos: Pos2, mods: Modifiers) {
         let id = snap::pick(self.engine.doc(), &self.viewports[vi], pos, self.origin());
+        let ids = self.expand_groups(id.into_iter().collect());
+        let id = ids.first().copied();
         let selecting_for_tool = self.tool.as_ref().is_some_and(|t| t.selecting);
         let sel = &mut self.engine.ctx.selection;
         match id {
-            Some(id) if mods.command => {
-                sel.remove(&id);
+            Some(_) if mods.command => {
+                for i in &ids {
+                    sel.remove(i);
+                }
             }
-            Some(id) if mods.shift || selecting_for_tool => {
-                sel.insert(id);
+            Some(_) if mods.shift || selecting_for_tool => {
+                sel.extend(ids);
             }
-            Some(id) => {
+            Some(_) => {
                 sel.clear();
-                sel.insert(id);
+                sel.extend(ids);
             }
             None if !(mods.shift || mods.command || selecting_for_tool) => sel.clear(),
             None => {}
@@ -943,6 +1212,7 @@ impl FormaApp {
             crossing,
             self.origin(),
         );
+        let ids = self.expand_groups(ids);
         let selecting_for_tool = self.tool.as_ref().is_some_and(|t| t.selecting);
         let sel = &mut self.engine.ctx.selection;
         if mods.command {
@@ -1108,6 +1378,21 @@ impl FormaApp {
                     self.log(LogKind::Error, "type a number in the command line");
                     return;
                 }
+                if self
+                    .tool
+                    .as_ref()
+                    .is_some_and(|t| t.want() == Want::PickObject)
+                {
+                    let id = snap::pick(self.engine.doc(), &self.viewports[vi], pos, origin);
+                    match (id, self.tool.as_mut()) {
+                        (Some(id), Some(t)) => {
+                            let step = t.feed_object(id.0);
+                            self.handle_step(step);
+                        }
+                        _ => self.log(LogKind::Error, "no object there — click on an object"),
+                    }
+                    return;
+                }
                 if self.tool.as_ref().is_some_and(|t| t.want() == Want::Pick)
                     && snap::pick_curve_point(self.engine.doc(), &self.viewports[vi], pos, origin)
                         .is_none()
@@ -1173,6 +1458,7 @@ impl FormaApp {
                 px,
                 &vp.camera,
                 grid_plane_for(vp.kind),
+                vp.mode,
             );
             let mut egui_renderer = rs.renderer.write();
             match vp.texture {
@@ -1195,35 +1481,72 @@ impl FormaApp {
         }
     }
 
+    /// Screen rectangle of a viewport's title (click: menu, double-click: maximize).
+    fn title_rect(vp: &Viewport) -> Rect {
+        let w = 12.0 + vp.name().len() as f32 * 7.6 + 16.0;
+        Rect::from_min_size(
+            vp.rect.left_top() + egui::vec2(4.0, 3.0),
+            egui::vec2(w, 20.0),
+        )
+    }
+
     fn draw_overlays(&self, painter: &egui::Painter, vi: usize) {
         let vp = &self.viewports[vi];
         let p = painter.with_clip_rect(vp.rect);
         let origin = self.origin();
+        let ink = Color32::from_rgb(20, 20, 24);
         let seg = |a: Point3, b: Point3, s: Stroke| {
             if let (Some(sa), Some(sb)) = (vp.to_screen(a, origin), vp.to_screen(b, origin)) {
                 p.line_segment([sa, sb], s);
             }
         };
+        // Point objects: small squares, like Rhino's point display.
+        let doc = self.engine.doc();
+        for o in doc.objects() {
+            if let forma_doc::Geometry::Point(q) = &o.geometry {
+                if !doc.is_visible(o) {
+                    continue;
+                }
+                if let Some(sp) = vp.to_screen(*q, origin) {
+                    let selected = self.engine.ctx.selection.contains(&o.id);
+                    let [r, g, b] = doc.display_color(o);
+                    let c = if selected {
+                        Color32::from_rgb(255, 200, 0)
+                    } else {
+                        Color32::from_rgb(r, g, b)
+                    };
+                    let r = Rect::from_center_size(sp, egui::vec2(6.0, 6.0));
+                    p.rect_filled(r, 0.0, c);
+                    p.rect_stroke(r, 0.0, Stroke::new(1.0, ink), StrokeKind::Outside);
+                }
+            }
+        }
         if let (Some(t), Some(h)) = (self.tool.as_ref(), self.hover.as_ref()) {
-            let st = Stroke::new(1.3, Color32::from_rgb(20, 20, 24));
+            let st = Stroke::new(1.3, ink);
             for [a, b] in t.preview(h.point) {
                 seg(a, b, st);
             }
             if let Some(s) = vp.to_screen(h.point, origin) {
                 if !t.selecting {
-                    p.circle_filled(s, 3.0, Color32::from_rgb(20, 20, 24));
+                    p.circle_filled(s, 3.0, ink);
                 }
                 if let Some(k) = h.snap {
                     let r = Rect::from_center_size(s, egui::vec2(10.0, 10.0));
                     p.rect_stroke(r, 0.0, Stroke::new(1.5, Color32::WHITE), StrokeKind::Middle);
                     if h.viewport == vi {
-                        p.text(
-                            s + egui::vec2(9.0, -9.0),
-                            egui::Align2::LEFT_BOTTOM,
-                            k.label(),
-                            egui::FontId::proportional(13.0),
-                            Color32::WHITE,
+                        // Rhino-like osnap tag: a small label box next to the cursor.
+                        let font = egui::FontId::proportional(12.0);
+                        let galley = p.layout_no_wrap(k.label().to_string(), font, Color32::BLACK);
+                        let at = s + egui::vec2(10.0, -22.0);
+                        let bg = Rect::from_min_size(at, galley.size() + egui::vec2(8.0, 4.0));
+                        p.rect_filled(bg, 2.0, Color32::from_rgb(255, 255, 225));
+                        p.rect_stroke(
+                            bg,
+                            2.0,
+                            Stroke::new(1.0, Color32::from_gray(90)),
+                            StrokeKind::Inside,
                         );
+                        p.galley(at + egui::vec2(4.0, 2.0), galley, Color32::BLACK);
                     }
                 }
             }
@@ -1231,7 +1554,7 @@ impl FormaApp {
         if let Some(d) = &self.gumball_drag {
             if let Some(m) = d.motion {
                 let x: Xform = m.xform(d.center);
-                let st = Stroke::new(1.2, Color32::from_rgb(20, 20, 24));
+                let st = Stroke::new(1.2, ink);
                 for [a, b] in &d.skeleton {
                     seg(x.point(*a), x.point(*b), st);
                 }
@@ -1241,13 +1564,12 @@ impl FormaApp {
                             gumball::Motion::Translate(v) => format!("{:.2}", v.length()),
                             gumball::Motion::Rotate(a, _) => format!("{a:.1}°"),
                         };
-                        p.text(
-                            s + egui::vec2(12.0, -12.0),
-                            egui::Align2::LEFT_BOTTOM,
-                            label,
-                            egui::FontId::proportional(14.0),
-                            Color32::WHITE,
-                        );
+                        let font = egui::FontId::proportional(13.0);
+                        let galley = p.layout_no_wrap(label, font, Color32::BLACK);
+                        let at = s + egui::vec2(12.0, -26.0);
+                        let bg = Rect::from_min_size(at, galley.size() + egui::vec2(8.0, 4.0));
+                        p.rect_filled(bg, 2.0, Color32::from_rgb(255, 255, 225));
+                        p.galley(at + egui::vec2(4.0, 2.0), galley, Color32::BLACK);
                     }
                 }
             }
@@ -1293,47 +1615,98 @@ impl FormaApp {
                 }
             }
         }
-        // Title and frame.
+        // World axes icon, lower left (Rhino shows one in every view).
+        let corner = vp.rect.left_bottom() + egui::vec2(28.0, -28.0);
+        if let Some(c0) = vp.to_screen(to_p(vp.camera.target + origin), origin) {
+            for (axis, color, label) in [
+                (Vec3::X, Color32::from_rgb(200, 40, 40), "x"),
+                (Vec3::Y, Color32::from_rgb(30, 140, 40), "y"),
+                (Vec3::Z, Color32::from_rgb(40, 70, 200), "z"),
+            ] {
+                let t = to_p(vp.camera.target + origin);
+                let Some(c1) = vp.to_screen(t + axis * (vp.camera.distance * 0.05), origin) else {
+                    continue;
+                };
+                let d = c1 - c0;
+                if d.length() < 1e-3 {
+                    continue;
+                }
+                let len = 18.0 * (d.length() / (vp.rect.height() * 0.05 + 1e-3)).min(1.0);
+                if len < 3.0 {
+                    continue;
+                }
+                let dir = d.normalized();
+                let tip = corner + dir * len;
+                p.line_segment([corner, tip], Stroke::new(1.8, color));
+                p.text(
+                    tip + dir * 7.0,
+                    egui::Align2::CENTER_CENTER,
+                    label,
+                    egui::FontId::proportional(11.0),
+                    color,
+                );
+            }
+        }
+        // Title with the drop-down arrow, Rhino style.
         let active = vi == self.active;
-        let color = if active {
-            Color32::WHITE
-        } else {
-            Color32::from_gray(225)
-        };
-        let r = p.text(
-            vp.rect.left_top() + egui::vec2(8.0, 5.0),
-            egui::Align2::LEFT_TOP,
-            vp.name(),
-            egui::FontId::proportional(13.0),
-            color,
-        );
+        let tr = Self::title_rect(vp);
         if active {
-            p.line_segment(
-                [
-                    r.left_bottom() + egui::vec2(0.0, 1.0),
-                    r.right_bottom() + egui::vec2(0.0, 1.0),
-                ],
-                Stroke::new(1.5, Color32::WHITE),
+            p.rect_filled(tr, 3.0, Color32::from_rgba_unmultiplied(255, 255, 255, 150));
+        }
+        let title = format!("{} ▾", vp.name());
+        p.text(
+            tr.left_center() + egui::vec2(6.0, 0.0),
+            egui::Align2::LEFT_CENTER,
+            title,
+            if active {
+                egui::FontId::proportional(13.5)
+            } else {
+                egui::FontId::proportional(13.0)
+            },
+            if active {
+                Color32::BLACK
+            } else {
+                Color32::from_gray(45)
+            },
+        );
+        if vp.mode != DisplayMode::Wireframe || active {
+            p.text(
+                vp.rect.right_top() + egui::vec2(-8.0, 6.0),
+                egui::Align2::RIGHT_TOP,
+                vp.mode.name(),
+                egui::FontId::proportional(11.5),
+                Color32::from_gray(55),
             );
         }
         p.rect_stroke(
             vp.rect,
             0.0,
             Stroke::new(
-                if active { 1.5 } else { 1.0 },
+                if active { 2.0 } else { 1.0 },
                 if active {
-                    Color32::from_gray(235)
+                    theme::ACCENT
                 } else {
-                    Color32::from_gray(90)
+                    Color32::from_gray(110)
                 },
             ),
             StrokeKind::Inside,
         );
     }
 
+    fn toggle_maximize(&mut self) {
+        self.maximized = if self.maximized.is_some() {
+            None
+        } else {
+            Some(self.active)
+        };
+        self.dirty_all();
+    }
+
     fn ui_viewports(&mut self, ui: &mut egui::Ui, frame: &eframe::Frame) {
-        let full = ui.available_rect_before_wrap();
-        let gap = 2.0;
+        let outer = ui.available_rect_before_wrap();
+        let tabs_h = 24.0;
+        let full = Rect::from_min_max(outer.min, egui::pos2(outer.max.x, outer.max.y - tabs_h));
+        let gap = 3.0;
         let rects: Vec<(usize, Rect)> = match self.maximized {
             Some(m) => vec![(m, full)],
             None => {
@@ -1370,22 +1743,22 @@ impl FormaApp {
             if resp.hovered() {
                 any_hover = true;
             }
-            // Double-click on the title toggles maximize.
-            let title_rect = Rect::from_min_size(r.left_top(), egui::vec2(110.0, 22.0));
-            if resp.double_clicked_by(PointerButton::Primary)
-                && resp
-                    .interact_pointer_pos()
-                    .is_some_and(|p| title_rect.contains(p))
-            {
-                self.maximized = if self.maximized.is_some() {
-                    None
-                } else {
-                    Some(i)
-                };
+            let title = Self::title_rect(&self.viewports[i]);
+            let on_title = resp
+                .interact_pointer_pos()
+                .is_some_and(|p| title.contains(p));
+            if on_title && resp.double_clicked_by(PointerButton::Primary) {
                 self.active = i;
-                for v in &mut self.viewports {
-                    v.dirty = true;
-                }
+                self.title_menu = None;
+                self.toggle_maximize();
+                continue;
+            }
+            if on_title
+                && (resp.clicked_by(PointerButton::Primary)
+                    || resp.clicked_by(PointerButton::Secondary))
+            {
+                self.active = i;
+                self.title_menu = Some((i, title.left_bottom()));
                 continue;
             }
             self.viewport_input(ui, i, &resp);
@@ -1395,6 +1768,7 @@ impl FormaApp {
         }
         self.render_viewports(frame, ui.ctx().pixels_per_point());
         let painter = ui.painter();
+        painter.rect_filled(outer, 0.0, Color32::from_gray(150));
         for (i, r) in &rects {
             if let Some(id) = self.viewports[*i].texture {
                 painter.image(
@@ -1408,76 +1782,204 @@ impl FormaApp {
         for (i, _) in &rects {
             self.draw_overlays(painter, *i);
         }
+        self.ui_title_menu(ui);
+        // Viewport tabs under the views.
+        let tabs = Rect::from_min_max(egui::pos2(outer.min.x, full.max.y), outer.max);
+        let mut child = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(tabs.shrink2(egui::vec2(4.0, 2.0)))
+                .layout(egui::Layout::left_to_right(egui::Align::Center)),
+        );
+        child.painter().rect_filled(tabs, 0.0, theme::STRIP);
+        for i in [1usize, 0, 2, 3] {
+            let name = self.viewports[i].name();
+            let selected = self.active == i;
+            if child.selectable_label(selected, name).clicked() {
+                self.active = i;
+                if self.maximized.is_some() {
+                    self.maximized = Some(i);
+                }
+                self.dirty_all();
+            }
+        }
         if self.viewports.iter().any(|v| v.dirty) {
             ui.ctx().request_repaint();
         }
     }
 
-    fn icon_button(&mut self, ui: &mut egui::Ui, icon: Icon, tip: &str, active: bool) -> bool {
-        let (rect, resp) = ui.allocate_exact_size(egui::vec2(34.0, 34.0), egui::Sense::click());
-        let visuals = ui.style().interact_selectable(&resp, active);
-        if resp.hovered() || active {
-            ui.painter().rect_filled(rect, 4.0, visuals.weak_bg_fill);
+    /// Drop-down menu of a viewport title (Rhino's "Top ▾").
+    fn ui_title_menu(&mut self, ui: &mut egui::Ui) {
+        let Some((vi, at)) = self.title_menu else {
+            return;
+        };
+        let mut close = false;
+        let mut act: Option<Act> = None;
+        let area = egui::Area::new(egui::Id::new("viewport-title-menu"))
+            .order(egui::Order::Foreground)
+            .fixed_pos(at + egui::vec2(0.0, 2.0))
+            .show(ui.ctx(), |ui| {
+                egui::Frame::menu(ui.style()).show(ui, |ui| {
+                    ui.set_min_width(170.0);
+                    ui.label(egui::RichText::new("Set View").small().weak());
+                    for (label, cmd) in [
+                        ("Top", "top"),
+                        ("Front", "front"),
+                        ("Right", "right"),
+                        ("Perspective", "perspective"),
+                    ] {
+                        if ui.selectable_label(false, label).clicked() {
+                            act = Some(Act::Submit(cmd));
+                            close = true;
+                        }
+                    }
+                    ui.separator();
+                    ui.label(egui::RichText::new("Display Mode").small().weak());
+                    let current = self.viewports[vi].mode;
+                    for m in DisplayMode::ALL {
+                        if ui.selectable_label(current == m, m.name()).clicked() {
+                            act = Some(Act::Mode(m));
+                            close = true;
+                        }
+                    }
+                    ui.separator();
+                    let label = if self.maximized.is_some() {
+                        "Restore Viewport Layout"
+                    } else {
+                        "Maximize"
+                    };
+                    if ui.selectable_label(false, label).clicked() {
+                        act = Some(Act::Maximize);
+                        close = true;
+                    }
+                    if ui.selectable_label(false, "Zoom Extents").clicked() {
+                        act = Some(Act::Submit("ze"));
+                        close = true;
+                    }
+                    if ui.selectable_label(false, "Zoom Selected").clicked() {
+                        act = Some(Act::Submit("zs"));
+                        close = true;
+                    }
+                });
+            });
+        let title = Self::title_rect(&self.viewports[vi]);
+        let press = ui.input(|i| {
+            i.pointer
+                .any_pressed()
+                .then(|| i.pointer.interact_pos())
+                .flatten()
+        });
+        let clicked_elsewhere =
+            press.is_some_and(|p| !area.response.rect.contains(p) && !title.contains(p));
+        if close || clicked_elsewhere || ui.input(|i| i.key_pressed(Key::Escape)) {
+            self.title_menu = None;
         }
-        icons::paint(ui.painter(), rect, icon, visuals.fg_stroke.color);
+        if let Some(a) = act {
+            self.active = vi;
+            self.act(ui.ctx(), a);
+        }
+    }
+
+    fn icon_button(&mut self, ui: &mut egui::Ui, icon: Icon, tip: &str, active: bool) -> bool {
+        let (rect, resp) = ui.allocate_exact_size(egui::vec2(32.0, 32.0), egui::Sense::click());
+        if resp.hovered() || active {
+            let (fill, stroke) = if active {
+                (theme::ACCENT_BG, theme::ACCENT)
+            } else {
+                (
+                    Color32::from_rgb(229, 241, 251),
+                    Color32::from_rgb(160, 200, 236),
+                )
+            };
+            ui.painter().rect_filled(rect, 3.0, fill);
+            ui.painter()
+                .rect_stroke(rect, 3.0, Stroke::new(1.0, stroke), StrokeKind::Inside);
+        }
+        icons::paint(ui.painter(), rect.shrink(3.0), icon, theme::TEXT);
         resp.on_hover_text(tip).clicked()
     }
 
-    fn ui_tool_group(
-        &mut self,
-        ui: &mut egui::Ui,
-        title: &str,
-        kinds: &[ToolKind],
-    ) -> Option<ToolKind> {
+    /// Left sidebar: Rhino's main palette, two columns of tools.
+    fn ui_toolbar(&mut self, ui: &mut egui::Ui) {
+        use ToolKind as K;
+        let groups: [&[ToolKind]; 7] = [
+            &[
+                K::Point,
+                K::Line,
+                K::Polyline,
+                K::Curve,
+                K::Circle,
+                K::Arc,
+                K::Ellipse,
+                K::Rectangle,
+                K::Polygon,
+                K::InterpCrv,
+            ],
+            &[
+                K::OnSel("PlanarSrf"),
+                K::Extrude,
+                K::OnSel("Loft"),
+                K::Revolve,
+                K::Sweep1,
+                K::OnSel("Cap"),
+            ],
+            &[K::Box, K::Sphere, K::Cylinder, K::ExtrudeSrf],
+            &[
+                K::Move,
+                K::Copy,
+                K::Rotate,
+                K::Scale,
+                K::Mirror,
+                K::Orient,
+                K::ArrayLinear,
+                K::ArrayPolar,
+            ],
+            &[
+                K::Join,
+                K::Explode,
+                K::Trim,
+                K::Split,
+                K::Extend,
+                K::Offset,
+                K::Fillet,
+                K::Chamfer,
+            ],
+            &[
+                K::OnSel("Group"),
+                K::OnSel("Hide"),
+                K::OnSel("Lock"),
+                K::MatchProperties,
+            ],
+            &[K::Distance, K::OnSel("Area")],
+        ];
         let current = self.tool.as_ref().map(|t| t.kind);
         let mut start = None;
-        ui.label(egui::RichText::new(title).small().weak());
-        egui::Grid::new(title).spacing([2.0, 2.0]).show(ui, |ui| {
-            for (k, kind) in kinds.iter().enumerate() {
-                if self.icon_button(
-                    ui,
-                    Icon::Tool(*kind),
-                    kind.tooltip(),
-                    current == Some(*kind),
-                ) {
-                    start = Some(*kind);
-                }
-                if k % 2 == 1 {
-                    ui.end_row();
-                }
-            }
-        });
-        ui.add_space(4.0);
-        start
-    }
-
-    /// Left sidebar (Rhino's main tool palette).
-    fn ui_toolbar(&mut self, ui: &mut egui::Ui) {
         egui::ScrollArea::vertical().show(ui, |ui| {
-            let mut start = None;
-            start = start.or(self.ui_tool_group(ui, "Curve", &ToolKind::CURVES));
-            start = start.or(self.ui_tool_group(ui, "Curve Tools", &ToolKind::CURVE_TOOLS));
-            start = start.or(self.ui_tool_group(ui, "Solid", &ToolKind::SOLIDS));
-            start = start.or(self.ui_tool_group(ui, "Transform", &ToolKind::TRANSFORMS));
-            start = start.or(self.ui_tool_group(ui, "Edit", &ToolKind::EDIT));
-            let mut action: Option<&str> = None;
-            egui::Grid::new("edit-actions")
-                .spacing([2.0, 2.0])
-                .show(ui, |ui| {
-                    if self.icon_button(ui, Icon::Delete, "Delete selected (Del)", false) {
-                        action = Some("Delete");
-                    }
-                    if self.icon_button(ui, Icon::SelectAll, "Select all (Ctrl+A)", false) {
-                        action = Some("SelAll");
-                    }
-                });
-            if let Some(k) = start {
-                self.start_tool(k);
-            }
-            if let Some(a) = action {
-                self.run_engine(a);
+            ui.spacing_mut().item_spacing = egui::vec2(1.0, 1.0);
+            for (g, kinds) in groups.iter().enumerate() {
+                egui::Grid::new(("sidebar", g))
+                    .spacing([1.0, 1.0])
+                    .show(ui, |ui| {
+                        for (k, kind) in kinds.iter().enumerate() {
+                            if self.icon_button(
+                                ui,
+                                Icon::Tool(*kind),
+                                kind.tooltip(),
+                                current == Some(*kind),
+                            ) {
+                                start = Some(*kind);
+                            }
+                            if k % 2 == 1 {
+                                ui.end_row();
+                            }
+                        }
+                    });
+                ui.add_space(3.0);
+                ui.separator();
             }
         });
+        if let Some(k) = start {
+            self.start_tool(k);
+        }
     }
 
     fn act(&mut self, ctx: &egui::Context, a: Act) {
@@ -1495,16 +1997,23 @@ impl FormaApp {
             Act::Save => self.save(false),
             Act::SaveAs => self.save(true),
             Act::Exit => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
-            Act::Help => self.show_help(),
-            Act::Maximize => {
-                self.maximized = if self.maximized.is_some() {
-                    None
-                } else {
-                    Some(self.active)
-                };
-                self.dirty_all();
+            Act::Help => {
+                self.side_panel = SidePanel::Help;
+                self.show_help();
             }
+            Act::Maximize => self.toggle_maximize(),
             Act::Panel(p) => self.side_panel = p,
+            Act::Mode(m) => self.set_mode(m),
+            Act::Clip(c) => match c {
+                "Paste" => self.run_engine("Paste"),
+                other => {
+                    if self.has_selection() {
+                        self.run_engine(other);
+                    } else {
+                        self.start_tool(ToolKind::OnSel(other));
+                    }
+                }
+            },
         }
     }
 
@@ -1514,110 +2023,240 @@ impl FormaApp {
         }
     }
 
-    /// Tab strip and its command row, above the viewports (Rhino 8 style).
+    /// Buttons of a toolbar tab: (icon, tooltip, action); `None` = separator.
+    fn tab_items(&self) -> Vec<Option<(Icon, &'static str, Act)>> {
+        use ToolKind as K;
+        let tool = |k: ToolKind| Some((Icon::Tool(k), k.tooltip(), Act::Tool(k)));
+        let named = |n: &'static str, tip: &'static str, a: Act| Some((Icon::Named(n), tip, a));
+        let tools = |ks: &[ToolKind]| ks.iter().map(|k| tool(*k)).collect::<Vec<_>>();
+        let mut v = Vec::new();
+        match self.tab {
+            0 => {
+                v.push(named("New", "New (Ctrl+N)", Act::Cmd("New")));
+                v.push(named("Open", "Open (Ctrl+O)", Act::Open));
+                v.push(named("Save", "Save (Ctrl+S)", Act::Save));
+                v.push(None);
+                v.push(named("Cut", "Cut (Ctrl+X)", Act::Clip("Cut")));
+                v.push(named(
+                    "CopyToClipboard",
+                    "Copy to clipboard (Ctrl+C)",
+                    Act::Clip("CopyToClipboard"),
+                ));
+                v.push(named("Paste", "Paste (Ctrl+V)", Act::Clip("Paste")));
+                v.push(None);
+                v.push(named("Undo", "Undo (Ctrl+Z)", Act::Cmd("Undo")));
+                v.push(named("Redo", "Redo (Ctrl+Y)", Act::Cmd("Redo")));
+                v.push(None);
+                v.push(named("SelAll", "Select all (Ctrl+A)", Act::Cmd("SelAll")));
+                v.push(tool(K::OnSel("Delete")));
+                v.push(None);
+                v.push(tool(K::OnSel("Hide")));
+                v.push(named(
+                    "Show",
+                    "Show hidden objects (Ctrl+Alt+H)",
+                    Act::Cmd("Show"),
+                ));
+                v.push(tool(K::OnSel("Lock")));
+                v.push(named(
+                    "Unlock",
+                    "Unlock all (Ctrl+Alt+L)",
+                    Act::Cmd("Unlock"),
+                ));
+                v.push(None);
+                v.push(named(
+                    "ZoomExtents",
+                    "Zoom extents, all views",
+                    Act::Submit("zea"),
+                ));
+                v.push(named("ZoomSelected", "Zoom selected", Act::Submit("zs")));
+                v.push(None);
+                v.push(named(
+                    "Layer",
+                    "Layers panel",
+                    Act::Panel(SidePanel::Layers),
+                ));
+                v.push(named(
+                    "What",
+                    "Properties panel (F3)",
+                    Act::Panel(SidePanel::Properties),
+                ));
+                v.push(named("Help", "Help", Act::Help));
+            }
+            1 => {
+                for (n, c) in [
+                    ("Top", "top"),
+                    ("Front", "front"),
+                    ("Right", "right"),
+                    ("Perspective", "perspective"),
+                ] {
+                    v.push(named(n, n, Act::Submit(c)));
+                }
+                v.push(None);
+                v.push(named("ZoomExtents", "Zoom extents (ZE)", Act::Submit("ze")));
+                v.push(named(
+                    "ZoomSelected",
+                    "Zoom selected (ZS)",
+                    Act::Submit("zs"),
+                ));
+                v.push(named(
+                    "Isolate",
+                    "Maximize / restore the active view",
+                    Act::Maximize,
+                ));
+            }
+            2 => {
+                for (m, n) in [
+                    (DisplayMode::Wireframe, "Wireframe"),
+                    (DisplayMode::Shaded, "Shaded"),
+                    (DisplayMode::Ghosted, "Ghosted"),
+                    (DisplayMode::XRay, "XRay"),
+                ] {
+                    v.push(named(n, m.name(), Act::Mode(m)));
+                }
+            }
+            3 => {
+                for (n, tip) in [
+                    ("SelAll", "Select all (Ctrl+A)"),
+                    ("SelNone", "Select none (Esc)"),
+                    ("Invert", "Invert selection"),
+                    ("SelLast", "Select last created objects"),
+                    ("SelCrv", "Select all curves"),
+                    ("SelMesh", "Select all surfaces / meshes"),
+                    ("SelPt", "Select all points"),
+                ] {
+                    v.push(named(n, tip, Act::Cmd(n)));
+                }
+                v.push(tool(K::OnSel("SelGroup")));
+            }
+            4 => {
+                v.push(tool(K::OnSel("Hide")));
+                v.push(named("Show", "Show all hidden objects", Act::Cmd("Show")));
+                v.push(tool(K::OnSel("Isolate")));
+                v.push(named(
+                    "Unisolate",
+                    "Unisolate (show all)",
+                    Act::Cmd("Unisolate"),
+                ));
+                v.push(None);
+                v.push(tool(K::OnSel("Lock")));
+                v.push(named("Unlock", "Unlock all", Act::Cmd("Unlock")));
+                v.push(None);
+                v.push(tool(K::OnSel("Group")));
+                v.push(tool(K::OnSel("Ungroup")));
+            }
+            5 => {
+                v.extend(tools(&ToolKind::TRANSFORMS));
+                v.push(named("Array", "Rectangular array", ARRAY_PREFILL));
+            }
+            6 => {
+                v.extend(tools(&ToolKind::CURVES));
+                v.push(None);
+                v.extend(tools(&ToolKind::CURVE_TOOLS));
+            }
+            7 => v.extend(tools(&ToolKind::SURFACES)),
+            8 => v.extend(tools(&ToolKind::SOLIDS)),
+            _ => {
+                v.extend(tools(&ToolKind::ANALYZE));
+                v.push(None);
+                v.push(tool(K::MatchProperties));
+            }
+        }
+        v
+    }
+
+    /// Tab strip and its command row (Rhino 8 style).
     fn ui_tabs(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 0.0;
             for (i, name) in TABS.iter().enumerate() {
-                if ui.selectable_label(self.tab == i, *name).clicked() {
+                let selected = self.tab == i;
+                let text = egui::RichText::new(*name).size(12.5);
+                let b = egui::Button::new(if selected { text.strong() } else { text })
+                    .fill(if selected {
+                        Color32::WHITE
+                    } else {
+                        theme::STRIP
+                    })
+                    .stroke(Stroke::new(
+                        1.0,
+                        if selected {
+                            theme::BORDER
+                        } else {
+                            theme::STRIP
+                        },
+                    ))
+                    .corner_radius(egui::CornerRadius {
+                        nw: 3,
+                        ne: 3,
+                        sw: 0,
+                        se: 0,
+                    });
+                if ui.add(b).clicked() {
                     self.tab = i;
                 }
             }
         });
         let mut act: Option<Act> = None;
         let current = self.tool.as_ref().map(|t| t.kind);
-        let icon = |ui: &mut egui::Ui, i: Icon, tip: &str| -> bool {
-            let active = matches!((i, current), (Icon::Tool(k), Some(c)) if k == c);
-            let (rect, resp) = ui.allocate_exact_size(egui::vec2(28.0, 28.0), egui::Sense::click());
-            let v = ui.style().interact_selectable(&resp, active);
-            if resp.hovered() || active {
-                ui.painter().rect_filled(rect, 3.0, v.weak_bg_fill);
-            }
-            icons::paint(ui.painter(), rect, i, v.fg_stroke.color);
-            resp.on_hover_text(tip).clicked()
-        };
-        let tools = |ui: &mut egui::Ui, kinds: &[ToolKind], act: &mut Option<Act>| {
-            for k in kinds {
-                if icon(ui, Icon::Tool(*k), k.tooltip()) {
-                    *act = Some(Act::Tool(*k));
-                }
-            }
-        };
-        ui.horizontal(|ui| match self.tab {
-            0 => {
-                for (i, tip, a) in [
-                    (Icon::New, "New (Ctrl+N)", Act::Cmd("New")),
-                    (Icon::Open, "Open (Ctrl+O)", Act::Open),
-                    (Icon::Save, "Save (Ctrl+S)", Act::Save),
-                    (Icon::Undo, "Undo (Ctrl+Z)", Act::Cmd("Undo")),
-                    (Icon::Redo, "Redo (Ctrl+Y)", Act::Cmd("Redo")),
-                    (Icon::SelectAll, "Select all (Ctrl+A)", Act::Cmd("SelAll")),
-                    (Icon::Delete, "Delete (Del)", Act::Cmd("Delete")),
-                    (
-                        Icon::ZoomExtents,
-                        "Zoom extents, all views",
-                        Act::Submit("zea"),
-                    ),
-                ] {
-                    if icon(ui, i, tip) {
-                        act = Some(a);
+        let items = self.tab_items();
+        let frame = egui::Frame::NONE
+            .fill(Color32::WHITE)
+            .stroke(Stroke::new(1.0, theme::BORDER))
+            .inner_margin(egui::Margin::symmetric(4, 2));
+        frame.show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 1.0;
+                for it in items {
+                    match it {
+                        None => {
+                            ui.add_space(3.0);
+                            ui.separator();
+                            ui.add_space(3.0);
+                        }
+                        Some((icon, tip, a)) => {
+                            let active =
+                                matches!((icon, current), (Icon::Tool(k), Some(c)) if k == c);
+                            if self.icon_button(ui, icon, tip, active) {
+                                act = Some(a);
+                            }
+                        }
                     }
                 }
-                ui.separator();
-                tools(ui, &ToolKind::EDIT, &mut act);
-                ui.separator();
-                ui.toggle_value(&mut self.gumball_on, "Gumball")
-                    .on_hover_text("Move / rotate the selection with axis handles");
-            }
-            1 => {
-                tools(ui, &ToolKind::CURVES, &mut act);
-                ui.separator();
-                tools(ui, &ToolKind::CURVE_TOOLS, &mut act);
-                ui.separator();
-                tools(ui, &ToolKind::EDIT, &mut act);
-            }
-            2 => {
-                tools(ui, &ToolKind::SOLIDS, &mut act);
-                ui.separator();
-                for b in ["BooleanUnion", "BooleanDifference", "BooleanIntersection"] {
-                    ui.add_enabled(false, egui::Button::new(b))
-                        .on_disabled_hover_text(
-                            "Needs the solid kernel (OpenCascade), planned for a next version",
-                        );
-                }
-            }
-            3 => {
-                tools(ui, &ToolKind::TRANSFORMS, &mut act);
-                ui.separator();
-                if ui
-                    .button("Array")
-                    .on_hover_text("Rectangular array: Array nx ny nz dx,dy,dz")
-                    .clicked()
-                {
-                    act = Some(ARRAY_PREFILL);
-                }
-            }
-            _ => {
-                for (label, cmd) in [
-                    ("Top", "top"),
-                    ("Front", "front"),
-                    ("Right", "right"),
-                    ("Perspective", "perspective"),
-                    ("Zoom Extents", "ze"),
-                    ("Zoom Extents All", "zea"),
-                ] {
-                    if ui.button(label).clicked() {
-                        act = Some(Act::Submit(cmd));
+                if self.tab == 8 {
+                    ui.separator();
+                    for b in [
+                        "BooleanUnion",
+                        "BooleanDifference",
+                        "BooleanIntersection",
+                        "FilletEdge",
+                    ] {
+                        ui.add_enabled(false, egui::Button::new(b))
+                            .on_disabled_hover_text(
+                                "Needs the solid kernel (OpenCascade), planned for a next version",
+                            );
                     }
                 }
-                let label = if self.maximized.is_some() {
-                    "4 Views"
-                } else {
-                    "Maximize"
-                };
-                if ui.button(label).clicked() {
-                    act = Some(Act::Maximize);
+                if self.tab == 5 {
+                    ui.separator();
+                    ui.menu_button("Align ▾", |ui| {
+                        for (label, opt) in [
+                            ("Left", "left"),
+                            ("Right", "right"),
+                            ("Top", "top"),
+                            ("Bottom", "bottom"),
+                            ("Horizontal centers", "hcenter"),
+                            ("Vertical centers", "vcenter"),
+                            ("Centers", "center"),
+                        ] {
+                            if ui.button(label).clicked() {
+                                act = Some(Act::Submit(align_cmd(opt)));
+                                ui.close();
+                            }
+                        }
+                    });
                 }
-            }
+            });
         });
         if let Some(a) = act {
             self.act(ui.ctx(), a);
@@ -1645,6 +2284,7 @@ impl FormaApp {
                     "Needs the solid kernel (OpenCascade), planned for a next version",
                 );
         };
+        use ToolKind as K;
         egui::MenuBar::new().ui(ui, |ui| {
             ui.menu_button("File", |ui| {
                 ui.menu_button("New", |ui| {
@@ -1653,9 +2293,29 @@ impl FormaApp {
                     item(ui, &mut act, "Metres", "", Act::Cmd("New m"));
                 });
                 item(ui, &mut act, "Open…", "Ctrl+O", Act::Open);
+                item(
+                    ui,
+                    &mut act,
+                    "Import…",
+                    "",
+                    Act::Prefill(
+                        "Import ",
+                        "Import <file.3dm> — merge a Rhino file into this model",
+                    ),
+                );
                 ui.separator();
                 item(ui, &mut act, "Save", "Ctrl+S", Act::Save);
                 item(ui, &mut act, "Save As…", "Ctrl+Shift+S", Act::SaveAs);
+                item(
+                    ui,
+                    &mut act,
+                    "Export Selected…",
+                    "",
+                    Act::Prefill(
+                        "Export ",
+                        "Export <file.3dm> — save only the selected objects",
+                    ),
+                );
                 ui.separator();
                 item(ui, &mut act, "Exit", "", Act::Exit);
             });
@@ -1663,17 +2323,63 @@ impl FormaApp {
                 item(ui, &mut act, "Undo", "Ctrl+Z", Act::Cmd("Undo"));
                 item(ui, &mut act, "Redo", "Ctrl+Y", Act::Cmd("Redo"));
                 ui.separator();
+                item(ui, &mut act, "Cut", "Ctrl+X", Act::Clip("Cut"));
+                item(ui, &mut act, "Copy", "Ctrl+C", Act::Clip("CopyToClipboard"));
+                item(ui, &mut act, "Paste", "Ctrl+V", Act::Clip("Paste"));
+                item(ui, &mut act, "Delete", "Del", Act::Tool(K::OnSel("Delete")));
+                ui.separator();
                 ui.menu_button("Select Objects", |ui| {
                     item(ui, &mut act, "All Objects", "Ctrl+A", Act::Cmd("SelAll"));
                     item(ui, &mut act, "None", "Esc", Act::Cmd("SelNone"));
+                    item(ui, &mut act, "Invert", "", Act::Cmd("Invert"));
+                    item(
+                        ui,
+                        &mut act,
+                        "Last Created Objects",
+                        "",
+                        Act::Cmd("SelLast"),
+                    );
+                    ui.separator();
+                    item(ui, &mut act, "Curves", "", Act::Cmd("SelCrv"));
+                    item(ui, &mut act, "Surfaces / Meshes", "", Act::Cmd("SelMesh"));
+                    item(ui, &mut act, "Points", "", Act::Cmd("SelPt"));
                 });
-                item(ui, &mut act, "Delete", "Del", Act::Cmd("Delete"));
                 ui.separator();
-                tool(ui, &mut act, "Join", ToolKind::Join);
-                tool(ui, &mut act, "Explode", ToolKind::Explode);
-                tool(ui, &mut act, "Trim", ToolKind::Trim);
-                tool(ui, &mut act, "Extend", ToolKind::Extend);
+                tool(ui, &mut act, "Join", K::Join);
+                tool(ui, &mut act, "Explode", K::Explode);
+                tool(ui, &mut act, "Trim", K::Trim);
+                tool(ui, &mut act, "Split", K::Split);
                 ui.separator();
+                ui.menu_button("Groups", |ui| {
+                    item(
+                        ui,
+                        &mut act,
+                        "Group",
+                        "Ctrl+G",
+                        Act::Tool(K::OnSel("Group")),
+                    );
+                    item(
+                        ui,
+                        &mut act,
+                        "Ungroup",
+                        "Ctrl+Shift+G",
+                        Act::Tool(K::OnSel("Ungroup")),
+                    );
+                    item(
+                        ui,
+                        &mut act,
+                        "Select Group",
+                        "",
+                        Act::Tool(K::OnSel("SelGroup")),
+                    );
+                });
+                ui.menu_button("Visibility", |ui| {
+                    item(ui, &mut act, "Hide", "Ctrl+H", Act::Tool(K::OnSel("Hide")));
+                    item(ui, &mut act, "Show", "Ctrl+Alt+H", Act::Cmd("Show"));
+                    item(ui, &mut act, "Isolate", "", Act::Tool(K::OnSel("Isolate")));
+                    item(ui, &mut act, "Lock", "Ctrl+L", Act::Tool(K::OnSel("Lock")));
+                    item(ui, &mut act, "Unlock", "Ctrl+Alt+L", Act::Cmd("Unlock"));
+                });
                 ui.menu_button("Layers", |ui| {
                     item(
                         ui,
@@ -1690,6 +2396,7 @@ impl FormaApp {
                         Act::Panel(SidePanel::Properties),
                     );
                 });
+                tool(ui, &mut act, "Match Properties", K::MatchProperties);
                 item(
                     ui,
                     &mut act,
@@ -1702,6 +2409,7 @@ impl FormaApp {
                 ui.menu_button("Zoom", |ui| {
                     item(ui, &mut act, "Zoom Extents", "ZE", Act::Submit("ze"));
                     item(ui, &mut act, "Zoom Extents All", "ZEA", Act::Submit("zea"));
+                    item(ui, &mut act, "Zoom Selected", "ZS", Act::Submit("zs"));
                 });
                 ui.menu_button("Set View", |ui| {
                     item(ui, &mut act, "Top", "", Act::Submit("top"));
@@ -1709,83 +2417,161 @@ impl FormaApp {
                     item(ui, &mut act, "Right", "", Act::Submit("right"));
                     item(ui, &mut act, "Perspective", "", Act::Submit("perspective"));
                 });
+                ui.menu_button("Display Mode", |ui| {
+                    for m in DisplayMode::ALL {
+                        item(ui, &mut act, m.name(), "", Act::Mode(m));
+                    }
+                });
                 let label = if self.maximized.is_some() {
-                    "Show 4 Viewports"
+                    "Restore Viewport Layout"
                 } else {
                     "Maximize Active Viewport"
                 };
                 item(ui, &mut act, label, "", Act::Maximize);
                 ui.separator();
                 if let Some(r) = &mut self.renderer {
-                    if ui.checkbox(&mut r.show_grid, "Grid").changed() {
+                    if ui.checkbox(&mut r.show_grid, "Grid  (F7)").changed() {
                         for v in &mut self.viewports {
                             v.dirty = true;
                         }
                     }
                 }
                 ui.checkbox(&mut self.gumball_on, "Gumball");
+                ui.checkbox(&mut self.show_osnap, "Osnap Toolbar");
             });
             ui.menu_button("Curve", |ui| {
+                tool(ui, &mut act, "Point Object", K::Point);
                 ui.menu_button("Line", |ui| {
-                    tool(ui, &mut act, "Single Line", ToolKind::Line);
-                    tool(ui, &mut act, "Polyline", ToolKind::Polyline);
+                    tool(ui, &mut act, "Single Line", K::Line);
                 });
-                tool(ui, &mut act, "Rectangle", ToolKind::Rectangle);
-                tool(ui, &mut act, "Circle", ToolKind::Circle);
-                tool(ui, &mut act, "Arc", ToolKind::Arc);
+                tool(ui, &mut act, "Polyline", K::Polyline);
+                ui.menu_button("Free-Form", |ui| {
+                    tool(ui, &mut act, "Control Points", K::Curve);
+                    tool(ui, &mut act, "Interpolate Points", K::InterpCrv);
+                });
+                tool(ui, &mut act, "Rectangle", K::Rectangle);
+                tool(ui, &mut act, "Polygon", K::Polygon);
+                tool(ui, &mut act, "Circle", K::Circle);
+                tool(ui, &mut act, "Arc", K::Arc);
+                tool(ui, &mut act, "Ellipse", K::Ellipse);
                 ui.separator();
-                tool(ui, &mut act, "Fillet Curves", ToolKind::Fillet);
-                tool(ui, &mut act, "Fillet Corners", ToolKind::FilletCorners);
-                tool(ui, &mut act, "Offset Curve", ToolKind::Offset);
-                tool(ui, &mut act, "Extend Curve", ToolKind::Extend);
-                tool(ui, &mut act, "Trim", ToolKind::Trim);
+                tool(ui, &mut act, "Fillet Curves", K::Fillet);
+                tool(ui, &mut act, "Chamfer Curves", K::Chamfer);
+                tool(ui, &mut act, "Fillet Corners", K::FilletCorners);
+                tool(ui, &mut act, "Offset Curve", K::Offset);
+                tool(ui, &mut act, "Extend Curve", K::Extend);
                 ui.separator();
                 ui.menu_button("Curve Edit Tools", |ui| {
-                    tool(ui, &mut act, "Join", ToolKind::Join);
-                    tool(ui, &mut act, "Explode", ToolKind::Explode);
+                    tool(ui, &mut act, "Join", K::Join);
+                    tool(ui, &mut act, "Explode", K::Explode);
+                    tool(ui, &mut act, "Trim", K::Trim);
+                    tool(ui, &mut act, "Split", K::Split);
+                    tool(ui, &mut act, "Flip Direction", K::OnSel("Flip"));
+                });
+                ui.menu_button("Curve From Objects", |ui| {
+                    tool(ui, &mut act, "Intersection", K::OnSel("Intersect"));
+                    tool(
+                        ui,
+                        &mut act,
+                        "Project To CPlane",
+                        K::OnSel("ProjectToCPlane"),
+                    );
                 });
             });
+            ui.menu_button("Surface", |ui| {
+                tool(ui, &mut act, "Planar Curves", K::OnSel("PlanarSrf"));
+                ui.menu_button("Extrude Curve", |ui| {
+                    tool(ui, &mut act, "Straight", K::Extrude);
+                });
+                tool(ui, &mut act, "Loft", K::OnSel("Loft"));
+                tool(ui, &mut act, "Revolve", K::Revolve);
+                tool(ui, &mut act, "Sweep 1 Rail", K::Sweep1);
+                ui.separator();
+                kernel(ui, "Offset Surface");
+                ui.label(
+                    egui::RichText::new("Surfaces are meshes until the NURBS kernel lands")
+                        .small()
+                        .weak(),
+                );
+            });
             ui.menu_button("Solid", |ui| {
-                tool(ui, &mut act, "Box", ToolKind::Box);
-                tool(ui, &mut act, "Sphere", ToolKind::Sphere);
-                tool(ui, &mut act, "Cylinder", ToolKind::Cylinder);
+                tool(ui, &mut act, "Box", K::Box);
+                tool(ui, &mut act, "Sphere", K::Sphere);
+                tool(ui, &mut act, "Cylinder", K::Cylinder);
                 ui.separator();
                 ui.menu_button("Extrude Planar Curve", |ui| {
-                    tool(ui, &mut act, "Straight", ToolKind::Extrude);
+                    tool(ui, &mut act, "Straight", K::Extrude);
                 });
+                tool(ui, &mut act, "Extrude Surface", K::ExtrudeSrf);
+                tool(ui, &mut act, "Cap Planar Holes", K::OnSel("Cap"));
                 ui.separator();
-                ui.menu_button("Boolean", |ui| {
-                    kernel(ui, "Union");
-                    kernel(ui, "Difference");
-                    kernel(ui, "Intersection");
-                });
+                kernel(ui, "Union");
+                kernel(ui, "Difference");
+                kernel(ui, "Intersection");
                 kernel(ui, "Fillet Edge");
             });
             ui.menu_button("Transform", |ui| {
-                tool(ui, &mut act, "Move", ToolKind::Move);
-                tool(ui, &mut act, "Copy", ToolKind::Copy);
-                tool(ui, &mut act, "Rotate", ToolKind::Rotate);
-                tool(ui, &mut act, "Scale", ToolKind::Scale);
-                tool(ui, &mut act, "Mirror", ToolKind::Mirror);
+                tool(ui, &mut act, "Move", K::Move);
+                tool(ui, &mut act, "Copy", K::Copy);
+                tool(ui, &mut act, "Rotate", K::Rotate);
+                ui.menu_button("Scale", |ui| {
+                    tool(ui, &mut act, "Scale 3-D", K::Scale);
+                    tool(ui, &mut act, "Scale 2-D", K::Scale2D);
+                    tool(ui, &mut act, "Scale 1-D", K::Scale1D);
+                });
+                tool(ui, &mut act, "Mirror", K::Mirror);
+                tool(ui, &mut act, "Orient: 2 Points", K::Orient);
                 ui.separator();
                 ui.menu_button("Array", |ui| {
                     item(ui, &mut act, "Rectangular", "", ARRAY_PREFILL);
-                    tool(ui, &mut act, "Linear", ToolKind::ArrayLinear);
-                    tool(ui, &mut act, "Polar", ToolKind::ArrayPolar);
+                    tool(ui, &mut act, "Linear", K::ArrayLinear);
+                    tool(ui, &mut act, "Polar", K::ArrayPolar);
                 });
+                ui.menu_button("Align", |ui| {
+                    for (label, opt) in [
+                        ("Left", "left"),
+                        ("Right", "right"),
+                        ("Top", "top"),
+                        ("Bottom", "bottom"),
+                        ("Horizontal Centers", "hcenter"),
+                        ("Vertical Centers", "vcenter"),
+                        ("Centers", "center"),
+                    ] {
+                        item(ui, &mut act, label, "", Act::Submit(align_cmd(opt)));
+                    }
+                });
+                ui.separator();
+                tool(
+                    ui,
+                    &mut act,
+                    "Project To CPlane",
+                    K::OnSel("ProjectToCPlane"),
+                );
             });
             ui.menu_button("Tools", |ui| {
                 ui.menu_button("Object Snap", |ui| {
-                    ui.checkbox(&mut self.snap.end, "End");
-                    ui.checkbox(&mut self.snap.mid, "Mid");
-                    ui.checkbox(&mut self.snap.cen, "Center");
-                    ui.checkbox(&mut self.snap.quad, "Quad");
+                    for k in SnapKind::ALL {
+                        ui.checkbox(self.snap.flag(k), k.label());
+                    }
+                    ui.checkbox(&mut self.snap.project, "Project");
+                    ui.checkbox(&mut self.snap.disabled, "Disable");
                 });
                 ui.checkbox(&mut self.snap.grid, "Grid Snap (F9)");
                 ui.checkbox(&mut self.snap.ortho, "Ortho (F8)");
+                ui.checkbox(&mut self.snap.planar, "Planar");
+            });
+            ui.menu_button("Analyze", |ui| {
+                tool(ui, &mut act, "Distance", K::Distance);
+                tool(ui, &mut act, "Length", K::OnSel("Length"));
+                ui.menu_button("Mass Properties", |ui| {
+                    tool(ui, &mut act, "Area", K::OnSel("Area"));
+                    tool(ui, &mut act, "Volume", K::OnSel("Volume"));
+                });
+                tool(ui, &mut act, "Bounding Box", K::OnSel("BoundingBox"));
+                tool(ui, &mut act, "Object Details (What)", K::OnSel("What"));
             });
             ui.menu_button("Help", |ui| {
-                item(ui, &mut act, "Commands, keys and mouse", "", Act::Help);
+                item(ui, &mut act, "Commands, keys and mouse", "F1", Act::Help);
             });
         });
         if let Some(a) = act {
@@ -1793,17 +2579,71 @@ impl FormaApp {
         }
     }
 
-    /// Right panel with Properties and Layers tabs.
+    /// Right panel with Properties, Layers and Help tabs.
     fn ui_side(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
-            ui.selectable_value(&mut self.side_panel, SidePanel::Properties, "Properties");
-            ui.selectable_value(&mut self.side_panel, SidePanel::Layers, "Layers");
+            ui.spacing_mut().item_spacing.x = 0.0;
+            for (p, name) in [
+                (SidePanel::Properties, "Properties"),
+                (SidePanel::Layers, "Layers"),
+                (SidePanel::Help, "Help"),
+            ] {
+                let selected = self.side_panel == p;
+                let text = egui::RichText::new(name).size(12.5);
+                let b = egui::Button::new(if selected { text.strong() } else { text })
+                    .fill(if selected {
+                        Color32::WHITE
+                    } else {
+                        theme::PANEL
+                    })
+                    .stroke(Stroke::new(
+                        1.0,
+                        if selected {
+                            theme::BORDER
+                        } else {
+                            theme::PANEL
+                        },
+                    ));
+                if ui.add(b).clicked() {
+                    self.side_panel = p;
+                }
+            }
         });
         ui.separator();
         match self.side_panel {
             SidePanel::Properties => self.ui_properties(ui),
             SidePanel::Layers => self.ui_layers(ui),
+            SidePanel::Help => self.ui_help(ui),
         }
+    }
+
+    fn ui_help(&mut self, ui: &mut egui::Ui) {
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            if let Some(t) = &self.tool {
+                ui.heading(t.kind.name());
+                ui.label(t.kind.tooltip());
+                ui.label(egui::RichText::new(t.prompt()).weak());
+                ui.separator();
+            }
+            ui.label(egui::RichText::new("Mouse").strong());
+            ui.label("Left: pick / select · drag →: window · drag ←: crossing\nRight drag: rotate (pan in Top/Front/Right) · Shift+right / middle: pan · wheel: zoom\nRight click: Enter (repeat last command)");
+            ui.add_space(4.0);
+            ui.label(egui::RichText::new("Keys").strong());
+            ui.label("Enter / Space: confirm or repeat · Esc: cancel\nCtrl+Z/Y undo/redo · Ctrl+C/X/V clipboard · Ctrl+G group · Ctrl+H hide · Ctrl+L lock\nF3 properties · F7 grid · F8 Ortho · F9 Grid Snap");
+            ui.add_space(4.0);
+            ui.label(egui::RichText::new("Commands").strong());
+            for k in ToolKind::CURVES
+                .iter()
+                .chain(&ToolKind::CURVE_TOOLS)
+                .chain(&ToolKind::SURFACES)
+                .chain(&ToolKind::SOLIDS)
+                .chain(&ToolKind::TRANSFORMS)
+                .chain(&ToolKind::VISIBILITY)
+                .chain(&ToolKind::ANALYZE)
+            {
+                ui.label(egui::RichText::new(k.tooltip()).small());
+            }
+        });
     }
 
     fn ui_properties(&mut self, ui: &mut egui::Ui) {
@@ -1941,6 +2781,21 @@ impl FormaApp {
                     ));
                     ui.end_row();
                 }
+                let groups: std::collections::BTreeSet<Option<u32>> =
+                    sel.iter().map(|o| o.group).collect();
+                if !groups.contains(&None) || groups.len() > 1 {
+                    ui.weak("Group");
+                    ui.label(match groups.iter().next() {
+                        Some(Some(g)) if groups.len() == 1 => format!("group {g}"),
+                        _ => "varies".into(),
+                    });
+                    ui.end_row();
+                }
+                if sel.iter().any(|o| o.locked) {
+                    ui.weak("Locked");
+                    ui.label("yes");
+                    ui.end_row();
+                }
                 if sel.len() == 1 {
                     if let Some(c) = sel[0].geometry.to_chain() {
                         let len: f64 = c.segs.iter().map(forma_geom::Seg::length).sum();
@@ -1964,7 +2819,7 @@ impl FormaApp {
         let mut cmd: Option<String> = None;
         ui.horizontal(|ui| {
             if ui
-                .button("+ New layer")
+                .button("＋ New Layer")
                 .on_hover_text("New layer (becomes current)")
                 .clicked()
             {
@@ -1978,6 +2833,17 @@ impl FormaApp {
                 };
                 cmd = Some(format!("Layer {name}"));
             }
+            if ui
+                .add_enabled(
+                    self.has_selection(),
+                    egui::Button::new("Move Selection Here"),
+                )
+                .on_hover_text("Move the selected objects to the current layer")
+                .clicked()
+            {
+                let doc = self.engine.doc();
+                cmd = Some(format!("ChangeLayer {}", doc.layer(doc.current_layer).name));
+            }
         });
         ui.add_space(4.0);
         let doc = self.engine.doc();
@@ -1988,94 +2854,146 @@ impl FormaApp {
         let current = doc.current_layer.0;
         let has_sel = self.has_selection();
         let layers = doc.layers.clone();
+        // Header like Rhino's layer panel.
+        let header = |ui: &mut egui::Ui| {
+            ui.horizontal(|ui| {
+                ui.add_sized(
+                    [130.0, 16.0],
+                    egui::Label::new(egui::RichText::new("Name").small().weak()),
+                );
+                ui.add_sized(
+                    [18.0, 16.0],
+                    egui::Label::new(egui::RichText::new("").small()),
+                );
+                ui.add_sized(
+                    [18.0, 16.0],
+                    egui::Label::new(egui::RichText::new("On").small().weak()),
+                );
+                ui.add_sized(
+                    [18.0, 16.0],
+                    egui::Label::new(egui::RichText::new("Lk").small().weak()),
+                );
+                ui.add_sized(
+                    [24.0, 16.0],
+                    egui::Label::new(egui::RichText::new("Color").small().weak()),
+                );
+            });
+        };
+        header(ui);
+        ui.separator();
         egui::ScrollArea::vertical().show(ui, |ui| {
-            egui::Grid::new("layers")
-                .num_columns(5)
-                .spacing([6.0, 3.0])
-                .striped(true)
-                .show(ui, |ui| {
-                    for (i, layer) in layers.iter().enumerate() {
-                        let depth = layer.name.matches("::").count();
-                        let short = layer
-                            .name
-                            .rsplit("::")
-                            .next()
-                            .unwrap_or(&layer.name)
-                            .to_string();
-                        ui.horizontal(|ui| {
-                            ui.add_space(depth as f32 * 12.0);
-                            let text = if i == current {
-                                egui::RichText::new(format!("✔ {short}")).strong()
-                            } else {
-                                egui::RichText::new(short)
-                            };
-                            let resp = ui
-                                .add(egui::Label::new(text).sense(egui::Sense::click()))
-                                .on_hover_text(format!(
-                                    "{} — {} objects\nClick: make current · Right click: more",
-                                    layer.name, counts[i]
-                                ));
-                            if resp.clicked() {
-                                cmd = Some(format!("Layer {}", layer.name));
-                            }
-                            resp.context_menu(|ui| {
-                                if ui.button("Make current").clicked() {
-                                    cmd = Some(format!("Layer {}", layer.name));
-                                    ui.close();
-                                }
-                                if ui
-                                    .add_enabled(
-                                        has_sel,
-                                        egui::Button::new("Move selected objects here"),
-                                    )
-                                    .clicked()
-                                {
-                                    cmd = Some(format!("ChangeLayer {}", layer.name));
-                                    ui.close();
-                                }
-                                if ui.button("Select objects on this layer").clicked() {
-                                    let ids: Vec<String> = doc
-                                        .objects()
-                                        .filter(|o| o.layer.0 == i)
-                                        .map(|o| format!("#{}", o.id.0))
-                                        .collect();
-                                    if !ids.is_empty() {
-                                        cmd = Some(format!("SelNone; Select {}", ids.join(" ")));
-                                    }
-                                    ui.close();
-                                }
-                            });
-                        });
-                        // Visible (eye) and lock toggles.
-                        let eye = if layer.visible { "👁" } else { "–" };
-                        if ui
-                            .add(egui::Button::new(eye).frame(false))
-                            .on_hover_text("Show / hide")
-                            .clicked()
-                        {
-                            let on = if layer.visible { "off" } else { "on" };
-                            cmd = Some(format!("LayerVisible {on} {}", layer.name));
-                        }
-                        let lock = if layer.locked { "🔒" } else { "🔓" };
-                        if ui
-                            .add(egui::Button::new(lock).frame(false))
-                            .on_hover_text("Lock / unlock")
-                            .clicked()
-                        {
-                            let on = if layer.locked { "off" } else { "on" };
-                            cmd = Some(format!("LayerLock {on} {}", layer.name));
-                        }
-                        let mut c = layer.color;
-                        if ui.color_edit_button_srgb(&mut c).changed() {
-                            cmd = Some(format!(
-                                "LayerColor {},{},{} {}",
-                                c[0], c[1], c[2], layer.name
-                            ));
-                        }
-                        ui.weak(counts[i].to_string());
-                        ui.end_row();
+            for (i, layer) in layers.iter().enumerate() {
+                let depth = layer.name.matches("::").count();
+                let short = layer
+                    .name
+                    .rsplit("::")
+                    .next()
+                    .unwrap_or(&layer.name)
+                    .to_string();
+                let row = ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 4.0;
+                    let (name_rect, name_resp) =
+                        ui.allocate_exact_size(egui::vec2(130.0, 20.0), egui::Sense::click());
+                    if i == current {
+                        ui.painter().rect_filled(name_rect, 2.0, theme::ACCENT_BG);
+                    } else if name_resp.hovered() {
+                        ui.painter()
+                            .rect_filled(name_rect, 2.0, Color32::from_rgb(235, 243, 251));
                     }
+                    let indent = depth as f32 * 12.0;
+                    if depth > 0 {
+                        ui.painter().text(
+                            name_rect.left_center() + egui::vec2(indent - 8.0, 0.0),
+                            egui::Align2::LEFT_CENTER,
+                            "└",
+                            egui::FontId::proportional(11.0),
+                            theme::WEAK,
+                        );
+                    }
+                    ui.painter().text(
+                        name_rect.left_center() + egui::vec2(indent + 4.0, 0.0),
+                        egui::Align2::LEFT_CENTER,
+                        &short,
+                        egui::FontId::proportional(13.0),
+                        if layer.visible {
+                            theme::TEXT
+                        } else {
+                            theme::WEAK
+                        },
+                    );
+                    let name_resp = name_resp.on_hover_text(format!(
+                        "{} — {} objects\nDouble-click: make current · Right click: more",
+                        layer.name, counts[i]
+                    ));
+                    if name_resp.double_clicked() || name_resp.clicked() {
+                        cmd = Some(format!("Layer {}", layer.name));
+                    }
+                    name_resp.context_menu(|ui| {
+                        if ui.button("Set Current").clicked() {
+                            cmd = Some(format!("Layer {}", layer.name));
+                            ui.close();
+                        }
+                        if ui
+                            .add_enabled(has_sel, egui::Button::new("Change Object Layer"))
+                            .clicked()
+                        {
+                            cmd = Some(format!("ChangeLayer {}", layer.name));
+                            ui.close();
+                        }
+                        if ui.button("Select Objects").clicked() {
+                            let ids: Vec<String> = doc
+                                .objects()
+                                .filter(|o| o.layer.0 == i)
+                                .map(|o| format!("#{}", o.id.0))
+                                .collect();
+                            if !ids.is_empty() {
+                                cmd = Some(format!("SelNone; Select {}", ids.join(" ")));
+                            }
+                            ui.close();
+                        }
+                    });
+                    // Current check mark.
+                    let (r, resp) =
+                        ui.allocate_exact_size(egui::vec2(18.0, 18.0), egui::Sense::click());
+                    if i == current {
+                        ui.painter().text(
+                            r.center(),
+                            egui::Align2::CENTER_CENTER,
+                            "✔",
+                            egui::FontId::proportional(13.0),
+                            theme::TEXT,
+                        );
+                    }
+                    if resp.on_hover_text("Current layer").clicked() {
+                        cmd = Some(format!("Layer {}", layer.name));
+                    }
+                    // On / off: a light bulb.
+                    let (r, resp) =
+                        ui.allocate_exact_size(egui::vec2(18.0, 18.0), egui::Sense::click());
+                    paint_bulb(ui.painter(), r, layer.visible);
+                    if resp.on_hover_text("Show / hide").clicked() {
+                        let on = if layer.visible { "off" } else { "on" };
+                        cmd = Some(format!("LayerVisible {on} {}", layer.name));
+                    }
+                    // Lock: a padlock.
+                    let (r, resp) =
+                        ui.allocate_exact_size(egui::vec2(18.0, 18.0), egui::Sense::click());
+                    paint_lock(ui.painter(), r, layer.locked);
+                    if resp.on_hover_text("Lock / unlock").clicked() {
+                        let on = if layer.locked { "off" } else { "on" };
+                        cmd = Some(format!("LayerLock {on} {}", layer.name));
+                    }
+                    let mut c = layer.color;
+                    if ui.color_edit_button_srgb(&mut c).changed() {
+                        cmd = Some(format!(
+                            "LayerColor {},{},{} {}",
+                            c[0], c[1], c[2], layer.name
+                        ));
+                    }
+                    ui.label(egui::RichText::new(counts[i].to_string()).small().weak());
                 });
+                let _ = row;
+            }
         });
         if let Some(c) = cmd {
             if let Some(rest) = c.strip_prefix("SelNone; ") {
@@ -2097,36 +3015,48 @@ impl FormaApp {
         }
     }
 
+    /// Command history and prompt, docked at the top like Rhino.
     fn ui_command_line(&mut self, ui: &mut egui::Ui) {
-        // Claim the whole panel, otherwise it shrinks to its contents every frame.
         ui.set_min_height(ui.available_height());
-        let log_height = (ui.available_height() - 30.0).max(20.0);
-        egui::ScrollArea::vertical()
-            .max_height(log_height)
-            .min_scrolled_height(log_height)
-            .stick_to_bottom(true)
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                for (kind, line) in &self.log {
-                    let t = egui::RichText::new(line).monospace();
-                    match kind {
-                        LogKind::Normal => ui.label(t),
-                        LogKind::Command => ui.label(t.weak()),
-                        LogKind::Error => ui.colored_label(ui.visuals().error_fg_color, t),
-                    };
-                }
-            });
+        let log_height = (ui.available_height() - 28.0).max(16.0);
+        let frame = egui::Frame::NONE
+            .fill(Color32::WHITE)
+            .stroke(Stroke::new(1.0, theme::BORDER))
+            .inner_margin(egui::Margin::symmetric(6, 2));
+        frame.show(ui, |ui| {
+            egui::ScrollArea::vertical()
+                .max_height(log_height)
+                .min_scrolled_height(log_height)
+                .stick_to_bottom(true)
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    ui.spacing_mut().item_spacing.y = 0.0;
+                    for (kind, line) in &self.log {
+                        let t = egui::RichText::new(line).monospace().size(12.5);
+                        match kind {
+                            LogKind::Normal => ui.label(t),
+                            LogKind::Command => ui.label(t.color(theme::WEAK)),
+                            LogKind::Error => ui.label(t.color(Color32::from_rgb(190, 30, 30))),
+                        };
+                    }
+                });
+        });
         ui.horizontal(|ui| {
             let prompt = match (&self.tool, &self.gumball_typed) {
+                _ if self.pending.is_some() => {
+                    let (line, what) = self.pending.as_ref().expect("pending");
+                    format!("{line} — {what} (Enter to run):")
+                }
                 (_, Some((h, _))) => format!("Gumball — {}:", h.describe()),
                 (Some(t), None) => format!("{}:", t.prompt()),
                 (None, None) => "Command:".to_string(),
             };
-            ui.label(egui::RichText::new(prompt).monospace().strong());
+            ui.label(egui::RichText::new(prompt).monospace().size(13.0));
             let id = egui::Id::new(CMD_ID);
             let edit = egui::TextEdit::singleline(&mut self.command)
                 .id(id)
                 .font(egui::TextStyle::Monospace)
+                .frame(egui::Frame::NONE)
                 .desired_width(f32::INFINITY);
             let resp = ui.add(edit);
             if self.focus_command {
@@ -2142,59 +3072,221 @@ impl FormaApp {
             }
             if resp.changed() && self.command.ends_with(' ') {
                 let text = std::mem::take(&mut self.command);
-                self.submit(&text);
+                self.submit_space(&text);
             }
+        });
+    }
+
+    /// Rhino's Osnap bar: one checkbox per object snap, plus Project and Disable.
+    fn ui_osnap(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 10.0;
+            ui.spacing_mut().icon_spacing = 3.0;
+            let disabled = self.snap.disabled;
+            for k in SnapKind::ALL {
+                ui.add_enabled_ui(!disabled, |ui| {
+                    ui.checkbox(self.snap.flag(k), egui::RichText::new(k.label()).size(12.5));
+                });
+            }
+            ui.add_enabled_ui(!disabled, |ui| {
+                ui.checkbox(
+                    &mut self.snap.project,
+                    egui::RichText::new("Project").size(12.5),
+                );
+            });
+            ui.checkbox(
+                &mut self.snap.disabled,
+                egui::RichText::new("Disable").size(12.5),
+            );
         });
     }
 
     fn ui_status(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
-            let coords = match &self.hover {
+            let (plane_name, coords) = match &self.hover {
                 Some(h) => {
                     let (u, v, w) = self.viewports[h.viewport].cplane().coords(h.point);
-                    format!(
-                        "{}  x {:.2}  y {:.2}  z {:.2}",
-                        self.viewports[h.viewport].name(),
-                        u,
-                        v,
-                        w
-                    )
+                    ("CPlane", format!("x {u:>9.3}   y {v:>9.3}   z {w:>8.3}"))
                 }
-                None => "—".to_string(),
+                None => ("CPlane", "x —   y —   z —".to_string()),
             };
-            ui.monospace(coords);
+            ui.label(egui::RichText::new(plane_name).size(12.5));
+            ui.add_sized(
+                [250.0, 18.0],
+                egui::Label::new(egui::RichText::new(coords).monospace().size(12.5)),
+            );
             ui.separator();
-            ui.weak(self.engine.doc().units.abbreviation());
+            let units = match self.engine.doc().units {
+                LengthUnit::Millimeters => "Millimeters",
+                LengthUnit::Centimeters => "Centimeters",
+                LengthUnit::Meters => "Meters",
+                LengthUnit::Inches => "Inches",
+                LengthUnit::Feet => "Feet",
+            };
+            ui.label(egui::RichText::new(units).size(12.5));
             ui.separator();
-            ui.toggle_value(&mut self.snap.grid, "Grid Snap")
-                .on_hover_text("F9");
-            ui.toggle_value(&mut self.snap.ortho, "Ortho")
-                .on_hover_text("F8, or hold Shift");
-            ui.add(
-                egui::DragValue::new(&mut self.snap.step)
-                    .speed(0.1)
-                    .range(0.0001..=1.0e6)
-                    .prefix("step "),
+            // Current layer: colour swatch and a drop-down to change it.
+            let doc = self.engine.doc();
+            let cur = doc.layer(doc.current_layer);
+            let [r, g, b] = cur.color;
+            let (sw, _) = ui.allocate_exact_size(egui::vec2(12.0, 12.0), egui::Sense::hover());
+            ui.painter()
+                .rect_filled(sw, 1.0, Color32::from_rgb(r, g, b));
+            ui.painter()
+                .rect_stroke(sw, 1.0, Stroke::new(1.0, theme::WEAK), StrokeKind::Inside);
+            let mut pick: Option<String> = None;
+            egui::ComboBox::from_id_salt("status-layer")
+                .selected_text(egui::RichText::new(cur.name.clone()).size(12.5))
+                .width(130.0)
+                .show_ui(ui, |ui| {
+                    for l in &doc.layers {
+                        if ui.selectable_label(false, &l.name).clicked() {
+                            pick = Some(l.name.clone());
+                        }
+                    }
+                });
+            if let Some(n) = pick {
+                self.run_engine(&format!("Layer {n}"));
+            }
+            ui.separator();
+            let pane = |ui: &mut egui::Ui, on: &mut bool, label: &str, tip: &str| {
+                let text = egui::RichText::new(label).size(12.5);
+                let text = if *on {
+                    text.strong().color(Color32::BLACK)
+                } else {
+                    text.color(theme::WEAK)
+                };
+                if ui
+                    .add(egui::Button::new(text).frame(false))
+                    .on_hover_text(tip)
+                    .clicked()
+                {
+                    *on = !*on;
+                }
+            };
+            pane(
+                ui,
+                &mut self.snap.grid,
+                "Grid Snap",
+                "F9 — snap to the grid",
+            );
+            pane(
+                ui,
+                &mut self.snap.ortho,
+                "Ortho",
+                "F8 or hold Shift — horizontal / vertical only",
+            );
+            pane(
+                ui,
+                &mut self.snap.planar,
+                "Planar",
+                "Keep points on the plane of the first point",
+            );
+            let mut osnap_on = !self.snap.disabled;
+            pane(ui, &mut osnap_on, "Osnap", "Object snaps on / off");
+            self.snap.disabled = !osnap_on;
+            ui.add_enabled(
+                false,
+                egui::Button::new(egui::RichText::new("SmartTrack").size(12.5)).frame(false),
             )
-            .on_hover_text("Grid snap step");
+            .on_disabled_hover_text("Not available yet");
+            pane(
+                ui,
+                &mut self.gumball_on,
+                "Gumball",
+                "Axis handles on the selection",
+            );
+            ui.add_enabled(
+                false,
+                egui::Button::new(egui::RichText::new("Record History").size(12.5)).frame(false),
+            )
+            .on_disabled_hover_text("Not available yet");
+            let filter = &mut self.filter;
+            ui.menu_button(egui::RichText::new("Filter").size(12.5), |ui| {
+                ui.checkbox(&mut filter.curves, "Curves");
+                ui.checkbox(&mut filter.surfaces, "Surfaces / meshes");
+                ui.checkbox(&mut filter.points, "Points");
+            });
             ui.separator();
-            ui.weak("Osnap:");
-            ui.toggle_value(&mut self.snap.end, "End");
-            ui.toggle_value(&mut self.snap.mid, "Mid");
-            ui.toggle_value(&mut self.snap.cen, "Cen");
-            ui.toggle_value(&mut self.snap.quad, "Quad");
+            if let Some(r) = self.renderer.as_ref() {
+                let _ = r;
+            }
+            let mins = self.saved_at.elapsed().as_secs() / 60;
+            ui.label(
+                egui::RichText::new(format!("Minutes from last save: {mins}"))
+                    .size(12.5)
+                    .color(theme::WEAK),
+            );
             ui.separator();
             let doc = self.engine.doc();
-            ui.weak(format!("Layer: {}", doc.layer(doc.current_layer).name));
-            ui.separator();
-            ui.weak(format!(
-                "{} objects · {} selected · {} triangles",
-                doc.len(),
-                self.engine.ctx.selection.len(),
-                self.triangles
-            ));
+            ui.label(
+                egui::RichText::new(format!(
+                    "{} objects · {} selected",
+                    doc.len(),
+                    self.engine.ctx.selection.len()
+                ))
+                .size(12.5)
+                .color(theme::WEAK),
+            );
         });
     }
+}
+
+/// Rhino-style Align command for the active construction plane.
+fn align_cmd(opt: &str) -> &'static str {
+    match opt {
+        "left" => "Align left",
+        "right" => "Align right",
+        "top" => "Align top",
+        "bottom" => "Align bottom",
+        "hcenter" => "Align hcenter",
+        "vcenter" => "Align vcenter",
+        _ => "Align center",
+    }
+}
+
+fn paint_bulb(p: &egui::Painter, r: Rect, on: bool) {
+    let c = r.center() - egui::vec2(0.0, 2.0);
+    let fill = if on {
+        Color32::from_rgb(255, 214, 40)
+    } else {
+        Color32::from_rgb(225, 225, 225)
+    };
+    p.circle_filled(c, 5.0, fill);
+    p.circle_stroke(c, 5.0, Stroke::new(1.0, Color32::from_gray(90)));
+    let base = Rect::from_center_size(c + egui::vec2(0.0, 6.5), egui::vec2(5.0, 3.0));
+    p.rect_filled(base, 0.5, Color32::from_gray(110));
+}
+
+fn paint_lock(p: &egui::Painter, r: Rect, locked: bool) {
+    let body = Rect::from_center_size(r.center() + egui::vec2(0.0, 2.5), egui::vec2(10.0, 7.0));
+    let fill = if locked {
+        Color32::from_rgb(230, 170, 30)
+    } else {
+        Color32::from_rgb(235, 235, 235)
+    };
+    p.rect_filled(body, 1.0, fill);
+    p.rect_stroke(
+        body,
+        1.0,
+        Stroke::new(1.0, Color32::from_gray(90)),
+        StrokeKind::Inside,
+    );
+    let cx = if locked {
+        body.center().x
+    } else {
+        body.center().x + 3.0
+    };
+    let pts: Vec<Pos2> = (0..=12)
+        .map(|i| {
+            let a = std::f32::consts::PI * i as f32 / 12.0;
+            egui::pos2(cx + 3.2 * a.cos(), body.top() - 3.8 * a.sin())
+        })
+        .collect();
+    p.add(egui::Shape::line(
+        pts,
+        Stroke::new(1.3, Color32::from_gray(90)),
+    ));
 }
 
 impl eframe::App for FormaApp {
@@ -2217,36 +3309,78 @@ impl eframe::App for FormaApp {
 
         let title = match &self.engine.doc().path {
             Some(p) => format!(
-                "Forma — {}",
+                "{} — Forma",
                 std::path::Path::new(p)
                     .file_name()
                     .map_or(p.clone(), |n| n.to_string_lossy().into_owned())
             ),
-            None => "Forma — senza titolo".to_string(),
+            None => "Untitled — Forma".to_string(),
         };
         if title != self.title {
             ctx.send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
             self.title = title;
         }
 
-        egui::Panel::top("menu").show(ui, |ui| self.ui_menu(ui));
-        egui::Panel::bottom("status").show(ui, |ui| self.ui_status(ui));
-        egui::Panel::bottom("command")
+        let strip = egui::Frame::NONE
+            .fill(theme::STRIP)
+            .inner_margin(egui::Margin::symmetric(6, 2));
+        egui::Panel::top("menu")
+            .frame(
+                egui::Frame::NONE
+                    .fill(Color32::WHITE)
+                    .inner_margin(egui::Margin::symmetric(4, 1)),
+            )
+            .show(ui, |ui| self.ui_menu(ui));
+        egui::Panel::top("command")
             .resizable(true)
-            .default_size(130.0)
-            .size_range(60.0..=500.0)
+            .default_size(92.0)
+            .size_range(56.0..=400.0)
+            .frame(
+                egui::Frame::NONE
+                    .fill(theme::PANEL)
+                    .inner_margin(egui::Margin::symmetric(4, 3)),
+            )
             .show(ui, |ui| self.ui_command_line(ui));
+        egui::Panel::top("tabs")
+            .frame(
+                egui::Frame::NONE
+                    .fill(theme::STRIP)
+                    .inner_margin(egui::Margin {
+                        left: 4,
+                        right: 4,
+                        top: 3,
+                        bottom: 3,
+                    }),
+            )
+            .show(ui, |ui| self.ui_tabs(ui));
+        egui::Panel::bottom("status")
+            .frame(strip)
+            .show(ui, |ui| self.ui_status(ui));
+        if self.show_osnap {
+            egui::Panel::bottom("osnap")
+                .frame(strip)
+                .show(ui, |ui| self.ui_osnap(ui));
+        }
         egui::Panel::left("tools")
             .resizable(false)
-            .exact_size(80.0)
+            .exact_size(72.0)
+            .frame(
+                egui::Frame::NONE
+                    .fill(theme::PANEL)
+                    .inner_margin(egui::Margin::symmetric(2, 4)),
+            )
             .show(ui, |ui| self.ui_toolbar(ui));
         egui::Panel::right("side")
             .resizable(true)
-            .default_size(260.0)
+            .default_size(280.0)
+            .frame(
+                egui::Frame::NONE
+                    .fill(theme::PANEL)
+                    .inner_margin(egui::Margin::same(6)),
+            )
             .show(ui, |ui| self.ui_side(ui));
-        egui::Panel::top("tabs").show(ui, |ui| self.ui_tabs(ui));
         egui::CentralPanel::default()
-            .frame(egui::Frame::NONE.fill(Color32::from_gray(60)))
+            .frame(egui::Frame::NONE.fill(Color32::from_gray(150)))
             .show(ui, |ui| self.ui_viewports(ui, frame));
 
         // Changes made by panels this frame (commands, layer toggles) need a redraw.
@@ -2257,5 +3391,7 @@ impl eframe::App for FormaApp {
         {
             ctx.request_repaint();
         }
+        // Minutes-from-last-save counter.
+        ctx.request_repaint_after(std::time::Duration::from_secs(30));
     }
 }

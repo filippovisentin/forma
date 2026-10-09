@@ -1,76 +1,65 @@
-FORMA 0.3 — modellatore personale in stile Rhino
-=================================================
+FORMA 0.4 — modellatore personale in stile Rhino 8
+==================================================
 
 Avvio
   Doppio clic su forma.exe. Se Windows mostra "PC protetto da Windows":
   "Ulteriori informazioni" -> "Esegui comunque" (l'app non è firmata).
 
-Interfaccia
-  4 viste (Top, Perspective, Front, Right). Doppio clic sul titolo di una vista
-  per ingrandirla / tornare a 4. In alto i menu (con sottomenu come Rhino) e le
-  schede Standard / Curve Tools / Solid Tools / Transform / Set View; a sinistra
-  la barra strumenti; a destra i pannelli Properties (F3) e Layers; in basso la
-  riga di comando e la barra di stato.
+Interfaccia (come Rhino 8)
+  In alto: menu, riga di comando con lo storico, schede (Standard, Set View,
+  Display, Select, Visibility, Transform, Curve Tools, Surface Tools, Solid
+  Tools, Analyze). A sinistra la barra strumenti principale. A destra i pannelli
+  Properties (F3), Layers e Help. In basso le schede delle viste, la barra Osnap
+  e la barra di stato (Grid Snap, Ortho, Planar, Osnap, Gumball, Filter).
+  Clic sul titolo di una vista ("Top ▾"): cambia vista, modalità di
+  visualizzazione (Wireframe, Shaded, Ghosted, X-Ray), massimizza.
+  Doppio clic sul titolo: massimizza / torna a 4 viste.
 
-Gumball (oggetti selezionati)
-  Frecce rossa/verde/blu ..... trascina per spostare lungo X / Y / Z
-  Quadratini ................. trascina per spostare nel piano
-  Archi ...................... trascina per ruotare (a scatti di 5° con Grid Snap)
-  Clic su una maniglia ....... scrivi la distanza (o l'angolo) e Invio
-  Si attiva/disattiva dal pulsante "Gumball" (scheda Standard) o dal menu View.
-
-Mouse (come Rhino)
-  Sinistro ................... seleziona / clicca punti
-  Trascina a destra (→) ...... selezione a finestra (oggetti interi)
-  Trascina a sinistra (←) .... selezione crossing (oggetti toccati)
-  Shift+clic / Ctrl+clic ..... aggiungi / togli dalla selezione
-  Destro trascinato .......... ruota (Perspective) / sposta (Top, Front, Right)
-  Shift+destro, rotella premuta  sposta la vista
-  Rotella .................... zoom verso il cursore
-  Clic destro ................ Invio (conferma o ripete l'ultimo comando)
+Mouse
+  Sinistro: seleziona / clicca punti · trascina → finestra · trascina ← crossing
+  Shift+clic aggiunge, Ctrl+clic toglie dalla selezione
+  Destro trascinato: ruota (Perspective) / sposta (Top, Front, Right)
+  Shift+destro o rotella premuta: sposta · rotella: zoom · clic destro: Invio
 
 Tastiera
-  Scrivi direttamente: il testo va nella riga di comando.
-  Invio / Spazio = conferma o ripete · Esc = annulla · Canc = elimina
-  F8 = Ortho (o tieni premuto Shift) · F9 = Grid Snap · F7 = griglia
-  Ctrl+Z / Ctrl+Y / Ctrl+A / Ctrl+S / Ctrl+O / Ctrl+N
+  Scrivi direttamente: il testo va nella riga di comando. Spazio = Invio, ma i
+  comandi che chiedono valori (es. Select #2 #3, Layer Muri) aspettano Invio.
+  Esc annulla · Canc elimina · Ctrl+Z/Y · Ctrl+C/X/V copia/taglia/incolla
+  Ctrl+G gruppo · Ctrl+Shift+G separa · Ctrl+H nascondi · Ctrl+Alt+H mostra
+  Ctrl+L blocca · Ctrl+Alt+L sblocca · Ctrl+J Join · F1 aiuto · F3 proprietà
+  F7 griglia · F8 Ortho · F9 Grid Snap
 
-Coordinate (nel piano della vista attiva)
-  100,50        assoluto            @100,50   relativo all'ultimo punto
-  @300<45       distanza<angolo     300       lunghezza verso il cursore
+Gumball (oggetti selezionati)
+  Frecce: sposta lungo X/Y/Z · quadratini: sposta nel piano · archi: ruota
+  Clic su una maniglia: scrivi distanza o angolo e Invio.
 
-Comandi
-  Curve:     Line, Polyline (C chiude), Rectangle, Circle, Arc
-  Solidi:    Box, Cylinder, Sphere, ExtrudeCrv (curve chiuse -> solido)
-  Modifica:  Move, Copy, Rotate, Scale, Mirror, Delete,
-             Array (nx ny nz dx,dy,dz), ArrayLinear, ArrayPolar
-  Curve 2D:  Offset (scrivi la distanza, poi clicca il lato), Trim (seleziona i
-             tagli, Invio, poi clicca i pezzi da togliere), Extend (seleziona i
-             bordi, Invio, poi clicca vicino all'estremità), Fillet (raggio, poi
-             due linee), FilletCorners (raccorda tutti gli angoli di una polilinea)
-  Unisci:    Join (curve che si toccano -> polycurve; mesh -> una mesh),
-             Explode (polilinee/polycurve -> segmenti; box -> facce)
-  Selezione: SelAll, SelNone
-  Layer:     Layer <nome> (corrente), ChangeLayer <nome> (sposta la selezione)
-             oppure clic sul nome nel pannello / tasto destro; nel pannello
-             Layers: occhio = mostra/nascondi, lucchetto = blocca, quadratino
-             colorato = colore del layer
-  Colori:    pannello Properties (F3): layer dell'oggetto, colore "By Layer" o
-             personalizzato; da riga di comando SetObjectColor rosso / 255,0,0 /
-             #ff0000 / ByLayer, LayerColor <colore> [layer]
-  File:      New [mm|cm|m], Open, Save, Save As
-  Viste:     ZE (zoom estensioni vista attiva), ZEA (tutte), Top, Front, Right,
-             Perspective · Help = elenco completo
+Comandi principali (si scrivono come in Rhino)
+  Curve:      Point, Line, Polyline, Curve, InterpCrv, Rectangle, Circle, Arc,
+              Ellipse, Polygon
+  Modifica:   Offset, Trim, Split, Extend, Fillet, Chamfer, FilletCorners,
+              Join, Explode, Flip, Intersect, ProjectToCPlane
+  Superfici:  PlanarSrf, ExtrudeCrv, ExtrudeSrf, Loft, Revolve, Sweep1, Cap
+  Solidi:     Box, Cylinder, Sphere
+  Trasforma:  Move, Copy, Rotate, Scale, Scale1D, Scale2D, Mirror, Orient,
+              Align, Array, ArrayLinear, ArrayPolar
+  Visibilità: Hide, Show, Isolate, Lock, Unlock, Group, Ungroup
+  Selezione:  SelAll, SelNone, Invert, SelLast, SelCrv, SelMesh, SelPt, SelGroup
+  Analisi:    Distance, Length, Area, Volume, BoundingBox, What
+  Attributi:  Layer, ChangeLayer, SetObjectColor, LayerColor, MatchProperties
+  File:       New, Open, Import, Save, Save As, Export (solo selezionati)
+  Viste:      ZE, ZEA, ZS, Top, Front, Right, Perspective,
+              Wireframe, Shaded, Ghosted, XRay
 
-Snap (barra di stato)
-  End, Mid, Cen, Quad sugli oggetti; Grid Snap con passo regolabile; Ortho.
+Osnap
+  End, Near, Point, Mid, Cen, Int, Perp, Tan, Quad, Knot, Vertex, più
+  Project (proietta sul piano) e Disable.
 
-Note
+Limiti di questa versione
+  - Loft, Revolve, Sweep1, PlanarSrf, ExtrudeSrf e Cap creano mesh, non
+    superfici NURBS. Curve, InterpCrv ed Ellipse sono vere NURBS.
+  - BooleanUnion/Difference/Intersection e FilletEdge arriveranno con il kernel
+    OpenCascade (nei menu sono visibili ma disattivati).
   - Salvando un file aperto da Rhino, la prima volta Forma propone un nuovo nome
     (nome-forma.3dm): le superfici importate vengono salvate come mesh.
-  - Booleane (BooleanUnion/Difference) e raccordi sugli spigoli dei solidi
-    arriveranno con il kernel OpenCascade: nei menu sono visibili ma disattivati.
-  - Offset/Trim/Extend lavorano su linee, polilinee, archi e cerchi nel loro
-    piano (le curve importate da Rhino arrivano come polilinee).
 
 forma-cli.exe: versione a riga di comando (info, render in PNG, script).

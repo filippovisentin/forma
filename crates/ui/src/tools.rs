@@ -6,172 +6,357 @@ use forma_geom::{Chain, CircleArc, Plane, Point3, Vec3, Xform};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ToolKind {
+    Point,
     Line,
     Polyline,
+    Curve,
+    InterpCrv,
     Rectangle,
     Circle,
     Arc,
+    Ellipse,
+    Polygon,
     Box,
     Cylinder,
     Sphere,
     Extrude,
+    ExtrudeSrf,
+    Revolve,
+    Sweep1,
     Move,
     Copy,
     Rotate,
     Scale,
+    Scale1D,
+    Scale2D,
     Mirror,
+    Orient,
     Offset,
     Trim,
+    Split,
     Extend,
     Fillet,
+    Chamfer,
     FilletCorners,
     Join,
     Explode,
     ArrayLinear,
     ArrayPolar,
+    Distance,
+    MatchProperties,
+    /// An engine command that acts on the selection (asks for one if empty).
+    OnSel(&'static str),
 }
 
+/// Commands that only need a selection, then run as typed.
+pub const SELECTION_COMMANDS: [&str; 22] = [
+    "Hide",
+    "Isolate",
+    "Lock",
+    "Group",
+    "Ungroup",
+    "SelGroup",
+    "Flip",
+    "ProjectToCPlane",
+    "Intersect",
+    "PlanarSrf",
+    "Loft",
+    "Cap",
+    "Length",
+    "Area",
+    "Volume",
+    "BoundingBox",
+    "What",
+    "CopyToClipboard",
+    "Cut",
+    "Delete",
+    "Join",
+    "Explode",
+];
+
 impl ToolKind {
-    pub const CURVES: [ToolKind; 5] = [
+    pub const CURVES: [ToolKind; 10] = [
+        ToolKind::Point,
         ToolKind::Line,
         ToolKind::Polyline,
+        ToolKind::Curve,
+        ToolKind::InterpCrv,
         ToolKind::Rectangle,
         ToolKind::Circle,
         ToolKind::Arc,
+        ToolKind::Ellipse,
+        ToolKind::Polygon,
     ];
-    pub const SOLIDS: [ToolKind; 4] = [
+    pub const CURVE_TOOLS: [ToolKind; 12] = [
+        ToolKind::Offset,
+        ToolKind::Trim,
+        ToolKind::Split,
+        ToolKind::Extend,
+        ToolKind::Fillet,
+        ToolKind::Chamfer,
+        ToolKind::FilletCorners,
+        ToolKind::Join,
+        ToolKind::Explode,
+        ToolKind::OnSel("Flip"),
+        ToolKind::OnSel("ProjectToCPlane"),
+        ToolKind::OnSel("Intersect"),
+    ];
+    pub const SURFACES: [ToolKind; 7] = [
+        ToolKind::OnSel("PlanarSrf"),
+        ToolKind::Extrude,
+        ToolKind::OnSel("Loft"),
+        ToolKind::Revolve,
+        ToolKind::Sweep1,
+        ToolKind::ExtrudeSrf,
+        ToolKind::OnSel("Cap"),
+    ];
+    pub const SOLIDS: [ToolKind; 6] = [
         ToolKind::Box,
         ToolKind::Cylinder,
         ToolKind::Sphere,
         ToolKind::Extrude,
+        ToolKind::ExtrudeSrf,
+        ToolKind::OnSel("Cap"),
     ];
-    pub const TRANSFORMS: [ToolKind; 7] = [
+    pub const TRANSFORMS: [ToolKind; 10] = [
         ToolKind::Move,
         ToolKind::Copy,
         ToolKind::Rotate,
         ToolKind::Scale,
+        ToolKind::Scale1D,
+        ToolKind::Scale2D,
         ToolKind::Mirror,
+        ToolKind::Orient,
         ToolKind::ArrayLinear,
         ToolKind::ArrayPolar,
     ];
-    pub const CURVE_TOOLS: [ToolKind; 5] = [
-        ToolKind::Offset,
-        ToolKind::Trim,
-        ToolKind::Extend,
-        ToolKind::Fillet,
-        ToolKind::FilletCorners,
+    pub const VISIBILITY: [ToolKind; 5] = [
+        ToolKind::OnSel("Hide"),
+        ToolKind::OnSel("Isolate"),
+        ToolKind::OnSel("Lock"),
+        ToolKind::OnSel("Group"),
+        ToolKind::OnSel("Ungroup"),
     ];
-    pub const EDIT: [ToolKind; 2] = [ToolKind::Join, ToolKind::Explode];
+    pub const ANALYZE: [ToolKind; 6] = [
+        ToolKind::Distance,
+        ToolKind::OnSel("Length"),
+        ToolKind::OnSel("Area"),
+        ToolKind::OnSel("Volume"),
+        ToolKind::OnSel("BoundingBox"),
+        ToolKind::OnSel("What"),
+    ];
+    pub const EDIT: [ToolKind; 3] = [ToolKind::Join, ToolKind::Explode, ToolKind::MatchProperties];
 
     pub fn name(self) -> &'static str {
+        use ToolKind::*;
         match self {
-            ToolKind::Line => "Line",
-            ToolKind::Polyline => "Polyline",
-            ToolKind::Rectangle => "Rectangle",
-            ToolKind::Circle => "Circle",
-            ToolKind::Arc => "Arc",
-            ToolKind::Box => "Box",
-            ToolKind::Cylinder => "Cylinder",
-            ToolKind::Sphere => "Sphere",
-            ToolKind::Extrude => "ExtrudeCrv",
-            ToolKind::Move => "Move",
-            ToolKind::Copy => "Copy",
-            ToolKind::Rotate => "Rotate",
-            ToolKind::Scale => "Scale",
-            ToolKind::Mirror => "Mirror",
-            ToolKind::Offset => "Offset",
-            ToolKind::Trim => "Trim",
-            ToolKind::Extend => "Extend",
-            ToolKind::Fillet => "Fillet",
-            ToolKind::FilletCorners => "FilletCorners",
-            ToolKind::Join => "Join",
-            ToolKind::Explode => "Explode",
-            ToolKind::ArrayLinear => "ArrayLinear",
-            ToolKind::ArrayPolar => "ArrayPolar",
+            Point => "Point",
+            Line => "Line",
+            Polyline => "Polyline",
+            Curve => "Curve",
+            InterpCrv => "InterpCrv",
+            Rectangle => "Rectangle",
+            Circle => "Circle",
+            Arc => "Arc",
+            Ellipse => "Ellipse",
+            Polygon => "Polygon",
+            Box => "Box",
+            Cylinder => "Cylinder",
+            Sphere => "Sphere",
+            Extrude => "ExtrudeCrv",
+            ExtrudeSrf => "ExtrudeSrf",
+            Revolve => "Revolve",
+            Sweep1 => "Sweep1",
+            Move => "Move",
+            Copy => "Copy",
+            Rotate => "Rotate",
+            Scale => "Scale",
+            Scale1D => "Scale1D",
+            Scale2D => "Scale2D",
+            Mirror => "Mirror",
+            Orient => "Orient",
+            Offset => "Offset",
+            Trim => "Trim",
+            Split => "Split",
+            Extend => "Extend",
+            Fillet => "Fillet",
+            Chamfer => "Chamfer",
+            FilletCorners => "FilletCorners",
+            Join => "Join",
+            Explode => "Explode",
+            ArrayLinear => "ArrayLinear",
+            ArrayPolar => "ArrayPolar",
+            Distance => "Distance",
+            MatchProperties => "MatchProperties",
+            OnSel(n) => n,
         }
     }
 
     pub fn tooltip(self) -> &'static str {
+        use ToolKind::*;
         match self {
-            ToolKind::Line => "Line — single segment",
-            ToolKind::Polyline => "Polyline — connected segments (C closes)",
-            ToolKind::Rectangle => "Rectangle — two corners",
-            ToolKind::Circle => "Circle — center, radius",
-            ToolKind::Arc => "Arc — center, start, end",
-            ToolKind::Box => "Box — two corners and height",
-            ToolKind::Cylinder => "Cylinder — center, radius, height",
-            ToolKind::Sphere => "Sphere — center, radius",
-            ToolKind::Extrude => "ExtrudeCrv — extrude curves (closed → solid)",
-            ToolKind::Move => "Move — from, to",
-            ToolKind::Copy => "Copy — from, to (repeat, Enter to finish)",
-            ToolKind::Rotate => "Rotate — center, angle or two reference points",
-            ToolKind::Scale => "Scale — base point, factor or two reference points",
-            ToolKind::Mirror => "Mirror — two points of the mirror line (copies)",
-            ToolKind::Offset => "Offset — parallel copy of curves at a distance",
-            ToolKind::Trim => "Trim — cut curves with cutting objects",
-            ToolKind::Extend => "Extend — lengthen curves to boundaries",
-            ToolKind::Fillet => "Fillet — round the corner between two lines",
-            ToolKind::FilletCorners => "FilletCorners — round all corners of polylines",
-            ToolKind::Join => "Join — join curves end to end / meshes into one",
-            ToolKind::Explode => "Explode — split into segments or faces",
-            ToolKind::ArrayLinear => "ArrayLinear — copies along a direction",
-            ToolKind::ArrayPolar => "ArrayPolar — copies around a centre",
+            Point => "Point — single points (Enter to finish)",
+            Line => "Line — single segment",
+            Polyline => "Polyline — connected segments (C closes)",
+            Curve => "Curve — control-point curve (Enter to finish)",
+            InterpCrv => "InterpCrv — curve through points (Enter to finish)",
+            Rectangle => "Rectangle — two corners",
+            Circle => "Circle — center, radius",
+            Arc => "Arc — center, start, end",
+            Ellipse => "Ellipse — center, end of first axis, second axis",
+            Polygon => "Polygon — center, corner (type a number for the sides)",
+            Box => "Box — two corners and height",
+            Cylinder => "Cylinder — center, radius, height",
+            Sphere => "Sphere — center, radius",
+            Extrude => "ExtrudeCrv — extrude curves (closed → solid)",
+            ExtrudeSrf => "ExtrudeSrf — extrude a planar surface into a solid",
+            Revolve => "Revolve — curves around an axis",
+            Sweep1 => "Sweep1 — profiles along one rail",
+            Move => "Move — from, to",
+            Copy => "Copy — from, to (repeat, Enter to finish)",
+            Rotate => "Rotate — center, angle or two reference points",
+            Scale => "Scale — base point, factor or two reference points",
+            Scale1D => "Scale1D — scale in one direction",
+            Scale2D => "Scale2D — scale in the construction plane",
+            Mirror => "Mirror — two points of the mirror line (copies)",
+            Orient => "Orient — two reference points to two target points",
+            Offset => "Offset — parallel copy of curves at a distance",
+            Trim => "Trim — cut curves with cutting objects",
+            Split => "Split — divide curves at cutting objects",
+            Extend => "Extend — lengthen curves to boundaries",
+            Fillet => "Fillet — round the corner between two lines",
+            Chamfer => "Chamfer — bevel the corner between two lines",
+            FilletCorners => "FilletCorners — round all corners of polylines",
+            Join => "Join — join curves end to end / meshes into one",
+            Explode => "Explode — split into segments or faces",
+            ArrayLinear => "ArrayLinear — copies along a direction",
+            ArrayPolar => "ArrayPolar — copies around a centre",
+            Distance => "Distance — between two points",
+            MatchProperties => "MatchProperties — copy layer and colour from an object",
+            OnSel("Hide") => "Hide — hide selected objects",
+            OnSel("Isolate") => "Isolate — hide everything else",
+            OnSel("Lock") => "Lock — selected objects can be seen and snapped to, not selected",
+            OnSel("Group") => "Group — select together",
+            OnSel("Ungroup") => "Ungroup",
+            OnSel("SelGroup") => "SelGroup — select the whole groups",
+            OnSel("Flip") => "Flip — reverse curve direction / surface normals",
+            OnSel("ProjectToCPlane") => "ProjectToCPlane — flatten onto the construction plane",
+            OnSel("Intersect") => "Intersect — points where curves cross",
+            OnSel("PlanarSrf") => "PlanarSrf — surface from closed planar curves",
+            OnSel("Loft") => "Loft — surface through curves",
+            OnSel("Cap") => "Cap — close planar holes",
+            OnSel("Length") => "Length — of curves",
+            OnSel("Area") => "Area — of closed curves and surfaces",
+            OnSel("Volume") => "Volume — of closed solids",
+            OnSel("BoundingBox") => "BoundingBox — box around the selection",
+            OnSel("What") => "What — describe the selection",
+            OnSel("CopyToClipboard") => "Copy to clipboard (Ctrl+C)",
+            OnSel("Cut") => "Cut (Ctrl+X)",
+            OnSel("Delete") => "Delete (Del)",
+            OnSel(_) => "",
         }
     }
 
     pub fn from_name(s: &str) -> Option<ToolKind> {
+        use ToolKind::*;
         let l = s.to_lowercase();
         Some(match l.as_str() {
-            "line" | "l" => ToolKind::Line,
-            "polyline" | "pl" => ToolKind::Polyline,
-            "rectangle" | "rec" => ToolKind::Rectangle,
-            "circle" | "c" => ToolKind::Circle,
-            "arc" => ToolKind::Arc,
-            "box" => ToolKind::Box,
-            "cylinder" => ToolKind::Cylinder,
-            "sphere" => ToolKind::Sphere,
-            "extrude" | "extrudecrv" | "ext" => ToolKind::Extrude,
-            "move" | "m" => ToolKind::Move,
-            "copy" | "co" | "cp" => ToolKind::Copy,
-            "rotate" | "ro" => ToolKind::Rotate,
-            "scale" | "sc" => ToolKind::Scale,
-            "mirror" | "mi" => ToolKind::Mirror,
-            "offset" | "o" => ToolKind::Offset,
-            "trim" | "tr" => ToolKind::Trim,
-            "extend" | "ex" => ToolKind::Extend,
-            "fillet" | "f" => ToolKind::Fillet,
-            "filletcorners" | "fc" => ToolKind::FilletCorners,
-            "join" | "j" => ToolKind::Join,
-            "explode" | "x" => ToolKind::Explode,
-            "arraylinear" | "al" => ToolKind::ArrayLinear,
-            "arraypolar" | "ap" => ToolKind::ArrayPolar,
+            "point" | "pt" => Point,
+            "line" | "l" => Line,
+            "polyline" | "pl" => Polyline,
+            "curve" | "crv" => Curve,
+            "interpcrv" | "interp" => InterpCrv,
+            "rectangle" | "rec" => Rectangle,
+            "circle" | "c" => Circle,
+            "arc" => Arc,
+            "ellipse" | "el" => Ellipse,
+            "polygon" | "pol" => Polygon,
+            "box" => Box,
+            "cylinder" => Cylinder,
+            "sphere" => Sphere,
+            "extrude" | "extrudecrv" | "ext" => Extrude,
+            "extrudesrf" => ExtrudeSrf,
+            "revolve" | "rev" => Revolve,
+            "sweep1" => Sweep1,
+            "move" | "m" => Move,
+            "copy" | "co" | "cp" => Copy,
+            "rotate" | "ro" => Rotate,
+            "scale" | "sc" => Scale,
+            "scale1d" | "s1" => Scale1D,
+            "scale2d" | "s2" => Scale2D,
+            "mirror" | "mi" => Mirror,
+            "orient" | "or" => Orient,
+            "offset" | "o" => Offset,
+            "trim" | "tr" => Trim,
+            "split" => Split,
+            "extend" | "ex" => Extend,
+            "fillet" | "f" => Fillet,
+            "chamfer" | "cha" => Chamfer,
+            "filletcorners" | "fc" => FilletCorners,
+            "join" | "j" => Join,
+            "explode" | "x" => Explode,
+            "arraylinear" | "al" => ArrayLinear,
+            "arraypolar" | "ap" => ArrayPolar,
+            "distance" | "dist" => Distance,
+            "matchproperties" | "matchprop" | "ma" => MatchProperties,
             _ => return None,
         })
     }
 
+    /// A selection command typed by name (exact names only).
+    pub fn selection_command(s: &str) -> Option<ToolKind> {
+        let l = s.to_lowercase();
+        let l = match l.as_str() {
+            "dir" => "flip",
+            "del" | "erase" => "delete",
+            "copyclip" => "copytoclipboard",
+            "bbox" => "boundingbox",
+            "flatten" => "projecttocplane",
+            other => other,
+        }
+        .to_string();
+        SELECTION_COMMANDS
+            .iter()
+            .find(|n| n.to_lowercase() == l)
+            .map(|n| ToolKind::OnSel(n))
+    }
+
     pub fn needs_selection(self) -> bool {
+        use ToolKind::*;
         matches!(
             self,
-            ToolKind::Extrude
-                | ToolKind::Move
-                | ToolKind::Copy
-                | ToolKind::Rotate
-                | ToolKind::Scale
-                | ToolKind::Mirror
-                | ToolKind::Offset
-                | ToolKind::Trim
-                | ToolKind::Extend
-                | ToolKind::FilletCorners
-                | ToolKind::Join
-                | ToolKind::Explode
-                | ToolKind::ArrayLinear
-                | ToolKind::ArrayPolar
+            Extrude
+                | ExtrudeSrf
+                | Revolve
+                | Sweep1
+                | Move
+                | Copy
+                | Rotate
+                | Scale
+                | Scale1D
+                | Scale2D
+                | Mirror
+                | Orient
+                | Offset
+                | Trim
+                | Split
+                | Extend
+                | FilletCorners
+                | Join
+                | Explode
+                | ArrayLinear
+                | ArrayPolar
+                | MatchProperties
+                | OnSel(_)
         )
     }
 
     /// Tools that are a single engine command once objects are selected.
     pub fn instant(self) -> bool {
-        matches!(self, ToolKind::Join | ToolKind::Explode)
+        matches!(
+            self,
+            ToolKind::Join | ToolKind::Explode | ToolKind::OnSel(_)
+        )
     }
 }
 
@@ -187,6 +372,8 @@ pub enum Want {
     Number,
     /// Click on a curve (no snaps); a typed number changes the tool's distance.
     Pick,
+    /// Click on any object (rails, property sources).
+    PickObject,
     /// A distance along a line (heights): picked on the line or typed.
     Height {
         from: Point3,
@@ -219,6 +406,12 @@ pub struct Tool {
     count: Option<usize>,
     /// Selected curves with their own plane normal, for the Offset preview.
     pub curves: Vec<(Chain, Option<Vec3>)>,
+    /// Second phase of a two-selection tool (Split: cutting objects).
+    pub phase: u8,
+    /// Ids (as numbers) of the first selection of a two-selection tool.
+    pub stash: Vec<u64>,
+    /// Typed factor waiting for a direction (Scale1D).
+    factor: Option<f64>,
 }
 
 fn fmt_p(p: Point3) -> String {
@@ -258,6 +451,9 @@ impl Tool {
             distance: 1.0,
             count: None,
             curves: Vec::new(),
+            phase: 0,
+            stash: Vec::new(),
+            factor: None,
         }
     }
 
@@ -267,7 +463,12 @@ impl Tool {
             let what = match self.kind {
                 Trim => "select cutting objects",
                 Extend => "select boundary objects",
+                Split if self.phase == 0 => "select objects to split",
+                Split => "select cutting objects (none: the curves cut each other)",
                 Offset | FilletCorners => "select curves",
+                Revolve | Sweep1 => "select curves to revolve / sweep",
+                Join => "select objects to join",
+                MatchProperties => "select objects to change",
                 _ => "select objects",
             };
             return format!("{} — {what}, press Enter when done", self.kind.name());
@@ -324,6 +525,42 @@ impl Tool {
             (ArrayLinear, _) => "Second reference point (spacing and direction)",
             (ArrayPolar, 0) => "Centre of polar array",
             (ArrayPolar, _) => "Number of elements (full turn)",
+            (Point, _) => "Location of point (Enter to finish)",
+            (Curve | InterpCrv, 0) => "Start of curve",
+            (Curve | InterpCrv, _) => "Next point (Enter to finish, U to undo)",
+            (Ellipse, 0) => "Ellipse center",
+            (Ellipse, 1) => "End of first axis",
+            (Ellipse, _) => "End of second axis (or radius)",
+            (Polygon, 0) => {
+                return format!(
+                    "Polygon — center ({} sides; type a number to change)",
+                    self.count.unwrap_or(5)
+                )
+            }
+            (Polygon, _) => "Corner of polygon",
+            (Split, _) => "press Enter",
+            (Chamfer, 0) => {
+                return format!("Chamfer — first line (distance {d}; type a number to change)")
+            }
+            (Chamfer, _) => "Second line",
+            (Scale1D | Scale2D, 0) => "Origin point",
+            (Scale1D, 1) if self.factor.is_some() => "Direction of scaling",
+            (Scale1D | Scale2D, 1) if self.reference.is_none() => {
+                "Scale factor or first reference point"
+            }
+            (Scale1D | Scale2D, _) => "Second reference point",
+            (Orient, 0) => "Reference point 1",
+            (Orient, 1) => "Reference point 2",
+            (Orient, 2) => "Target point 1",
+            (Orient, _) => "Target point 2",
+            (Revolve, 0) => "Start of revolve axis",
+            (Revolve, _) => "End of revolve axis",
+            (Sweep1, _) => "Select the rail curve",
+            (ExtrudeSrf, _) => "Extrusion distance",
+            (Distance, 0) => "First point for distance",
+            (Distance, _) => "Second point for distance",
+            (MatchProperties, _) => "Select the object to match",
+            (OnSel(_), _) => "press Enter",
         };
         format!("{} — {p}", self.kind.name())
     }
@@ -338,7 +575,16 @@ impl Tool {
             (Circle, 1) | (Sphere, 1) | (Cylinder, 1) => Want::PointOrNumber,
             (Rotate, 1) | (Scale, 1) if self.reference.is_none() => Want::PointOrNumber,
             (Offset, _) => Want::PointOrNumber,
-            (Trim | Extend | Fillet, _) => Want::Pick,
+            (Trim | Extend | Fillet | Chamfer, _) => Want::Pick,
+            (Sweep1 | MatchProperties, _) => Want::PickObject,
+            (Ellipse, 2) | (Polygon, 0) => Want::PointOrNumber,
+            (Scale1D | Scale2D, 1) if self.reference.is_none() && self.factor.is_none() => {
+                Want::PointOrNumber
+            }
+            (ExtrudeSrf, _) => Want::Height {
+                from: self.anchor,
+                dir: self.plane.z,
+            },
             (FilletCorners, _) => Want::Number,
             (ArrayLinear, _) if self.count.is_none() => Want::Number,
             (ArrayPolar, 1) => Want::Number,
@@ -436,6 +682,83 @@ impl Tool {
                     self.n()
                 )])
             }
+            (Point, _) => Step::Emit(vec![format!("Point {}", fmt_p(p))]),
+            (Ellipse, 2) => {
+                let c = self.pts[0];
+                let a = self.pts[1] - c;
+                let v = p - c;
+                let b = match a.normalized() {
+                    Some(u) => (v - u * v.dot(u)).length(),
+                    None => v.length(),
+                };
+                self.feed_number(b)
+            }
+            (Polygon, 1) => Step::Done(vec![format!(
+                "Polygon {} {} {} {}",
+                fmt_p(self.pts[0]),
+                fmt_p(p),
+                self.count.unwrap_or(5),
+                self.n()
+            )]),
+            (Chamfer, 1) => Step::Done(vec![format!(
+                "Chamfer {} {} {} {}",
+                round(self.distance),
+                fmt_p(self.pts[0]),
+                fmt_p(p),
+                self.n()
+            )]),
+            (Scale1D, 1) if self.factor.is_some() => Step::Done(vec![format!(
+                "Scale1D {} {} {}",
+                fmt_p(self.pts[0]),
+                round(self.factor.unwrap_or(1.0)),
+                fmt_p(p)
+            )]),
+            (Scale1D | Scale2D, 1) if self.reference.is_none() => {
+                self.reference = Some(p);
+                Step::Continue
+            }
+            (Scale1D, 1) => {
+                let o = self.pts[0];
+                let r = self.reference.expect("reference");
+                let Some(dir) = (r - o).normalized() else {
+                    return Step::Cancel("reference point is on the origin".into());
+                };
+                let f = (p - o).dot(dir) / (r - o).length();
+                Step::Done(vec![format!(
+                    "Scale1D {} {} {}",
+                    fmt_p(o),
+                    round(f),
+                    fmt_p(r)
+                )])
+            }
+            (Scale2D, 1) => {
+                let o = self.pts[0];
+                let r = self.reference.expect("reference").distance_to(o);
+                if r < 1e-12 {
+                    return Step::Cancel("reference point is on the origin".into());
+                }
+                Step::Done(vec![format!(
+                    "Scale2D {} {} {}",
+                    fmt_p(o),
+                    round(p.distance_to(o) / r),
+                    self.n()
+                )])
+            }
+            (Orient, 3) => Step::Done(vec![format!(
+                "Orient {} {} {} {}",
+                fmt_p(self.pts[0]),
+                fmt_p(self.pts[1]),
+                fmt_p(self.pts[2]),
+                fmt_p(p)
+            )]),
+            (Revolve, 1) => {
+                Step::Done(vec![format!("Revolve {} {}", fmt_p(self.pts[0]), fmt_p(p))])
+            }
+            (Distance, 1) => Step::Done(vec![format!(
+                "Distance {} {}",
+                fmt_p(self.pts[0]),
+                fmt_p(p)
+            )]),
             (Offset, _) => Step::Done(vec![format!(
                 "Offset {} {} {}",
                 round(self.distance),
@@ -536,6 +859,38 @@ impl Tool {
                 Step::Continue
             }
             (FilletCorners, _) => Step::Done(vec![format!("FilletCorners {}", round(x.abs()))]),
+            (Chamfer, _) => {
+                if x > 0.0 {
+                    self.distance = x;
+                }
+                Step::Continue
+            }
+            (Ellipse, 2) => Step::Done(vec![format!(
+                "Ellipse {} {} {} {}",
+                fmt_p(self.pts[0]),
+                fmt_p(self.pts[1]),
+                round(x.abs()),
+                self.n()
+            )]),
+            (Polygon, 0) => {
+                if (3.0..=1000.0).contains(&x) {
+                    self.count = Some(x.round() as usize);
+                    Step::Continue
+                } else {
+                    Step::Cancel("a polygon needs 3 or more sides".into())
+                }
+            }
+            (Scale1D, 1) => {
+                self.factor = Some(x);
+                Step::Continue
+            }
+            (Scale2D, 1) => Step::Done(vec![format!(
+                "Scale2D {} {} {}",
+                fmt_p(self.pts[0]),
+                round(x),
+                self.n()
+            )]),
+            (ExtrudeSrf, _) => Step::Done(vec![format!("ExtrudeSrf {} {}", round(x), self.n())]),
             (ArrayLinear, _) if self.count.is_none() => {
                 if x >= 2.0 {
                     self.count = Some(x.round() as usize);
@@ -559,6 +914,25 @@ impl Tool {
         }
     }
 
+    /// Engine line for an instant tool (selection commands).
+    pub fn instant_line(&self) -> String {
+        match self.kind {
+            ToolKind::OnSel("ProjectToCPlane") => {
+                format!("ProjectToCPlane {} {}", self.n(), fmt_p(self.plane.origin))
+            }
+            k => k.name().to_string(),
+        }
+    }
+
+    /// An object was clicked (rail, property source).
+    pub fn feed_object(&mut self, id: u64) -> Step {
+        match self.kind {
+            ToolKind::Sweep1 => Step::Done(vec![format!("Sweep1 #{id}")]),
+            ToolKind::MatchProperties => Step::Done(vec![format!("MatchProperties #{id}")]),
+            _ => Step::Continue,
+        }
+    }
+
     fn finish_polyline(&mut self, close: bool) -> Step {
         let mut pts: Vec<String> = self.pts.iter().map(|p| fmt_p(*p)).collect();
         if close {
@@ -572,7 +946,7 @@ impl Tool {
         if self.selecting {
             if has_selection {
                 if self.kind.instant() {
-                    return Step::Done(vec![self.kind.name().to_string()]);
+                    return Step::Done(vec![self.instant_line()]);
                 }
                 self.selecting = false;
                 return Step::Continue;
@@ -582,7 +956,11 @@ impl Tool {
         match self.kind {
             ToolKind::Polyline if self.pts.len() >= 2 => self.finish_polyline(false),
             ToolKind::Copy if !self.pts.is_empty() => Step::Done(Vec::new()),
-            ToolKind::Trim | ToolKind::Extend => Step::Done(Vec::new()),
+            ToolKind::Trim | ToolKind::Extend | ToolKind::Point => Step::Done(Vec::new()),
+            ToolKind::Curve | ToolKind::InterpCrv if self.pts.len() >= 2 => {
+                let pts: Vec<String> = self.pts.iter().map(|p| fmt_p(*p)).collect();
+                Step::Done(vec![format!("{} {}", self.kind.name(), pts.join(" "))])
+            }
             _ => Step::Cancel("cancelled".into()),
         }
     }
@@ -593,7 +971,11 @@ impl Tool {
         if self.kind == ToolKind::Polyline && (w == "c" || w == "close") && self.pts.len() >= 3 {
             return Some(self.finish_polyline(true));
         }
-        if self.kind == ToolKind::Polyline && (w == "u" || w == "undo") && !self.pts.is_empty() {
+        let undoable = matches!(
+            self.kind,
+            ToolKind::Polyline | ToolKind::Curve | ToolKind::InterpCrv
+        );
+        if undoable && (w == "u" || w == "undo") && !self.pts.is_empty() {
             self.pts.pop();
             return Some(Step::Continue);
         }
@@ -632,6 +1014,100 @@ impl Tool {
             return out;
         }
         match (self.kind, n) {
+            (Curve | InterpCrv, _) if n >= 1 => {
+                let mut pts = self.pts.clone();
+                pts.push(cur);
+                let crv = if self.kind == Curve {
+                    poly(&mut out, &pts);
+                    forma_geom::NurbsCurve::clamped_uniform(&pts, 3)
+                } else {
+                    forma_geom::NurbsCurve::interpolate(&pts, 3)
+                };
+                if let Some(c) = crv {
+                    poly(&mut out, &c.points());
+                }
+            }
+            (Ellipse, 1) => out.push([self.pts[0], cur]),
+            (Ellipse, 2) => {
+                let c = self.pts[0];
+                let a = self.pts[1] - c;
+                let v = cur - c;
+                if let Some(u) = a.normalized() {
+                    let b = (v - u * v.dot(u)).length();
+                    let pl = Plane::from_normal(c, self.plane.z);
+                    let pl = Plane {
+                        origin: c,
+                        x: u,
+                        y: pl.z.cross(u),
+                        z: pl.z,
+                    };
+                    let e = forma_geom::NurbsCurve::ellipse(&pl, a.length(), b.max(1e-9));
+                    poly(&mut out, &e.points());
+                }
+            }
+            (Polygon, 1) => {
+                let c = self.pts[0];
+                let sides = self.count.unwrap_or(5);
+                let pl = Plane::from_normal(c, self.plane.z);
+                let (u0, v0, _) = pl.coords(cur);
+                let (r, a0) = (u0.hypot(v0), v0.atan2(u0));
+                let pts: Vec<Point3> = (0..=sides)
+                    .map(|k| {
+                        let a = a0 + std::f64::consts::TAU * k as f64 / sides as f64;
+                        pl.point_at(r * a.cos(), r * a.sin(), 0.0)
+                    })
+                    .collect();
+                poly(&mut out, &pts);
+                out.push([c, cur]);
+            }
+            (Orient, 1) | (Orient, 3) | (Revolve, 1) | (Distance, 1) => {
+                out.push([self.pts[n - 1], cur]);
+                if self.kind == Orient && n == 3 {
+                    out.push([self.pts[0], self.pts[1]]);
+                    if let Some(x) =
+                        Xform::orient(self.pts[0], self.pts[1], self.pts[2], cur, false)
+                    {
+                        xf(&mut out, &x);
+                    }
+                }
+            }
+            (Orient, 2) => {
+                out.push([self.pts[0], self.pts[1]]);
+                xf(&mut out, &Xform::translation(cur - self.pts[0]));
+            }
+            (ExtrudeSrf, _) => {
+                let h = (cur - self.anchor).dot(self.plane.z);
+                xf(&mut out, &Xform::translation(self.plane.z * h));
+                out.push([self.anchor, self.anchor + self.plane.z * h]);
+            }
+            (Scale1D | Scale2D, 1) => {
+                out.push([self.pts[0], cur]);
+                if let Some(r) = self.reference {
+                    let o = self.pts[0];
+                    let d = r.distance_to(o);
+                    if d > 1e-12 {
+                        let f = if self.kind == Scale1D {
+                            (cur - o).dot((r - o) * (1.0 / d)) / d
+                        } else {
+                            cur.distance_to(o) / d
+                        };
+                        let x = if self.kind == Scale1D {
+                            let dir = (r - o) * (1.0 / d);
+                            let pl = Plane::from_normal(o, dir);
+                            let pl = Plane {
+                                origin: o,
+                                x: dir,
+                                y: pl.x,
+                                z: dir.cross(pl.x),
+                            };
+                            Xform::scale_axes(&pl, f, 1.0, 1.0)
+                        } else {
+                            Xform::scale_axes(&self.plane.moved_to(o), f, f, 1.0)
+                        };
+                        xf(&mut out, &x);
+                    }
+                }
+            }
             (Line, 1) | (Polyline, _) if n >= 1 => {
                 poly(&mut out, &self.pts);
                 out.push([self.pts[n - 1], cur]);
@@ -878,5 +1354,70 @@ mod tests {
         assert!(r.distance_to(Point3::new(10.0, 30.0, 0.0)) < 1e-9);
         let s = parse_typed_point("@10<90", &Plane::TOP, base, None).unwrap();
         assert!(s.distance_to(Point3::new(10.0, 10.0, 0.0)) < 1e-9);
+    }
+
+    #[test]
+    fn new_curve_tools_emit_commands() {
+        let mut p = Tool::new(ToolKind::Polygon, Plane::TOP, false, Point3::ORIGIN, vec![]);
+        assert!(matches!(p.feed_number(6.0), Step::Continue));
+        p.feed_point(Point3::ORIGIN);
+        let Step::Done(c) = p.feed_point(Point3::new(10.0, 0.0, 0.0)) else {
+            panic!()
+        };
+        assert_eq!(c, vec!["Polygon 0,0,0 10,0,0 6 0,0,1"]);
+        let mut e = Tool::new(ToolKind::Ellipse, Plane::TOP, false, Point3::ORIGIN, vec![]);
+        e.feed_point(Point3::ORIGIN);
+        e.feed_point(Point3::new(30.0, 0.0, 0.0));
+        let Step::Done(c) = e.feed_point(Point3::new(5.0, 10.0, 0.0)) else {
+            panic!()
+        };
+        assert_eq!(c, vec!["Ellipse 0,0,0 30,0,0 10 0,0,1"]);
+        let mut k = Tool::new(ToolKind::Curve, Plane::TOP, false, Point3::ORIGIN, vec![]);
+        for x in [0.0, 1.0, 2.0] {
+            k.feed_point(Point3::new(x, x, 0.0));
+        }
+        let Step::Done(c) = k.enter(false) else {
+            panic!()
+        };
+        assert_eq!(c, vec!["Curve 0,0,0 1,1,0 2,2,0"]);
+    }
+
+    #[test]
+    fn scale1d_by_reference_and_selection_commands() {
+        let mut t = Tool::new(ToolKind::Scale1D, Plane::TOP, true, Point3::ORIGIN, vec![]);
+        t.feed_point(Point3::ORIGIN);
+        t.feed_point(Point3::new(10.0, 0.0, 0.0));
+        let Step::Done(c) = t.feed_point(Point3::new(25.0, 3.0, 0.0)) else {
+            panic!()
+        };
+        assert_eq!(c, vec!["Scale1D 0,0,0 2.5 10,0,0"]);
+        assert_eq!(
+            ToolKind::selection_command("hide"),
+            Some(ToolKind::OnSel("Hide"))
+        );
+        assert_eq!(
+            ToolKind::selection_command("dir"),
+            Some(ToolKind::OnSel("Flip"))
+        );
+        let mut h = Tool::new(
+            ToolKind::OnSel("Hide"),
+            Plane::TOP,
+            false,
+            Point3::ORIGIN,
+            vec![],
+        );
+        assert_eq!(h.want(), Want::Selection);
+        let Step::Done(c) = h.enter(true) else {
+            panic!()
+        };
+        assert_eq!(c, vec!["Hide"]);
+        let f = Tool::new(
+            ToolKind::OnSel("ProjectToCPlane"),
+            Plane::FRONT,
+            true,
+            Point3::ORIGIN,
+            vec![],
+        );
+        assert_eq!(f.instant_line(), "ProjectToCPlane 0,-1,0 0,0,0");
     }
 }

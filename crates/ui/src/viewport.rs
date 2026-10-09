@@ -3,7 +3,7 @@
 use eframe::egui::{Pos2, Rect};
 use forma_geom::{Plane, Point3, Vec3};
 use forma_render::glam::DVec3;
-use forma_render::{Camera, StandardView, View};
+use forma_render::{Camera, DisplayMode, StandardView, View};
 
 pub fn to_d(p: Point3) -> DVec3 {
     DVec3::new(p.x, p.y, p.z)
@@ -27,6 +27,7 @@ pub struct Viewport {
     /// Pixel size of the render target.
     pub px: (u32, u32),
     pub dirty: bool,
+    pub mode: DisplayMode,
 }
 
 impl Viewport {
@@ -39,6 +40,12 @@ impl Viewport {
             rect: Rect::NOTHING,
             px: (1, 1),
             dirty: true,
+            // Rhino-like: drafting views in wireframe, the perspective shaded.
+            mode: if kind == StandardView::Perspective {
+                DisplayMode::Shaded
+            } else {
+                DisplayMode::Wireframe
+            },
         }
     }
 

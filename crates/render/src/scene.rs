@@ -78,11 +78,13 @@ pub fn srgb_to_linear(c: u8) -> f32 {
 /// Shaded surface colour for a layer colour: lightened so black layers read as grey.
 fn surface_color(rgb: [u8; 3]) -> [f32; 4] {
     let l = rgb.map(srgb_to_linear);
-    let mix = 0.45;
+    // Rhino shades dark-layer objects light grey and keeps strong colours.
+    let max = l[0].max(l[1]).max(l[2]);
+    let mix = 0.15 + 0.6 * (1.0 - max);
     [
-        l[0] + (0.8 - l[0]) * mix,
-        l[1] + (0.8 - l[1]) * mix,
-        l[2] + (0.8 - l[2]) * mix,
+        l[0] + (0.85 - l[0]) * mix,
+        l[1] + (0.85 - l[1]) * mix,
+        l[2] + (0.85 - l[2]) * mix,
         1.0,
     ]
 }
@@ -255,19 +257,8 @@ fn build_entry(o: &Object, color: [u8; 3], origin: DVec3) -> Entry {
                 });
             }
         }
-        Geometry::Point(p) => {
-            // Small 3D cross until the display draws screen-space point markers.
-            let c = wire_color(color);
-            let r = 2.0;
-            for d in [Vec3::X, Vec3::Y, Vec3::Z] {
-                for q in [*p - d * r, *p + d * r] {
-                    e.lines.push(LineVertex {
-                        pos: local(&q),
-                        color: c,
-                    });
-                }
-            }
-        }
+        // Drawn by the UI as screen-space markers.
+        Geometry::Point(_) => {}
         g => {
             let c = wire_color(color);
             let pts = g.curve_points();
@@ -384,8 +375,8 @@ pub fn grid_lines(scene: &Scene, plane: GridPlane, min_extent: f64) -> (Vec<Line
     let half = (extent / spacing).ceil() as i64;
     let cu = (center.dot(u) / spacing).round() as i64;
     let cv = (center.dot(v) / spacing).round() as i64;
-    let minor = [0.50, 0.50, 0.52, 1.0];
-    let major = [0.36, 0.36, 0.38, 1.0];
+    let minor = [0.300, 0.300, 0.300, 1.0];
+    let major = [0.205, 0.205, 0.205, 1.0];
     let red = [0.60, 0.04, 0.04, 1.0];
     let green = [0.04, 0.45, 0.04, 1.0];
     let blue = [0.08, 0.20, 0.70, 1.0];

@@ -31,8 +31,7 @@ fn vs_mesh(v: MeshIn) -> MeshOut {
     return o;
 }
 
-@fragment
-fn fs_mesh(i: MeshOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
+fn shade(i: MeshOut) -> vec4<f32> {
     var n = i.normal;
     if (dot(n, n) < 1e-12) {
         // No normal available: derive a flat one from screen-space derivatives.
@@ -47,8 +46,19 @@ fn fs_mesh(i: MeshOut, @builtin(front_facing) front: bool) -> @location(0) vec4<
     }
     // Two-sided headlight, like Rhino's default shaded mode.
     let d = abs(dot(n, to_eye));
-    let shade = 0.30 + 0.70 * d;
-    return vec4<f32>(i.color.rgb * shade, i.color.a);
+    let k = 0.30 + 0.70 * d;
+    return vec4<f32>(i.color.rgb * k, i.color.a);
+}
+
+@fragment
+fn fs_mesh(i: MeshOut) -> @location(0) vec4<f32> {
+    return shade(i);
+}
+
+@fragment
+fn fs_mesh_ghost(i: MeshOut) -> @location(0) vec4<f32> {
+    let c = shade(i);
+    return vec4<f32>(c.rgb, c.a * 0.45);
 }
 
 struct LineIn {

@@ -3,78 +3,149 @@
 use crate::viewport::Viewport;
 use eframe::egui::{Pos2, Rect};
 use forma_doc::{Document, Geometry, ObjectId};
-use forma_geom::{Plane, Point3, Vec3};
+use forma_geom::{CircleArc, Plane, Point3, Seg, Vec3};
 use forma_render::glam::DVec3;
 
+/// Rhino's object snaps.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SnapKind {
     End,
+    Near,
+    Point,
     Mid,
     Cen,
+    Int,
+    Perp,
+    Tan,
     Quad,
+    Knot,
+    Vertex,
 }
 
 impl SnapKind {
+    /// In the order of Rhino's Osnap bar.
+    pub const ALL: [SnapKind; 11] = [
+        SnapKind::End,
+        SnapKind::Near,
+        SnapKind::Point,
+        SnapKind::Mid,
+        SnapKind::Cen,
+        SnapKind::Int,
+        SnapKind::Perp,
+        SnapKind::Tan,
+        SnapKind::Quad,
+        SnapKind::Knot,
+        SnapKind::Vertex,
+    ];
+
     pub fn label(self) -> &'static str {
         match self {
             SnapKind::End => "End",
+            SnapKind::Near => "Near",
+            SnapKind::Point => "Point",
             SnapKind::Mid => "Mid",
             SnapKind::Cen => "Cen",
+            SnapKind::Int => "Int",
+            SnapKind::Perp => "Perp",
+            SnapKind::Tan => "Tan",
             SnapKind::Quad => "Quad",
+            SnapKind::Knot => "Knot",
+            SnapKind::Vertex => "Vertex",
+        }
+    }
+
+    fn index(self) -> usize {
+        SnapKind::ALL.iter().position(|k| *k == self).unwrap_or(0)
+    }
+
+    /// Lower wins when two snaps are about as close.
+    fn priority(self) -> u8 {
+        match self {
+            SnapKind::End | SnapKind::Point => 0,
+            SnapKind::Int => 1,
+            SnapKind::Cen => 2,
+            SnapKind::Quad | SnapKind::Knot | SnapKind::Vertex => 3,
+            SnapKind::Mid => 4,
+            SnapKind::Perp | SnapKind::Tan => 5,
+            SnapKind::Near => 9,
         }
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct SnapSettings {
-    pub end: bool,
-    pub mid: bool,
-    pub cen: bool,
-    pub quad: bool,
+    /// One flag per [`SnapKind::ALL`].
+    pub on: [bool; 11],
+    /// Project snapped points onto the construction plane.
+    pub project: bool,
+    /// All object snaps off (Rhino's "Disable").
+    pub disabled: bool,
     pub grid: bool,
     pub ortho: bool,
+    /// New points stay on the plane of the first point of the command.
+    pub planar: bool,
     /// Grid snap step in model units.
     pub step: f64,
 }
 
 impl Default for SnapSettings {
     fn default() -> Self {
+        let mut on = [false; 11];
+        for k in [
+            SnapKind::End,
+            SnapKind::Point,
+            SnapKind::Mid,
+            SnapKind::Cen,
+            SnapKind::Int,
+            SnapKind::Quad,
+        ] {
+            on[k.index()] = true;
+        }
         SnapSettings {
-            end: true,
-            mid: true,
-            cen: true,
-            quad: true,
+            on,
+            project: false,
+            disabled: false,
             grid: true,
             ortho: false,
+            planar: true,
             step: 10.0,
         }
     }
 }
 
 impl SnapSettings {
-    fn enabled(&self, k: SnapKind) -> bool {
-        match k {
-            SnapKind::End => self.end,
-            SnapKind::Mid => self.mid,
-            SnapKind::Cen => self.cen,
-            SnapKind::Quad => self.quad,
-        }
+    pub fn enabled(&self, k: SnapKind) -> bool {
+        !self.disabled && self.on[k.index()]
+    }
+
+    pub fn flag(&mut self, k: SnapKind) -> &mut bool {
+        &mut self.on[k.index()]
     }
 }
 
-/// Snap candidates of the visible objects.
+/// Snap data of the visible objects: fixed points and curves for the
+/// cursor-dependent snaps (Near, Int, Perp, Tan).
 #[derive(Default)]
 pub struct SnapPoints {
     points: Vec<(Point3, SnapKind)>,
+    /// Polylines of visible curves (and arcs for Tan / Perp).
+    curves: Vec<CurveSnap>,
+}
+
+struct CurveSnap {
+    pts: Vec<Point3>,
+    arcs: Vec<CircleArc>,
 }
 
 impl SnapPoints {
     pub fn build(doc: &Document) -> SnapPoints {
         let mut points = Vec::new();
+        let mut curves = Vec::new();
         for o in doc.objects() {
             if !doc.is_visible(o) {
                 continue;
             }
+            let mut arcs = Vec::new();
             match &o.geometry {
                 Geometry::Line(l) => {
                     points.push((l.from, SnapKind::End));
@@ -82,14 +153,21 @@ impl SnapPoints {
                     points.push((l.from.mid(l.to), SnapKind::Mid));
                 }
                 Geometry::Polyline(p) => {
-                    for q in p {
+                    if let (Some(a), Some(b)) = (p.first(), p.last()) {
+                        points.push((*a, SnapKind::End));
+                        points.push((*b, SnapKind::End));
+                    }
+                    for q in p.iter().skip(1).take(p.len().saturating_sub(2)) {
+                        // Rhino snaps End on polyline corners too.
                         points.push((*q, SnapKind::End));
+                        points.push((*q, SnapKind::Knot));
                     }
                     for w in p.windows(2) {
                         points.push((w[0].mid(w[1]), SnapKind::Mid));
                     }
                 }
                 Geometry::Arc(a) => {
+                    arcs.push(*a);
                     points.push((a.center(), SnapKind::Cen));
                     if a.is_closed() {
                         for k in 0..4 {
@@ -102,6 +180,12 @@ impl SnapPoints {
                         points.push((a.start(), SnapKind::End));
                         points.push((a.end(), SnapKind::End));
                         points.push((a.mid(), SnapKind::Mid));
+                        for k in 0..4 {
+                            let ang = k as f64 * std::f64::consts::FRAC_PI_2;
+                            if ang > 1e-9 && ang < a.sweep - 1e-9 {
+                                points.push((a.point_at_angle(ang), SnapKind::Quad));
+                            }
+                        }
                     }
                 }
                 Geometry::PolyCurve(segs) => {
@@ -109,15 +193,23 @@ impl SnapPoints {
                         points.push((s.start(), SnapKind::End));
                         points.push((s.end(), SnapKind::End));
                         points.push((s.point_at(0.5), SnapKind::Mid));
-                        if let forma_geom::Seg::Arc(a) = s {
+                        if let Seg::Arc(a) = s {
+                            arcs.push(*a);
                             points.push((a.center(), SnapKind::Cen));
                         }
                     }
                 }
-                Geometry::Point(p) => points.push((*p, SnapKind::End)),
+                Geometry::Point(p) => points.push((*p, SnapKind::Point)),
                 Geometry::Nurbs(n) => {
                     points.push((n.start(), SnapKind::End));
                     points.push((n.end(), SnapKind::End));
+                    let (t0, t1) = n.domain();
+                    points.push((n.point_at((t0 + t1) / 2.0), SnapKind::Mid));
+                    for k in n.knots.windows(2) {
+                        if k[1] > k[0] + 1e-12 && k[1] < t1 - 1e-12 {
+                            points.push((n.point_at(k[1]), SnapKind::Knot));
+                        }
+                    }
                 }
                 Geometry::Mesh(m) => {
                     // Corners and edge midpoints of small solids (boxes, extruded
@@ -129,13 +221,23 @@ impl SnapPoints {
                             points.push((pa.mid(pb), SnapKind::Mid));
                         }
                     }
+                    if m.positions.len() <= 20_000 {
+                        points.extend(m.positions.iter().map(|p| (*p, SnapKind::Vertex)));
+                    }
+                }
+            }
+            if o.geometry.is_curve() {
+                let pts = o.geometry.curve_points();
+                if pts.len() >= 2 {
+                    curves.push(CurveSnap { pts, arcs });
                 }
             }
         }
-        SnapPoints { points }
+        SnapPoints { points, curves }
     }
 
-    /// Nearest enabled snap within `radius` screen points of `pos`.
+    /// Nearest enabled snap within `radius` screen points of `pos`. `base` is the
+    /// previous point of the command (for Perp and Tan).
     pub fn find(
         &self,
         vp: &Viewport,
@@ -143,35 +245,154 @@ impl SnapPoints {
         origin: DVec3,
         settings: &SnapSettings,
         radius: f32,
+        base: Option<Point3>,
     ) -> Option<(Point3, SnapKind)> {
+        if settings.disabled {
+            return None;
+        }
         let mut best: Option<(f32, Point3, SnapKind)> = None;
-        for (p, k) in &self.points {
-            if !settings.enabled(*k) {
-                continue;
+        let consider = |p: Point3, k: SnapKind, best: &mut Option<(f32, Point3, SnapKind)>| {
+            if !settings.enabled(k) {
+                return;
             }
-            let Some(s) = vp.to_screen(*p, origin) else {
-                continue;
+            let Some(s) = vp.to_screen(p, origin) else {
+                return;
             };
             let d = s.distance(pos);
             if d <= radius
                 && best.is_none_or(|b| {
-                    d < b.0 - 0.5 || (d < b.0 + 0.5 && priority(*k) < priority(b.2))
+                    d < b.0 - 1.5 || (d < b.0 + 1.5 && k.priority() < b.2.priority())
                 })
             {
-                best = Some((d, *p, *k));
+                *best = Some((d, p, k));
+            }
+        };
+        for (p, k) in &self.points {
+            consider(*p, *k, &mut best);
+        }
+        // Curves near the cursor, as screen polylines.
+        let near: Vec<(&CurveSnap, Vec<Option<Pos2>>)> = self
+            .curves
+            .iter()
+            .filter_map(|c| {
+                let sc: Vec<Option<Pos2>> =
+                    c.pts.iter().map(|p| vp.to_screen(*p, origin)).collect();
+                let close = sc.windows(2).any(|w| match (w[0], w[1]) {
+                    (Some(a), Some(b)) => dist_point_segment(pos, a, b) <= radius,
+                    _ => false,
+                });
+                close.then_some((c, sc))
+            })
+            .take(12)
+            .collect();
+        for (c, sc) in &near {
+            // Near: closest point on the curve.
+            if settings.enabled(SnapKind::Near) {
+                if let Some(p) = closest_on_screen_polyline(&c.pts, sc, pos) {
+                    consider(p, SnapKind::Near, &mut best);
+                }
+            }
+            if let Some(b) = base {
+                if settings.enabled(SnapKind::Perp) {
+                    for w in c.pts.windows(2) {
+                        let d = w[1] - w[0];
+                        let l2 = d.dot(d);
+                        if l2 > 1e-18 {
+                            let t = (b - w[0]).dot(d) / l2;
+                            if (0.0..=1.0).contains(&t) {
+                                consider(w[0] + d * t, SnapKind::Perp, &mut best);
+                            }
+                        }
+                    }
+                    for a in &c.arcs {
+                        let (u, v, _) = a.plane.coords(b);
+                        let ang = v.atan2(u).rem_euclid(std::f64::consts::TAU);
+                        if ang <= a.sweep {
+                            consider(a.point_at_angle(ang), SnapKind::Perp, &mut best);
+                        }
+                    }
+                }
+                if settings.enabled(SnapKind::Tan) {
+                    for a in &c.arcs {
+                        let (u, v, _) = a.plane.coords(b);
+                        let d = u.hypot(v);
+                        if d > a.radius + 1e-9 {
+                            let phi = v.atan2(u);
+                            let off = (a.radius / d).acos();
+                            for ang in [phi + off, phi - off] {
+                                let ang = ang.rem_euclid(std::f64::consts::TAU);
+                                if ang <= a.sweep {
+                                    consider(a.point_at_angle(ang), SnapKind::Tan, &mut best);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // Int: apparent intersections between the nearby curves (and a curve with
+        // itself is skipped).
+        if settings.enabled(SnapKind::Int) {
+            for i in 0..near.len() {
+                for j in i + 1..near.len() {
+                    let (a, sa) = &near[i];
+                    let (_, sb) = &near[j];
+                    for (ka, wa) in sa.windows(2).enumerate() {
+                        let (Some(p0), Some(p1)) = (wa[0], wa[1]) else {
+                            continue;
+                        };
+                        if dist_point_segment(pos, p0, p1) > radius * 2.0 {
+                            continue;
+                        }
+                        for wb in sb.windows(2) {
+                            let (Some(q0), Some(q1)) = (wb[0], wb[1]) else {
+                                continue;
+                            };
+                            if let Some(t) = screen_cross(p0, p1, q0, q1) {
+                                let w = a.pts[ka] + (a.pts[ka + 1] - a.pts[ka]) * t;
+                                consider(w, SnapKind::Int, &mut best);
+                            }
+                        }
+                    }
+                }
             }
         }
         best.map(|(_, p, k)| (p, k))
     }
 }
 
-fn priority(k: SnapKind) -> u8 {
-    match k {
-        SnapKind::End => 0,
-        SnapKind::Cen => 1,
-        SnapKind::Quad => 2,
-        SnapKind::Mid => 3,
+/// Parameter on `a0→a1` where it crosses `b0→b1` in screen space.
+fn screen_cross(a0: Pos2, a1: Pos2, b0: Pos2, b1: Pos2) -> Option<f64> {
+    let r = a1 - a0;
+    let s = b1 - b0;
+    let den = r.x * s.y - r.y * s.x;
+    if den.abs() < 1e-6 {
+        return None;
     }
+    let qp = b0 - a0;
+    let t = (qp.x * s.y - qp.y * s.x) / den;
+    let u = (qp.x * r.y - qp.y * r.x) / den;
+    ((0.0..=1.0).contains(&t) && (0.0..=1.0).contains(&u)).then_some(f64::from(t))
+}
+
+fn closest_on_screen_polyline(pts: &[Point3], sc: &[Option<Pos2>], pos: Pos2) -> Option<Point3> {
+    let mut best: Option<(f32, Point3)> = None;
+    for (k, w) in sc.windows(2).enumerate() {
+        let (Some(a), Some(b)) = (w[0], w[1]) else {
+            continue;
+        };
+        let ab = b - a;
+        let t = if ab.length_sq() < 1e-6 {
+            0.0
+        } else {
+            ((pos - a).dot(ab) / ab.length_sq()).clamp(0.0, 1.0)
+        };
+        let d = pos.distance(a + ab * t);
+        if best.is_none_or(|bb| d < bb.0) {
+            best = Some((d, pts[k] + (pts[k + 1] - pts[k]) * f64::from(t)));
+        }
+    }
+    best.map(|b| b.1)
 }
 
 /// Round a point to the grid of `plane` (in-plane coordinates only).
