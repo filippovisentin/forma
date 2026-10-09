@@ -4,8 +4,10 @@
 //! Full import into `forma-doc` arrives with milestones M1/M5.
 
 mod display;
+mod writer;
 
 pub use display::{import_display, DisplayGeometry, Import, ImportedLayer, ImportedObject};
+pub use writer::write_document;
 
 use forma_geom::{BoundingBox, Point3};
 use std::ffi::{c_char, c_int, CString};
@@ -17,6 +19,11 @@ pub(crate) mod ffi {
 
     #[repr(C)]
     pub struct Model {
+        _private: [u8; 0],
+    }
+
+    #[repr(C)]
+    pub struct Writer {
         _private: [u8; 0],
     }
 
@@ -75,6 +82,46 @@ pub(crate) mod ffi {
         pub fn f3dm_points_copy(m: *const Model, xyz: *mut f64, cap_points: c_int) -> c_int;
         pub fn f3dm_mesh_data(m: *mut Model, obj: c_int, nv: *mut c_int, nt: *mut c_int) -> c_int;
         pub fn f3dm_mesh_copy(m: *const Model, xyz: *mut f64, tri: *mut u32);
+        pub fn f3dm_writer_new(unit_system: c_int, abs_tol: f64) -> *mut Writer;
+        pub fn f3dm_writer_free(w: *mut Writer);
+        pub fn f3dm_writer_layer(
+            w: *mut Writer,
+            name: *const c_char,
+            parent: c_int,
+            rgb: *const u8,
+            visible: c_int,
+        ) -> c_int;
+        pub fn f3dm_writer_line(
+            w: *mut Writer,
+            layer: c_int,
+            a: *const f64,
+            b: *const f64,
+        ) -> c_int;
+        pub fn f3dm_writer_polyline(
+            w: *mut Writer,
+            layer: c_int,
+            xyz: *const f64,
+            n: c_int,
+        ) -> c_int;
+        pub fn f3dm_writer_arc(
+            w: *mut Writer,
+            layer: c_int,
+            center: *const f64,
+            xaxis: *const f64,
+            yaxis: *const f64,
+            radius: f64,
+            sweep: f64,
+        ) -> c_int;
+        pub fn f3dm_writer_mesh(
+            w: *mut Writer,
+            layer: c_int,
+            xyz: *const f64,
+            normals: *const f64,
+            nv: c_int,
+            tri: *const u32,
+            nt: c_int,
+        ) -> c_int;
+        pub fn f3dm_writer_save(w: *mut Writer, path: *const c_char) -> c_int;
         pub fn f3dm_write_line(
             path: *const c_char,
             a: *const f64,
@@ -130,7 +177,7 @@ impl Units {
         }
     }
 
-    fn to_on(self) -> i32 {
+    pub(crate) fn to_on(self) -> i32 {
         match self {
             Units::None => 0,
             Units::Millimeters => 2,
@@ -230,7 +277,7 @@ impl Summary {
     }
 }
 
-fn c_path(path: &Path) -> Result<CString, Error> {
+pub(crate) fn c_path(path: &Path) -> Result<CString, Error> {
     let s = path
         .to_str()
         .ok_or_else(|| Error::BadPath(path.display().to_string()))?;

@@ -1,9 +1,11 @@
-//! CPU-side scene: document geometry flattened into vertex arrays.
+//! CPU-side scene: document geometry flattened into vertex arrays, with a per-object
+//! cache so edits only re-tessellate what changed.
 
 use bytemuck::{Pod, Zeroable};
-use forma_doc::{Document, Geometry};
+use forma_doc::{Document, Geometry, Object, ObjectId};
 use forma_geom::{Mesh, Point3, Vec3};
 use glam::DVec3;
+use std::collections::{BTreeSet, HashMap};
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Pod, Zeroable)]
@@ -20,20 +22,51 @@ pub struct LineVertex {
     pub color: [f32; 4],
 }
 
-/// Everything the GPU needs to draw a document.
-#[derive(Debug, Default)]
+/// Colour of visible solid/surface edges (linear RGB).
+pub const EDGE_COLOR: [f32; 4] = [0.02, 0.02, 0.025, 1.0];
+/// Selection highlight (linear RGB), Rhino-like yellow.
+pub const HIGHLIGHT: [f32; 4] = [1.0, 0.78, 0.0, 1.0];
+
+/// Everything the GPU needs to draw some objects.
+#[derive(Debug, Default, Clone)]
 pub struct Scene {
     /// Scene coordinates = model coordinates − origin (keeps f32 precise for large models).
     pub origin: DVec3,
     pub mesh_vertices: Vec<MeshVertex>,
     pub mesh_indices: Vec<u32>,
+    /// Curves and edges, as a line list.
     pub line_vertices: Vec<LineVertex>,
-    /// Bounds in scene coordinates.
+    /// Bounds in scene coordinates (zero when empty).
     pub min: DVec3,
     pub max: DVec3,
 }
 
-fn srgb_to_linear(c: u8) -> f32 {
+impl Scene {
+    pub fn is_empty(&self) -> bool {
+        self.mesh_indices.is_empty() && self.line_vertices.is_empty()
+    }
+
+    pub fn triangle_count(&self) -> usize {
+        self.mesh_indices.len() / 3
+    }
+
+    /// Build a scene without a persistent cache (screenshots, tests).
+    pub fn from_document(doc: &Document) -> Scene {
+        let mut cache = SceneCache::default();
+        cache.reset(model_center(doc));
+        cache.scene(doc)
+    }
+}
+
+/// Centre of the visible model, a good scene origin.
+pub fn model_center(doc: &Document) -> DVec3 {
+    doc.visible_bounding_box().map_or(DVec3::ZERO, |b| {
+        let c = b.center();
+        DVec3::new(c.x, c.y, c.z)
+    })
+}
+
+pub fn srgb_to_linear(c: u8) -> f32 {
     let c = c as f32 / 255.0;
     if c <= 0.04045 {
         c / 12.92
@@ -59,98 +92,195 @@ fn wire_color(rgb: [u8; 3]) -> [f32; 4] {
     [l[0], l[1], l[2], 1.0]
 }
 
-impl Scene {
-    pub fn is_empty(&self) -> bool {
-        self.mesh_indices.is_empty() && self.line_vertices.is_empty()
+/// Tessellated form of one object, positions relative to the scene origin.
+#[derive(Debug, Default, Clone)]
+struct Entry {
+    rev: u64,
+    color: [u8; 3],
+    mesh_vertices: Vec<MeshVertex>,
+    mesh_indices: Vec<u32>,
+    lines: Vec<LineVertex>,
+    min: DVec3,
+    max: DVec3,
+}
+
+/// Per-object tessellation cache. Keep one per document; call [`SceneCache::reset`]
+/// when a different document is loaded.
+#[derive(Debug, Default)]
+pub struct SceneCache {
+    origin: DVec3,
+    entries: HashMap<ObjectId, Entry>,
+}
+
+impl SceneCache {
+    /// Forget everything and use a new origin (use the centre of the model).
+    pub fn reset(&mut self, origin: DVec3) {
+        self.origin = origin;
+        self.entries.clear();
     }
 
-    pub fn triangle_count(&self) -> usize {
-        self.mesh_indices.len() / 3
+    pub fn origin(&self) -> DVec3 {
+        self.origin
     }
 
-    /// Build from the visible layers of a document.
-    pub fn from_document(doc: &Document) -> Scene {
-        let bb = doc.visible_bounding_box();
-        let origin = bb.map_or(DVec3::ZERO, |b| {
-            DVec3::new(
-                (b.min.x + b.max.x) / 2.0,
-                (b.min.y + b.max.y) / 2.0,
-                (b.min.z + b.max.z) / 2.0,
-            )
-        });
+    fn entry(&mut self, o: &Object, color: [u8; 3]) -> &Entry {
+        let stale = self
+            .entries
+            .get(&o.id)
+            .is_none_or(|e| e.rev != o.rev || e.color != color);
+        if stale {
+            let e = build_entry(o, color, self.origin);
+            self.entries.insert(o.id, e);
+        }
+        &self.entries[&o.id]
+    }
+
+    /// Build the scene of all objects on visible layers.
+    pub fn scene(&mut self, doc: &Document) -> Scene {
+        self.entries.retain(|id, _| doc.object(*id).is_some());
         let mut s = Scene {
-            origin,
+            origin: self.origin,
             ..Default::default()
         };
-        if let Some(b) = bb {
-            s.min = DVec3::new(b.min.x, b.min.y, b.min.z) - origin;
-            s.max = DVec3::new(b.max.x, b.max.y, b.max.z) - origin;
-        }
-        let local = |p: &Point3| -> [f32; 3] {
-            [
-                (p.x - origin.x) as f32,
-                (p.y - origin.y) as f32,
-                (p.z - origin.z) as f32,
-            ]
-        };
+        let mut first = true;
         for o in doc.objects() {
             let layer = doc.layer(o.layer);
             if !layer.visible {
                 continue;
             }
-            match &o.geometry {
-                Geometry::Mesh(m) => s.push_mesh(m, surface_color(layer.color), &local),
-                Geometry::Polyline(p) => {
-                    let c = wire_color(layer.color);
-                    for w in p.windows(2) {
-                        s.line_vertices.push(LineVertex {
-                            pos: local(&w[0]),
-                            color: c,
-                        });
-                        s.line_vertices.push(LineVertex {
-                            pos: local(&w[1]),
-                            color: c,
-                        });
-                    }
-                }
-                Geometry::Line(l) => {
-                    let c = wire_color(layer.color);
-                    s.line_vertices.push(LineVertex {
-                        pos: local(&l.from),
-                        color: c,
-                    });
-                    s.line_vertices.push(LineVertex {
-                        pos: local(&l.to),
-                        color: c,
-                    });
-                }
-            }
+            let e = self.entry(o, layer.color);
+            append(&mut s, e, None, &mut first);
         }
         s
     }
 
-    fn push_mesh(&mut self, m: &Mesh, color: [f32; 4], local: &dyn Fn(&Point3) -> [f32; 3]) {
-        let base = self.mesh_vertices.len() as u32;
-        let normals = vertex_normals(m);
-        for (p, n) in m.positions.iter().zip(&normals) {
-            self.mesh_vertices.push(MeshVertex {
-                pos: local(p),
-                normal: [n.x as f32, n.y as f32, n.z as f32],
-                color,
-            });
+    /// Build a highlight scene for the given objects (drawn over the scene in yellow).
+    pub fn highlight(&mut self, doc: &Document, ids: &BTreeSet<ObjectId>) -> Scene {
+        let mut s = Scene {
+            origin: self.origin,
+            ..Default::default()
+        };
+        let mut first = true;
+        for id in ids {
+            let Some(o) = doc.object(*id) else { continue };
+            let layer = doc.layer(o.layer);
+            if !layer.visible {
+                continue;
+            }
+            let e = self.entry(o, layer.color);
+            append(&mut s, e, Some(HIGHLIGHT), &mut first);
         }
-        let n = m.positions.len() as u32;
-        for t in &m.triangles {
-            if t.iter().all(|&i| i < n) {
-                self.mesh_indices.extend(t.iter().map(|i| i + base));
+        s
+    }
+}
+
+fn append(s: &mut Scene, e: &Entry, highlight: Option<[f32; 4]>, first: &mut bool) {
+    let base = s.mesh_vertices.len() as u32;
+    match highlight {
+        None => {
+            s.mesh_vertices.extend_from_slice(&e.mesh_vertices);
+            s.line_vertices.extend_from_slice(&e.lines);
+        }
+        Some(h) => {
+            s.mesh_vertices.extend(e.mesh_vertices.iter().map(|v| {
+                let c = v.color;
+                MeshVertex {
+                    color: [
+                        c[0] * 0.45 + h[0] * 0.55,
+                        c[1] * 0.45 + h[1] * 0.55,
+                        c[2] * 0.45 + h[2] * 0.55,
+                        1.0,
+                    ],
+                    ..*v
+                }
+            }));
+            s.line_vertices
+                .extend(e.lines.iter().map(|v| LineVertex { color: h, ..*v }));
+        }
+    }
+    s.mesh_indices
+        .extend(e.mesh_indices.iter().map(|i| i + base));
+    if e.mesh_vertices.is_empty() && e.lines.is_empty() {
+        return;
+    }
+    if *first {
+        s.min = e.min;
+        s.max = e.max;
+        *first = false;
+    } else {
+        s.min = s.min.min(e.min);
+        s.max = s.max.max(e.max);
+    }
+}
+
+fn build_entry(o: &Object, color: [u8; 3], origin: DVec3) -> Entry {
+    let local = |p: &Point3| -> [f32; 3] {
+        [
+            (p.x - origin.x) as f32,
+            (p.y - origin.y) as f32,
+            (p.z - origin.z) as f32,
+        ]
+    };
+    let mut e = Entry {
+        rev: o.rev,
+        color,
+        ..Default::default()
+    };
+    let b = o.geometry.bounding_box();
+    e.min = DVec3::new(b.min.x, b.min.y, b.min.z) - origin;
+    e.max = DVec3::new(b.max.x, b.max.y, b.max.z) - origin;
+    match &o.geometry {
+        Geometry::Mesh(m) => {
+            let c = surface_color(color);
+            let normals = vertex_normals(m);
+            for (p, n) in m.positions.iter().zip(&normals) {
+                e.mesh_vertices.push(MeshVertex {
+                    pos: local(p),
+                    normal: [n.x as f32, n.y as f32, n.z as f32],
+                    color: c,
+                });
+            }
+            let n = m.positions.len() as u32;
+            for t in &m.triangles {
+                if t.iter().all(|&i| i < n) {
+                    e.mesh_indices.extend_from_slice(t);
+                }
+            }
+            for [a, b] in m.boundary_edges() {
+                e.lines.push(LineVertex {
+                    pos: local(&m.positions[a as usize]),
+                    color: EDGE_COLOR,
+                });
+                e.lines.push(LineVertex {
+                    pos: local(&m.positions[b as usize]),
+                    color: EDGE_COLOR,
+                });
+            }
+        }
+        g => {
+            let c = wire_color(color);
+            let pts = g.curve_points();
+            for w in pts.windows(2) {
+                e.lines.push(LineVertex {
+                    pos: local(&w[0]),
+                    color: c,
+                });
+                e.lines.push(LineVertex {
+                    pos: local(&w[1]),
+                    color: c,
+                });
             }
         }
     }
+    e
 }
 
 /// Per-vertex normals: the mesh's own where valid, otherwise area-weighted face normals.
 fn vertex_normals(m: &Mesh) -> Vec<Vec3> {
     let n = m.positions.len();
+    if m.normals.len() == n && m.normals.iter().all(|v| v.length() > 0.5) {
+        return m.normals.clone();
+    }
     let mut acc = vec![Vec3::new(0.0, 0.0, 0.0); n];
     for t in &m.triangles {
         if t.iter().any(|&i| i as usize >= n) {
@@ -159,8 +289,7 @@ fn vertex_normals(m: &Mesh) -> Vec<Vec3> {
         let [a, b, c] = t.map(|i| m.positions[i as usize]);
         let f = (b - a).cross(c - a);
         for &i in t {
-            let v = &mut acc[i as usize];
-            *v = Vec3::new(v.x + f.x, v.y + f.y, v.z + f.z);
+            acc[i as usize] = acc[i as usize] + f;
         }
     }
     (0..n)
@@ -174,78 +303,181 @@ fn vertex_normals(m: &Mesh) -> Vec<Vec3> {
         .collect()
 }
 
-/// Grid lines on the XY plane (Rhino's construction plane) covering the scene, plus
-/// red/green X/Y axes. Returns vertices in scene coordinates.
-pub fn grid_lines(scene: &Scene) -> Vec<LineVertex> {
-    let extent = ((scene.max - scene.min).length() * 0.75).max(10.0);
-    // Spacing: a "nice" 1/2/5×10^k value giving roughly 30 lines across.
-    let raw = extent * 2.0 / 30.0;
+/// Construction plane a grid is drawn on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum GridPlane {
+    /// World XY (Top and Perspective views).
+    XY,
+    /// World XZ (Front view).
+    XZ,
+    /// World YZ (Right view).
+    YZ,
+}
+
+impl GridPlane {
+    pub const ALL: [GridPlane; 3] = [GridPlane::XY, GridPlane::XZ, GridPlane::YZ];
+
+    pub fn index(self) -> usize {
+        match self {
+            GridPlane::XY => 0,
+            GridPlane::XZ => 1,
+            GridPlane::YZ => 2,
+        }
+    }
+
+    /// World axes (u, v) of the plane.
+    pub fn axes(self) -> (DVec3, DVec3) {
+        match self {
+            GridPlane::XY => (DVec3::X, DVec3::Y),
+            GridPlane::XZ => (DVec3::X, DVec3::Z),
+            GridPlane::YZ => (DVec3::Y, DVec3::Z),
+        }
+    }
+}
+
+/// A "nice" grid spacing (1, 2 or 5 × 10^k) giving about 30 lines across `extent`.
+pub fn grid_spacing(extent: f64) -> f64 {
+    let raw = (extent.max(1e-6) * 2.0) / 30.0;
     let mag = 10f64.powf(raw.log10().floor());
-    let spacing = [1.0, 2.0, 5.0, 10.0]
+    [1.0, 2.0, 5.0, 10.0]
         .iter()
         .map(|m| m * mag)
-        .find(|s| *s >= raw)
-        .unwrap_or(10.0 * mag);
-    let half = (extent / spacing).ceil() as i64;
+        .find(|s| *s >= raw * 0.999)
+        .unwrap_or(10.0 * mag)
+}
+
+/// Grid lines on a world plane covering the scene, with the world axes in colour.
+/// `min_extent` keeps the grid useful for empty or tiny documents. Returns the lines
+/// and the spacing used.
+pub fn grid_lines(scene: &Scene, plane: GridPlane, min_extent: f64) -> (Vec<LineVertex>, f64) {
     let o = scene.origin;
-    // Grid lines sit at model coordinates that are multiples of `spacing`.
-    let cx = (o.x / spacing).round() as i64;
-    let cy = (o.y / spacing).round() as i64;
-    let z = (0.0 - o.z) as f32;
-    let minor = [0.55, 0.55, 0.57, 1.0];
-    let major = [0.42, 0.42, 0.45, 1.0];
-    let mut v = Vec::new();
-    for k in -half..=half {
-        let gx = (cx + k) as f64 * spacing;
-        let gy = (cy + k) as f64 * spacing;
-        let y0 = ((cy - half) as f64 * spacing - o.y) as f32;
-        let y1 = ((cy + half) as f64 * spacing - o.y) as f32;
-        let x0 = ((cx - half) as f64 * spacing - o.x) as f32;
-        let x1 = ((cx + half) as f64 * spacing - o.x) as f32;
-        let cxk = if (cx + k) % 5 == 0 { major } else { minor };
-        let cyk = if (cy + k) % 5 == 0 { major } else { minor };
-        let x = (gx - o.x) as f32;
-        let y = (gy - o.y) as f32;
-        if cx + k == 0 {
-            // Y axis (green)
-            v.push(LineVertex {
-                pos: [x, y0, z],
-                color: [0.05, 0.45, 0.05, 1.0],
-            });
-            v.push(LineVertex {
-                pos: [x, y1, z],
-                color: [0.05, 0.45, 0.05, 1.0],
-            });
+    let (u, v) = plane.axes();
+    // Rhino-like: the grid is centred on the world origin and large enough to cover
+    // the model with margin; far-away models get a grid around themselves instead.
+    let wmin = scene.min + o;
+    let wmax = scene.max + o;
+    let reach = [wmin, wmax]
+        .iter()
+        .flat_map(|c| [c.dot(u).abs(), c.dot(v).abs()])
+        .fold(0.0f64, f64::max);
+    let size = (scene.max - scene.min).length();
+    let (center, extent) = if reach <= size.max(min_extent) * 4.0 {
+        (DVec3::ZERO, (reach * 1.5).max(size).max(min_extent))
+    } else {
+        (
+            o + (scene.min + scene.max) / 2.0,
+            (size * 1.5).max(min_extent),
+        )
+    };
+    let spacing = grid_spacing(extent);
+    let half = (extent / spacing).ceil() as i64;
+    let cu = (center.dot(u) / spacing).round() as i64;
+    let cv = (center.dot(v) / spacing).round() as i64;
+    let minor = [0.50, 0.50, 0.52, 1.0];
+    let major = [0.36, 0.36, 0.38, 1.0];
+    let red = [0.60, 0.04, 0.04, 1.0];
+    let green = [0.04, 0.45, 0.04, 1.0];
+    let blue = [0.08, 0.20, 0.70, 1.0];
+    // Colour of the line where the u coordinate is 0 (the v axis) and vice versa.
+    let (u_axis, v_axis) = match plane {
+        GridPlane::XY => (red, green),
+        GridPlane::XZ => (red, blue),
+        GridPlane::YZ => (green, blue),
+    };
+    let world = |a: f64, b: f64| -> [f32; 3] {
+        let p = u * a + v * b - o;
+        [p.x as f32, p.y as f32, p.z as f32]
+    };
+    let (u0, u1) = ((cu - half) as f64 * spacing, (cu + half) as f64 * spacing);
+    let (v0, v1) = ((cv - half) as f64 * spacing, (cv + half) as f64 * spacing);
+    // Each line is split into one-cell segments: very long lines that cross the
+    // camera's near plane are rasterised badly by some drivers.
+    let n = (2 * half) as usize;
+    let mut out = Vec::with_capacity((n + 1) * 2 * n * 2);
+    let color = |i: i64, axis: [f32; 4]| {
+        if i == 0 {
+            axis
+        } else if i % 5 == 0 {
+            major
         } else {
-            v.push(LineVertex {
-                pos: [x, y0, z],
-                color: cxk,
+            minor
+        }
+    };
+    for k in -half..=half {
+        let iu = cu + k;
+        let a = iu as f64 * spacing;
+        let c = color(iu, v_axis);
+        for j in 0..n {
+            let b0 = v0 + (v1 - v0) * j as f64 / n as f64;
+            let b1 = v0 + (v1 - v0) * (j + 1) as f64 / n as f64;
+            out.push(LineVertex {
+                pos: world(a, b0),
+                color: c,
             });
-            v.push(LineVertex {
-                pos: [x, y1, z],
-                color: cxk,
+            out.push(LineVertex {
+                pos: world(a, b1),
+                color: c,
             });
         }
-        if cy + k == 0 {
-            // X axis (red)
-            v.push(LineVertex {
-                pos: [x0, y, z],
-                color: [0.55, 0.05, 0.05, 1.0],
+        let iv = cv + k;
+        let b = iv as f64 * spacing;
+        let c = color(iv, u_axis);
+        for j in 0..n {
+            let a0 = u0 + (u1 - u0) * j as f64 / n as f64;
+            let a1 = u0 + (u1 - u0) * (j + 1) as f64 / n as f64;
+            out.push(LineVertex {
+                pos: world(a0, b),
+                color: c,
             });
-            v.push(LineVertex {
-                pos: [x1, y, z],
-                color: [0.55, 0.05, 0.05, 1.0],
-            });
-        } else {
-            v.push(LineVertex {
-                pos: [x0, y, z],
-                color: cyk,
-            });
-            v.push(LineVertex {
-                pos: [x1, y, z],
-                color: cyk,
+            out.push(LineVertex {
+                pos: world(a1, b),
+                color: c,
             });
         }
     }
-    v
+    (out, spacing)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn doc_with_box() -> Document {
+        let mut d = Document::new();
+        let mut t = d.begin();
+        t.add(Geometry::Mesh(forma_geom::box_mesh(
+            &forma_geom::Plane::TOP,
+            1.0,
+            1.0,
+            1.0,
+        )));
+        t.commit();
+        d
+    }
+
+    #[test]
+    fn cache_follows_document_changes() {
+        let mut d = doc_with_box();
+        let mut cache = SceneCache::default();
+        let s1 = cache.scene(&d);
+        assert_eq!(s1.triangle_count(), 12);
+        assert_eq!(s1.line_vertices.len(), 24 * 2); // box edges
+        let ids: Vec<_> = d.objects().map(|o| o.id).collect();
+        let hl = cache.highlight(&d, &ids.iter().copied().collect());
+        assert_eq!(hl.triangle_count(), 12);
+        assert_eq!(hl.line_vertices[0].color, HIGHLIGHT);
+        let mut t = d.begin();
+        for id in ids {
+            t.remove(id);
+        }
+        t.commit();
+        assert!(cache.scene(&d).is_empty());
+        assert!(cache.entries.is_empty());
+    }
+
+    #[test]
+    fn spacing_is_nice() {
+        assert_eq!(grid_spacing(1500.0), 100.0);
+        assert_eq!(grid_spacing(75.0), 5.0);
+    }
 }

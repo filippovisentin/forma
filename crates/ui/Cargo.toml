@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 forma-engine.workspace = true
+forma-geom.workspace = true
 forma-render.workspace = true
 forma-doc.workspace = true
 eframe = "0.36"

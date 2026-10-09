@@ -4,6 +4,16 @@
 //! (curvo / truck / OpenCascade, see `docs/spikes/S2-kernel.md`) will live behind
 //! the types defined here.
 
+mod arc;
+mod plane;
+mod solids;
+mod xform;
+
+pub use arc::CircleArc;
+pub use plane::Plane;
+pub use solids::{box_mesh, cylinder_mesh, extrude_mesh, sphere_mesh, triangulate_polygon};
+pub use xform::Xform;
+
 use std::fmt;
 use std::ops::{Add, Mul, Neg, Sub};
 
@@ -86,6 +96,49 @@ impl Vec3 {
     }
 }
 
+impl Add for Vec3 {
+    type Output = Vec3;
+    fn add(self, o: Vec3) -> Vec3 {
+        Vec3::new(self.x + o.x, self.y + o.y, self.z + o.z)
+    }
+}
+
+impl Sub for Vec3 {
+    type Output = Vec3;
+    fn sub(self, o: Vec3) -> Vec3 {
+        Vec3::new(self.x - o.x, self.y - o.y, self.z - o.z)
+    }
+}
+
+impl Sub<Vec3> for Point3 {
+    type Output = Point3;
+    fn sub(self, v: Vec3) -> Point3 {
+        Point3::new(self.x - v.x, self.y - v.y, self.z - v.z)
+    }
+}
+
+impl Point3 {
+    /// The point as a vector from the origin.
+    pub fn to_vec(self) -> Vec3 {
+        Vec3::new(self.x, self.y, self.z)
+    }
+
+    /// Midpoint of two points.
+    pub fn mid(self, o: Point3) -> Point3 {
+        Point3::new(
+            (self.x + o.x) / 2.0,
+            (self.y + o.y) / 2.0,
+            (self.z + o.z) / 2.0,
+        )
+    }
+}
+
+impl Vec3 {
+    pub const X: Vec3 = Vec3::new(1.0, 0.0, 0.0);
+    pub const Y: Vec3 = Vec3::new(0.0, 1.0, 0.0);
+    pub const Z: Vec3 = Vec3::new(0.0, 0.0, 1.0);
+}
+
 impl Sub for Point3 {
     type Output = Vec3;
     fn sub(self, o: Point3) -> Vec3 {
@@ -114,6 +167,12 @@ impl Neg for Vec3 {
     }
 }
 
+impl fmt::Display for Vec3 {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{},{},{}", self.x, self.y, self.z)
+    }
+}
+
 impl fmt::Display for Point3 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{},{},{}", self.x, self.y, self.z)
@@ -139,6 +198,29 @@ impl BoundingBox {
             bb.max = Point3::new(bb.max.x.max(p.x), bb.max.y.max(p.y), bb.max.z.max(p.z));
         }
         Some(bb)
+    }
+
+    pub fn union(self, o: BoundingBox) -> BoundingBox {
+        BoundingBox::from_points(&[self.min, self.max, o.min, o.max]).expect("points")
+    }
+
+    pub fn center(&self) -> Point3 {
+        self.min.mid(self.max)
+    }
+
+    /// The 8 corners.
+    pub fn corners(&self) -> [Point3; 8] {
+        let (a, b) = (self.min, self.max);
+        [
+            Point3::new(a.x, a.y, a.z),
+            Point3::new(b.x, a.y, a.z),
+            Point3::new(b.x, b.y, a.z),
+            Point3::new(a.x, b.y, a.z),
+            Point3::new(a.x, a.y, b.z),
+            Point3::new(b.x, a.y, b.z),
+            Point3::new(b.x, b.y, b.z),
+            Point3::new(a.x, b.y, b.z),
+        ]
     }
 }
 
@@ -186,6 +268,26 @@ pub struct Mesh {
 impl Mesh {
     pub fn bounding_box(&self) -> Option<BoundingBox> {
         BoundingBox::from_points(&self.positions)
+    }
+
+    /// Edges used by exactly one triangle (by vertex index). For meshes built face by
+    /// face (breps, solids) these are the visible edges.
+    pub fn boundary_edges(&self) -> Vec<[u32; 2]> {
+        use std::collections::HashMap;
+        let mut count: HashMap<(u32, u32), (u32, [u32; 2])> = HashMap::new();
+        for t in &self.triangles {
+            for (a, b) in [(t[0], t[1]), (t[1], t[2]), (t[2], t[0])] {
+                let key = (a.min(b), a.max(b));
+                count.entry(key).or_insert((0, [a, b])).0 += 1;
+            }
+        }
+        let mut out: Vec<[u32; 2]> = count
+            .into_values()
+            .filter(|(n, _)| *n == 1)
+            .map(|(_, e)| e)
+            .collect();
+        out.sort_unstable();
+        out
     }
 
     /// Append another mesh, re-indexing its triangles.

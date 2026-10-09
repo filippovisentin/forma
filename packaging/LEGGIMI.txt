@@ -1,30 +1,52 @@
-FORMA — modellatore personale in stile Rhino
-============================================
+FORMA 0.2 — modellatore personale in stile Rhino
+=================================================
 
 Avvio
-  Fai doppio clic su forma.exe.
-  Se Windows mostra "PC protetto da Windows": clic su "Ulteriori informazioni"
-  e poi "Esegui comunque" (l'app non è firmata digitalmente).
+  Doppio clic su forma.exe. Se Windows mostra "PC protetto da Windows":
+  "Ulteriori informazioni" -> "Esegui comunque" (l'app non è firmata).
 
-Aprire un file
-  Ctrl+O, oppure trascina un file .3dm sulla finestra.
-  Puoi anche trascinare un .3dm sopra forma.exe in Esplora risorse.
+Interfaccia
+  4 viste (Top, Perspective, Front, Right). Doppio clic sul titolo di una vista
+  per ingrandirla / tornare a 4. A sinistra gli strumenti, a destra i layer,
+  in basso la riga di comando e la barra di stato.
 
-Navigazione (come in Rhino)
-  Tasto destro + trascina ........ ruota la vista
-  Shift + tasto destro / rotella premuta + trascina ... sposta (pan)
-  Rotella ........................ zoom
-  Doppio clic con la rotella ..... zoom estensioni
+Mouse (come Rhino)
+  Sinistro ................... seleziona / clicca punti
+  Trascina a destra (→) ...... selezione a finestra (oggetti interi)
+  Trascina a sinistra (←) .... selezione crossing (oggetti toccati)
+  Shift+clic / Ctrl+clic ..... aggiungi / togli dalla selezione
+  Destro trascinato .......... ruota (Perspective) / sposta (Top, Front, Right)
+  Shift+destro, rotella premuta  sposta la vista
+  Rotella .................... zoom verso il cursore
+  Clic destro ................ Invio (conferma o ripete l'ultimo comando)
 
-Riga di comando (in basso)
-  Help .......................... elenco comandi
-  ZE ............................ zoom estensioni
-  Top / Front / Right / Perspective .. viste standard
-  Line 0,0,0 @100,0 ............. linea (coordinate relative con @, polari con @d<angolo)
-  Polyline 0,0 100,0 100,50 c ... polilinea chiusa
-  Undo / Redo
+Tastiera
+  Scrivi direttamente: il testo va nella riga di comando.
+  Invio / Spazio = conferma o ripete · Esc = annulla · Canc = elimina
+  F8 = Ortho (o tieni premuto Shift) · F9 = Grid Snap · F7 = griglia
+  Ctrl+Z / Ctrl+Y / Ctrl+A / Ctrl+S / Ctrl+O / Ctrl+N
 
-Pannello Layers (a sinistra)
-  Spunta per mostrare/nascondere un layer.
+Coordinate (nel piano della vista attiva)
+  100,50        assoluto            @100,50   relativo all'ultimo punto
+  @300<45       distanza<angolo     300       lunghezza verso il cursore
 
-forma-cli.exe è la versione a riga di comando (info, render in PNG, script).
+Comandi
+  Curve:     Line, Polyline (C chiude), Rectangle, Circle, Arc
+  Solidi:    Box, Cylinder, Sphere, ExtrudeCrv (curve chiuse -> solido)
+  Modifica:  Move, Copy, Rotate, Scale, Mirror, Delete
+  Selezione: SelAll, SelNone
+  Layer:     Layer <nome> (corrente), ChangeLayer <nome> (sposta la selezione)
+             oppure clic sul nome nel pannello / tasto destro
+  File:      New [mm|cm|m], Open, Save, Save As
+  Viste:     ZE (zoom estensioni vista attiva), ZEA (tutte), Top, Front, Right,
+             Perspective · Help = elenco completo
+
+Snap (barra di stato)
+  End, Mid, Cen, Quad sugli oggetti; Grid Snap con passo regolabile; Ortho.
+
+Note
+  - Salvando un file aperto da Rhino, la prima volta Forma propone un nuovo nome
+    (nome-forma.3dm): le superfici importate vengono salvate come mesh.
+  - Booleane e raccordi arriveranno con il kernel OpenCascade.
+
+forma-cli.exe: versione a riga di comando (info, render in PNG, script).

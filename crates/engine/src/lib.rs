@@ -5,13 +5,15 @@
 
 mod args;
 mod commands;
+mod create;
+mod edit;
 mod import;
 
 pub use args::{parse_point, Args};
 
-use forma_doc::Document;
+use forma_doc::{Document, ObjectId};
 use forma_geom::{Point3, Tolerance};
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::fmt;
 
 /// Error returned by a command. Commands must leave the document unchanged on error
@@ -45,6 +47,21 @@ pub struct Context {
     pub tolerance: Tolerance,
     /// Last point entered, used for `@` relative coordinates.
     pub last_point: Option<Point3>,
+    /// Selected objects; editing commands (Move, Rotate, Extrude…) act on these.
+    pub selection: BTreeSet<ObjectId>,
+}
+
+impl Context {
+    /// Selected object ids, or an error naming the command that needs them.
+    pub fn selected(&self, command: &str) -> Result<Vec<ObjectId>, CommandError> {
+        if self.selection.is_empty() {
+            Err(CommandError::Invalid(format!(
+                "{command}: select objects first"
+            )))
+        } else {
+            Ok(self.selection.iter().copied().collect())
+        }
+    }
 }
 
 /// A command, e.g. `Line`. Implementations live in `commands/`.
@@ -80,6 +97,7 @@ impl Engine {
                 doc: Document::new(),
                 tolerance: Tolerance::default(),
                 last_point: None,
+                selection: BTreeSet::new(),
             },
             commands: Vec::new(),
             lookup: HashMap::new(),
@@ -113,7 +131,11 @@ impl Engine {
             .get(&name.to_lowercase())
             .ok_or_else(|| CommandError::UnknownCommand(name.to_string()))?;
         let mut args = Args::new(tokens);
-        let out = self.commands[idx].run(&mut self.ctx, &mut args)?;
+        let result = self.commands[idx].run(&mut self.ctx, &mut args);
+        // Drop selected ids that no longer exist (deleted, undone…).
+        let doc = &self.ctx.doc;
+        self.ctx.selection.retain(|id| doc.object(*id).is_some());
+        let out = result?;
         if let Some(extra) = args.remaining() {
             return Err(CommandError::BadInput(format!("unused input: {extra}")));
         }
@@ -167,7 +189,7 @@ mod tests {
         let mut e = Engine::new();
         e.run_script("# a square\nPolyline 0,0 100,0 100,100 0,100 c; Line 0,0 @0,0,50")
             .unwrap();
-        assert_eq!(e.doc().len(), 5);
+        assert_eq!(e.doc().len(), 2);
     }
 
     #[test]

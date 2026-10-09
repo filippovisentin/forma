@@ -1,20 +1,23 @@
-//! GPU display of document geometry with wgpu: camera, scene buffers, shaded
-//! surfaces, curves and grid. Renders into its own texture, so the same code drives
-//! the egui viewport and headless screenshots (tests, CLI, agents).
-//! No windowing here; `forma-ui` shows the texture.
+//! GPU display of document geometry with wgpu: cameras, scene buffers, shaded
+//! surfaces with edges, curves, construction-plane grids and selection highlight.
+//! Each viewport renders into its own texture ([`View`]), so the same code drives the
+//! egui viewports and headless screenshots (tests, CLI, agents). No windowing here.
 
 mod camera;
 mod scene;
 
 pub use camera::{Camera, StandardView};
 pub use glam;
-pub use scene::{grid_lines, LineVertex, MeshVertex, Scene};
+pub use scene::{
+    grid_lines, grid_spacing, model_center, GridPlane, LineVertex, MeshVertex, Scene, SceneCache,
+    EDGE_COLOR, HIGHLIGHT,
+};
 pub use wgpu;
 
 use bytemuck::{Pod, Zeroable};
 use wgpu::util::DeviceExt;
 
-/// Colour format of the rendered image (what egui samples and PNGs are written from).
+/// Colour format of the rendered image (what PNGs are written from).
 pub const COLOR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 /// Format of the view handed to egui (`Renderer::render`'s return value).
 pub const DISPLAY_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
@@ -45,24 +48,73 @@ struct Targets {
     display_view: wgpu::TextureView,
 }
 
-struct SceneBuffers {
+/// GPU buffers of one [`Scene`].
+#[derive(Default)]
+struct Buffers {
     mesh_vertices: Option<wgpu::Buffer>,
     mesh_indices: Option<wgpu::Buffer>,
     index_count: u32,
     lines: Option<wgpu::Buffer>,
     line_count: u32,
-    grid: Option<wgpu::Buffer>,
-    grid_count: u32,
 }
 
-/// Draws a [`Scene`] from a [`Camera`] into an offscreen texture.
-pub struct Renderer {
-    mesh_pipeline: wgpu::RenderPipeline,
-    line_pipeline: wgpu::RenderPipeline,
+impl Buffers {
+    fn new(device: &wgpu::Device, s: &Scene) -> Buffers {
+        Buffers {
+            mesh_vertices: buffer(
+                device,
+                "mesh vertices",
+                bytemuck::cast_slice(&s.mesh_vertices),
+                wgpu::BufferUsages::VERTEX,
+            ),
+            mesh_indices: buffer(
+                device,
+                "mesh indices",
+                bytemuck::cast_slice(&s.mesh_indices),
+                wgpu::BufferUsages::INDEX,
+            ),
+            index_count: s.mesh_indices.len() as u32,
+            lines: buffer(
+                device,
+                "lines",
+                bytemuck::cast_slice(&s.line_vertices),
+                wgpu::BufferUsages::VERTEX,
+            ),
+            line_count: s.line_vertices.len() as u32,
+        }
+    }
+}
+
+fn buffer(
+    device: &wgpu::Device,
+    label: &str,
+    contents: &[u8],
+    usage: wgpu::BufferUsages,
+) -> Option<wgpu::Buffer> {
+    (!contents.is_empty()).then(|| {
+        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some(label),
+            contents,
+            usage,
+        })
+    })
+}
+
+/// One viewport's render target and camera uniforms.
+pub struct View {
     uniforms: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
     targets: Option<Targets>,
-    buffers: Option<SceneBuffers>,
+}
+
+/// Shared pipelines and scene buffers; draws any number of [`View`]s.
+pub struct Renderer {
+    mesh_pipeline: wgpu::RenderPipeline,
+    line_pipeline: wgpu::RenderPipeline,
+    bind_group_layout: wgpu::BindGroupLayout,
+    scene: Buffers,
+    highlight: Buffers,
+    grids: [Buffers; 3],
     pub show_grid: bool,
 }
 
@@ -83,20 +135,6 @@ impl Renderer {
                     min_binding_size: None,
                 },
                 count: None,
-            }],
-        });
-        let uniforms = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("forma uniforms"),
-            size: std::mem::size_of::<Uniforms>() as u64,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("forma uniforms"),
-            layout: &bgl,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: uniforms.as_entire_binding(),
             }],
         });
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -157,7 +195,7 @@ impl Renderer {
                 cache: None,
             })
         };
-        // Surfaces are pushed slightly back so curves on them stay visible.
+        // Surfaces are pushed slightly back so curves and edges on them stay visible.
         let mesh_pipeline = pipeline(
             "forma mesh",
             "vs_mesh",
@@ -184,55 +222,66 @@ impl Renderer {
         Renderer {
             mesh_pipeline,
             line_pipeline,
-            uniforms,
-            bind_group,
-            targets: None,
-            buffers: None,
+            bind_group_layout: bgl,
+            scene: Buffers::default(),
+            highlight: Buffers::default(),
+            grids: Default::default(),
             show_grid: true,
         }
     }
 
-    /// Upload a scene (replaces the previous one).
-    pub fn set_scene(&mut self, device: &wgpu::Device, scene: &Scene) {
-        let buf = |label: &str, contents: &[u8], usage: wgpu::BufferUsages| {
-            (!contents.is_empty()).then(|| {
-                device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some(label),
-                    contents,
-                    usage,
-                })
-            })
-        };
-        let grid = grid_lines(scene);
-        self.buffers = Some(SceneBuffers {
-            mesh_vertices: buf(
-                "mesh vertices",
-                bytemuck::cast_slice(&scene.mesh_vertices),
-                wgpu::BufferUsages::VERTEX,
-            ),
-            mesh_indices: buf(
-                "mesh indices",
-                bytemuck::cast_slice(&scene.mesh_indices),
-                wgpu::BufferUsages::INDEX,
-            ),
-            index_count: scene.mesh_indices.len() as u32,
-            lines: buf(
-                "lines",
-                bytemuck::cast_slice(&scene.line_vertices),
-                wgpu::BufferUsages::VERTEX,
-            ),
-            line_count: scene.line_vertices.len() as u32,
-            grid: buf(
-                "grid",
-                bytemuck::cast_slice(&grid),
-                wgpu::BufferUsages::VERTEX,
-            ),
-            grid_count: grid.len() as u32,
+    /// A new viewport target.
+    pub fn new_view(&self, device: &wgpu::Device) -> View {
+        let uniforms = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("forma view uniforms"),
+            size: std::mem::size_of::<Uniforms>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
         });
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("forma view"),
+            layout: &self.bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: uniforms.as_entire_binding(),
+            }],
+        });
+        View {
+            uniforms,
+            bind_group,
+            targets: None,
+        }
     }
 
-    fn ensure_targets(&mut self, device: &wgpu::Device, size: (u32, u32)) {
-        if self.targets.as_ref().is_some_and(|t| t.size == size) {
+    /// Upload the document scene and rebuild the grids around it. Returns the grid
+    /// spacing (the same on all three planes).
+    pub fn set_scene(&mut self, device: &wgpu::Device, scene: &Scene, min_grid_extent: f64) -> f64 {
+        self.scene = Buffers::new(device, scene);
+        let mut spacing = 1.0;
+        for p in GridPlane::ALL {
+            let (lines, s) = grid_lines(scene, p, min_grid_extent);
+            spacing = s;
+            self.grids[p.index()] = Buffers {
+                lines: buffer(
+                    device,
+                    "grid",
+                    bytemuck::cast_slice(&lines),
+                    wgpu::BufferUsages::VERTEX,
+                ),
+                line_count: lines.len() as u32,
+                ..Default::default()
+            };
+        }
+        spacing
+    }
+
+    /// Upload the selection highlight (empty scene clears it).
+    pub fn set_highlight(&mut self, device: &wgpu::Device, scene: &Scene) {
+        self.highlight = Buffers::new(device, scene);
+    }
+
+    fn ensure_targets(view: &mut View, device: &wgpu::Device, size: (u32, u32)) {
+        if view.targets.as_ref().is_some_and(|t| t.size == size) {
             return;
         }
         let extent = wgpu::Extent3d {
@@ -279,27 +328,29 @@ impl Renderer {
             format: Some(DISPLAY_FORMAT),
             ..Default::default()
         });
-        self.targets = Some(Targets {
+        view.targets = Some(Targets {
             size,
             msaa: msaa.create_view(&Default::default()),
             depth: depth.create_view(&Default::default()),
             output_view: output.create_view(&Default::default()),
-            display_view,
             output,
+            display_view,
         });
     }
 
-    /// Render into the viewport texture of the given size and return a view of it in
-    /// [`DISPLAY_FORMAT`] (gamma-encoded values, as egui expects for native textures).
-    pub fn render(
-        &mut self,
+    /// Render a view and return its texture in [`DISPLAY_FORMAT`] (gamma-encoded
+    /// values, as egui expects for native textures).
+    pub fn render<'v>(
+        &self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
+        view: &'v mut View,
         size: (u32, u32),
         camera: &Camera,
-    ) -> &wgpu::TextureView {
+        grid: GridPlane,
+    ) -> &'v wgpu::TextureView {
         let size = (size.0.max(1), size.1.max(1));
-        self.ensure_targets(device, size);
+        Self::ensure_targets(view, device, size);
         let aspect = size.0 as f64 / size.1 as f64;
         let eye = if camera.ortho {
             let d = -camera.back();
@@ -312,9 +363,9 @@ impl Renderer {
             view_proj: camera.view_proj(aspect).to_cols_array_2d(),
             eye,
         };
-        queue.write_buffer(&self.uniforms, 0, bytemuck::bytes_of(&u));
+        queue.write_buffer(&view.uniforms, 0, bytemuck::bytes_of(&u));
 
-        let targets = self.targets.as_ref().expect("targets");
+        let targets = view.targets.as_ref().expect("targets");
         let mut enc = device.create_command_encoder(&Default::default());
         {
             let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -340,33 +391,43 @@ impl Renderer {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            pass.set_bind_group(0, &self.bind_group, &[]);
-            if let Some(b) = &self.buffers {
-                if let (true, Some(g)) = (self.show_grid, &b.grid) {
+            pass.set_bind_group(0, &view.bind_group, &[]);
+            let draw_lines = |pass: &mut wgpu::RenderPass<'_>, b: &Buffers| {
+                if let Some(l) = &b.lines {
                     pass.set_pipeline(&self.line_pipeline);
-                    pass.set_vertex_buffer(0, g.slice(..));
-                    pass.draw(0..b.grid_count, 0..1);
+                    pass.set_vertex_buffer(0, l.slice(..));
+                    pass.draw(0..b.line_count, 0..1);
                 }
+            };
+            let draw_mesh = |pass: &mut wgpu::RenderPass<'_>, b: &Buffers| {
                 if let (Some(v), Some(i)) = (&b.mesh_vertices, &b.mesh_indices) {
                     pass.set_pipeline(&self.mesh_pipeline);
                     pass.set_vertex_buffer(0, v.slice(..));
                     pass.set_index_buffer(i.slice(..), wgpu::IndexFormat::Uint32);
                     pass.draw_indexed(0..b.index_count, 0, 0..1);
                 }
-                if let Some(l) = &b.lines {
-                    pass.set_pipeline(&self.line_pipeline);
-                    pass.set_vertex_buffer(0, l.slice(..));
-                    pass.draw(0..b.line_count, 0..1);
-                }
+            };
+            if self.show_grid {
+                draw_lines(&mut pass, &self.grids[grid.index()]);
             }
+            draw_mesh(&mut pass, &self.scene);
+            draw_lines(&mut pass, &self.scene);
+            // Same geometry drawn again: equal depth passes LessEqual, so it lands on top.
+            draw_mesh(&mut pass, &self.highlight);
+            draw_lines(&mut pass, &self.highlight);
         }
         queue.submit([enc.finish()]);
-        &self.targets.as_ref().expect("targets").display_view
+        &view.targets.as_ref().expect("targets").display_view
     }
 
-    /// Copy the last rendered image back to the CPU as tightly packed RGBA8 (sRGB).
-    pub fn read_pixels(&self, device: &wgpu::Device, queue: &wgpu::Queue) -> Option<Vec<u8>> {
-        let t = self.targets.as_ref()?;
+    /// Copy a view's last image back to the CPU as tightly packed RGBA8 (sRGB).
+    pub fn read_pixels(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        view: &View,
+    ) -> Option<Vec<u8>> {
+        let t = view.targets.as_ref()?;
         let (w, h) = t.size;
         let row = w * 4;
         let padded =
@@ -412,6 +473,15 @@ impl Renderer {
     }
 }
 
+/// Grid plane matching a standard view (Rhino's CPlanes).
+pub fn grid_plane_for(view: StandardView) -> GridPlane {
+    match view {
+        StandardView::Front => GridPlane::XZ,
+        StandardView::Right => GridPlane::YZ,
+        _ => GridPlane::XY,
+    }
+}
+
 /// A GPU device without a window, for screenshots and tests.
 pub fn headless_device() -> Option<(wgpu::Device, wgpu::Queue)> {
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
@@ -435,11 +505,13 @@ pub fn screenshot(
     let (device, queue) = headless_device()?;
     let scene = Scene::from_document(doc);
     let mut r = Renderer::new(&device);
-    r.set_scene(&device, &scene);
+    r.set_scene(&device, &scene, 10.0);
+    r.show_grid = std::env::var_os("FORMA_NO_GRID").is_none();
+    let mut v = r.new_view(&device);
     let mut cam = Camera::view(view);
     cam.fit(scene.min, scene.max, size.0 as f64 / size.1 as f64);
-    r.render(&device, &queue, size, &cam);
-    r.read_pixels(&device, &queue)
+    r.render(&device, &queue, &mut v, size, &cam, grid_plane_for(view));
+    r.read_pixels(&device, &queue, &v)
 }
 
 #[cfg(test)]
@@ -448,8 +520,8 @@ mod tests {
     use forma_doc::{Document, Geometry};
     use forma_geom::{Mesh, Point3};
 
-    /// Renders a red square (above the grid plane) seen from the top and checks the centre pixel. Skipped
-    /// when no GPU or software rasteriser is available (e.g. CI runners).
+    /// Renders a red square (above the grid plane) seen from the top and checks the
+    /// centre pixel. Skipped when no GPU or software rasteriser is available.
     #[test]
     fn renders_a_mesh_headless() {
         let mut doc = Document::new();

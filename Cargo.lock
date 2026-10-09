@@ -1202,6 +1202,7 @@ dependencies = [
  "eframe",
  "forma-doc",
  "forma-engine",
+ "forma-geom",
  "forma-render",
  "rfd",
 ]

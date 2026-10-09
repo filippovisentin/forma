@@ -79,6 +79,11 @@ impl Camera {
     }
 
     pub fn view_proj(&self, aspect: f64) -> Mat4 {
+        self.view_proj_f64(aspect).as_mat4()
+    }
+
+    /// Double-precision view-projection (scene coordinates → clip space), for picking.
+    pub fn view_proj_f64(&self, aspect: f64) -> DMat4 {
         let view = DMat4::look_at_rh(self.eye(), self.target, self.up());
         let near = (self.distance * 1e-3).max(1e-3);
         let far = self.distance * 100.0 + 1.0;
@@ -89,7 +94,45 @@ impl Camera {
         } else {
             DMat4::perspective_rh(self.fov_y, aspect, near, far)
         };
-        (proj * view).as_mat4()
+        proj * view
+    }
+
+    /// Ray through a point in normalised device coordinates (x, y in −1..1),
+    /// in scene coordinates: (origin, unit direction).
+    pub fn ray(&self, ndc_x: f64, ndc_y: f64, aspect: f64) -> (DVec3, DVec3) {
+        let inv = self.view_proj_f64(aspect).inverse();
+        let near = inv.project_point3(DVec3::new(ndc_x, ndc_y, 0.0));
+        let far = inv.project_point3(DVec3::new(ndc_x, ndc_y, 1.0));
+        let dir = (far - near).normalize_or_zero();
+        (
+            near,
+            if dir == DVec3::ZERO {
+                -self.back()
+            } else {
+                dir
+            },
+        )
+    }
+
+    /// Normalised device coordinates of a scene point and whether it is in front of
+    /// the camera.
+    pub fn project(&self, p: DVec3, aspect: f64) -> Option<(f64, f64)> {
+        let clip = self.view_proj_f64(aspect) * p.extend(1.0);
+        if clip.w <= 1e-9 {
+            return None;
+        }
+        Some((clip.x / clip.w, clip.y / clip.w))
+    }
+
+    /// Zoom by `factor` keeping the scene point `anchor` fixed on screen.
+    pub fn zoom_at(&mut self, factor: f64, anchor: DVec3) {
+        let new_distance = (self.distance * factor).max(1e-3);
+        let k = new_distance / self.distance;
+        // Move the target towards the anchor projected on the target plane.
+        let n = self.back();
+        let a = anchor - n * (anchor - self.target).dot(n);
+        self.target = a + (self.target - a) * k;
+        self.distance = new_distance;
     }
 
     /// Fit a box (scene coordinates) in view, keeping the viewing direction.
@@ -102,18 +145,32 @@ impl Camera {
         self.target = center;
         self.distance = radius / half_fov.sin() * 1.05;
         // Tighten: project the 8 corners and scale until the box fills ~90% of the view.
+        // In perspective the eye must stay outside the bounding sphere, otherwise
+        // nearby faces get clipped and fill the view.
         let aspect = aspect.max(1e-6);
+        let min_distance = radius * 1.1;
         for _ in 0..4 {
-            let vp = self.view_proj(aspect);
+            let vp = self.view_proj_f64(aspect);
             let mut ext: f64 = 0.0;
+            let mut behind = false;
             for i in 0..8 {
                 let c = DVec3::new(
                     if i & 1 == 0 { min.x } else { max.x },
                     if i & 2 == 0 { min.y } else { max.y },
                     if i & 4 == 0 { min.z } else { max.z },
                 );
-                let p = vp.project_point3(c.as_vec3());
-                ext = ext.max(p.x.abs() as f64).max(p.y.abs() as f64);
+                let clip = vp * c.extend(1.0);
+                if clip.w <= 1e-9 {
+                    behind = true;
+                    break;
+                }
+                ext = ext
+                    .max((clip.x / clip.w).abs())
+                    .max((clip.y / clip.w).abs());
+            }
+            if behind {
+                self.distance *= 1.5;
+                continue;
             }
             if !(ext.is_finite() && ext > 1e-6) {
                 break;
@@ -122,8 +179,7 @@ impl Camera {
             if self.ortho {
                 self.distance *= k;
             } else {
-                // Perspective: scale the distance between target and eye roughly.
-                self.distance *= 1.0 + (k - 1.0) * 0.8;
+                self.distance = (self.distance * (1.0 + (k - 1.0) * 0.8)).max(min_distance);
             }
         }
     }

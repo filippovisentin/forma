@@ -3,8 +3,9 @@
 A personal, Rhino-style NURBS modeller written in Rust — built for my own interior-design
 workflow and as an experiment in building a real CAD tool with AI agents.
 
-> Status: **v0.1.0** — opens Rhino `.3dm` files in a 3D viewport (shaded surfaces, curves,
-> layers, orbit/pan/zoom, standard views, command line). Download it from
+> Status: **v0.2.0** — Rhino-style modelling: four viewports with CPlanes, snaps, Ortho,
+> curves (Line, Polyline, Rectangle, Circle, Arc), solids (Box, Cylinder, Sphere, ExtrudeCrv),
+> selection and transforms (Move, Copy, Rotate, Scale, Mirror), layers, open/save `.3dm`. Download it from
 > [Releases](https://github.com/filippovisentin/forma/releases). See [ROADMAP.md](ROADMAP.md).
 > No window yet. See [ROADMAP.md](ROADMAP.md).
 

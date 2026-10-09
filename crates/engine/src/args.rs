@@ -59,6 +59,34 @@ impl<'a> Args<'a> {
             .map_err(|_| CommandError::BadInput(format!("{what}: {t}")))
     }
 
+    /// Next token parsed as a vector `x,y,z` (or `x,y`).
+    pub fn vector(&mut self, what: &'static str) -> Result<Vec3, CommandError> {
+        let t = self.next_token().ok_or(CommandError::MissingInput(what))?;
+        parse_point(t, None).map(|p| p.to_vec())
+    }
+
+    /// Optional trailing vector: consumed only if the next token parses as one.
+    pub fn optional_vector(&mut self) -> Option<Vec3> {
+        let t = self.peek()?;
+        let v = parse_point(t, None).ok()?.to_vec();
+        self.pos += 1;
+        Some(v)
+    }
+
+    /// Optional trailing number.
+    pub fn optional_number(&mut self) -> Option<f64> {
+        let v = self.peek()?.parse().ok()?;
+        self.pos += 1;
+        Some(v)
+    }
+
+    /// All remaining tokens.
+    pub fn rest(&mut self) -> Vec<&'a str> {
+        let r = self.tokens[self.pos..].to_vec();
+        self.pos = self.tokens.len();
+        r
+    }
+
     /// Unconsumed tokens joined with spaces, or `None` if all were used.
     pub fn remaining(&self) -> Option<String> {
         (self.pos < self.tokens.len()).then(|| self.tokens[self.pos..].join(" "))

@@ -1,14 +1,33 @@
 //! Built-in commands. One struct per command; keep each small and tested.
 
 use crate::{Args, Command, CommandError, CommandResult, Context};
-use forma_doc::{Geometry, ObjectId};
+use forma_doc::Geometry;
 use forma_geom::LineCurve;
 
 pub fn builtin() -> Vec<Box<dyn Command>> {
     vec![
         Box::new(Line),
         Box::new(Polyline),
-        Box::new(Delete),
+        Box::new(crate::create::Rectangle),
+        Box::new(crate::create::Circle),
+        Box::new(crate::create::Arc),
+        Box::new(crate::create::BoxCmd),
+        Box::new(crate::create::Cylinder),
+        Box::new(crate::create::Sphere),
+        Box::new(crate::create::Extrude),
+        Box::new(crate::edit::Move),
+        Box::new(crate::edit::Copy),
+        Box::new(crate::edit::Rotate),
+        Box::new(crate::edit::Scale),
+        Box::new(crate::edit::Mirror),
+        Box::new(crate::edit::Delete),
+        Box::new(crate::edit::SelAll),
+        Box::new(crate::edit::SelNone),
+        Box::new(crate::edit::Select),
+        Box::new(crate::edit::LayerCmd),
+        Box::new(crate::edit::ChangeLayer),
+        Box::new(crate::edit::New),
+        Box::new(crate::edit::Save),
         Box::new(Undo),
         Box::new(Redo),
         Box::new(Open),
@@ -118,55 +137,19 @@ impl Command for Polyline {
         if pts.len() < 2 {
             return Err(CommandError::MissingInput("second point"));
         }
-        let mut t = ctx.doc.begin();
-        for w in pts.windows(2) {
-            let seg = LineCurve::new(w[0], w[1]);
-            if seg.is_degenerate(ctx.tolerance) {
-                return Err(CommandError::Invalid(
-                    "segment shorter than tolerance".into(),
-                ));
-            }
-            t.add(Geometry::Line(seg));
+        pts.dedup_by(|a, b| a.distance_to(*b) <= ctx.tolerance.absolute);
+        if pts.len() < 2 || (close && pts.len() < 4) {
+            return Err(CommandError::Invalid("polyline is degenerate".into()));
         }
+        let mut t = ctx.doc.begin();
+        let id = t.add(Geometry::Polyline(pts.clone()));
         t.commit();
         ctx.last_point = pts.last().copied();
-        Ok(format!("added {} segments", pts.len() - 1))
-    }
-}
-
-/// `Delete #id ...`
-pub struct Delete;
-
-impl Command for Delete {
-    fn name(&self) -> &'static str {
-        "Delete"
-    }
-    fn aliases(&self) -> &'static [&'static str] {
-        &["Del"]
-    }
-    fn help(&self) -> &'static str {
-        "Delete #id ... — remove objects by id"
-    }
-    fn run(&self, ctx: &mut Context, args: &mut Args) -> CommandResult {
-        let mut ids = Vec::new();
-        while let Some(tok) = args.next_token() {
-            let n: u64 = tok
-                .trim_start_matches('#')
-                .parse()
-                .map_err(|_| CommandError::BadInput(tok.to_string()))?;
-            ids.push(ObjectId(n));
-        }
-        if ids.is_empty() {
-            return Err(CommandError::MissingInput("object ids"));
-        }
-        let mut t = ctx.doc.begin();
-        for id in &ids {
-            if !t.remove(*id) {
-                return Err(CommandError::Invalid(format!("no object #{}", id.0)));
-            }
-        }
-        t.commit();
-        Ok(format!("deleted {}", ids.len()))
+        Ok(format!(
+            "added #{} polyline, {} segments",
+            id.0,
+            pts.len() - 1
+        ))
     }
 }
 
@@ -236,14 +219,15 @@ mod tests {
     }
 
     #[test]
-    fn closed_polyline_is_one_undo_step() {
+    fn closed_polyline_is_one_object() {
         let mut e = Engine::new();
         e.run_line("Polyline 0,0 600,0 600,400 0,400 c").unwrap();
-        assert_eq!(e.doc().len(), 4);
+        assert_eq!(e.doc().len(), 1);
+        assert!(e.doc().objects().next().unwrap().geometry.is_closed_curve());
         e.run_line("Undo").unwrap();
         assert!(e.doc().is_empty());
         e.run_line("Redo").unwrap();
-        assert_eq!(e.doc().len(), 4);
+        assert_eq!(e.doc().len(), 1);
     }
 
     #[test]

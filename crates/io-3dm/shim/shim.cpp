@@ -421,3 +421,93 @@ int f3dm_write_line(const char* path, const double a[3], const double b[3], cons
 }
 
 }  // extern "C"
+
+// ---------------------------------------------------------------------------
+// Writing. A writer collects layers and objects, then saves one .3dm file.
+
+extern "C" {
+
+struct F3dmWriter {
+  ONX_Model model;
+  std::vector<ON_UUID> layer_ids;   // by writer layer index
+  std::vector<int> layer_indices;   // model layer index by writer layer index
+};
+
+F3dmWriter* f3dm_writer_new(int unit_system, double abs_tol) {
+  F3dmWriter* w = new F3dmWriter();
+  w->model.m_settings.m_ModelUnitsAndTolerances.m_unit_system =
+      ON::LengthUnitSystemFromUnsigned(static_cast<unsigned int>(unit_system));
+  w->model.m_settings.m_ModelUnitsAndTolerances.m_absolute_tolerance = abs_tol;
+  w->model.m_settings.m_ModelUnitsAndTolerances.m_angle_tolerance = ON_PI / 180.0;
+  w->model.m_settings.m_ModelUnitsAndTolerances.m_relative_tolerance = 0.01;
+  return w;
+}
+
+void f3dm_writer_free(F3dmWriter* w) { delete w; }
+
+// Adds a layer (short name, parent = writer index or -1). Returns the writer index.
+int f3dm_writer_layer(F3dmWriter* w, const char* name, int parent, const unsigned char rgb[3],
+                      int visible) {
+  ON_Layer layer;
+  ON_wString wname(name);
+  layer.SetName(static_cast<const wchar_t*>(wname));
+  layer.SetColor(ON_Color(rgb[0], rgb[1], rgb[2]));
+  layer.SetVisible(visible != 0);
+  if (parent >= 0 && static_cast<size_t>(parent) < w->layer_ids.size()) {
+    layer.SetParentLayerId(w->layer_ids[parent]);
+  }
+  ON_ModelComponentReference ref = w->model.AddModelComponent(layer, true);
+  const ON_ModelComponent* c = ref.ModelComponent();
+  if (!c) return -1;
+  w->layer_ids.push_back(c->Id());
+  w->layer_indices.push_back(c->Index());
+  return static_cast<int>(w->layer_ids.size() - 1);
+}
+
+static int add_object(F3dmWriter* w, int layer, ON_Object* geometry) {
+  ON_3dmObjectAttributes* a = new ON_3dmObjectAttributes();
+  if (layer >= 0 && static_cast<size_t>(layer) < w->layer_indices.size()) {
+    a->m_layer_index = w->layer_indices[layer];
+  }
+  ON_ModelComponentReference ref = w->model.AddManagedModelGeometryComponent(geometry, a);
+  return ref.IsEmpty() ? 0 : 1;
+}
+
+int f3dm_writer_line(F3dmWriter* w, int layer, const double a[3], const double b[3]) {
+  return add_object(w, layer, new ON_LineCurve(ON_3dPoint(a), ON_3dPoint(b)));
+}
+
+int f3dm_writer_polyline(F3dmWriter* w, int layer, const double* xyz, int n) {
+  ON_Polyline pl;
+  for (int i = 0; i < n; i++) pl.Append(ON_3dPoint(xyz + 3 * i));
+  return add_object(w, layer, new ON_PolylineCurve(pl));
+}
+
+int f3dm_writer_arc(F3dmWriter* w, int layer, const double center[3], const double xaxis[3],
+                    const double yaxis[3], double radius, double sweep) {
+  const ON_3dPoint o(center);
+  const ON_3dVector vx(xaxis), vy(yaxis);
+  ON_Plane plane(o, vx, vy);
+  ON_Arc arc(plane, radius, sweep);
+  return add_object(w, layer, new ON_ArcCurve(arc));
+}
+
+int f3dm_writer_mesh(F3dmWriter* w, int layer, const double* xyz, const double* normals, int nv,
+                     const unsigned int* tri, int nt) {
+  ON_Mesh* mesh = new ON_Mesh(nt, nv, normals != nullptr, false);
+  for (int i = 0; i < nv; i++) {
+    mesh->SetVertex(i, ON_3dPoint(xyz + 3 * i));
+    if (normals) mesh->SetVertexNormal(i, ON_3dVector(normals + 3 * i));
+  }
+  for (int i = 0; i < nt; i++) {
+    mesh->SetTriangle(i, static_cast<int>(tri[3 * i]), static_cast<int>(tri[3 * i + 1]),
+                      static_cast<int>(tri[3 * i + 2]));
+  }
+  if (!normals) mesh->ComputeVertexNormals();
+  mesh->BoundingBox();
+  return add_object(w, layer, mesh);
+}
+
+int f3dm_writer_save(F3dmWriter* w, const char* path) { return w->model.Write(path, 0) ? 1 : 0; }
+
+}  // extern "C"

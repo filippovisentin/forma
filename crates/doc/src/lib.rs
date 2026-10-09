@@ -3,7 +3,7 @@
 //! Every mutation goes through a [`Transaction`], which records the changes so
 //! they can be undone as one step.
 
-use forma_geom::{BoundingBox, LineCurve, Mesh, Point3};
+use forma_geom::{BoundingBox, CircleArc, LineCurve, Mesh, Point3, Vec3, Xform};
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
@@ -21,6 +21,8 @@ pub enum Geometry {
     Line(LineCurve),
     /// Open or closed polyline (also used to display imported curves).
     Polyline(Vec<Point3>),
+    /// Circle or arc.
+    Arc(CircleArc),
     /// Triangle mesh (also the display form of imported breps and extrusions
     /// until the solid kernel lands, see ADR 0001).
     Mesh(Mesh),
@@ -31,8 +33,77 @@ impl Geometry {
         match self {
             Geometry::Line(_) => "line",
             Geometry::Polyline(_) => "polyline",
+            Geometry::Arc(a) if a.is_closed() => "circle",
+            Geometry::Arc(_) => "arc",
             Geometry::Mesh(_) => "mesh",
         }
+    }
+
+    pub fn is_curve(&self) -> bool {
+        !matches!(self, Geometry::Mesh(_))
+    }
+
+    /// True for closed curves (closed polylines and circles).
+    pub fn is_closed_curve(&self) -> bool {
+        match self {
+            Geometry::Polyline(p) => {
+                p.len() > 3 && p[0].distance_to(*p.last().expect("len")) < 1e-9
+            }
+            Geometry::Arc(a) => a.is_closed(),
+            _ => false,
+        }
+    }
+
+    /// Points of a curve as a polyline (arcs sampled). Empty for meshes.
+    pub fn curve_points(&self) -> Vec<Point3> {
+        match self {
+            Geometry::Line(l) => vec![l.from, l.to],
+            Geometry::Polyline(p) => p.clone(),
+            Geometry::Arc(a) => a.points(96),
+            Geometry::Mesh(_) => Vec::new(),
+        }
+    }
+
+    /// Transformed copy (rigid motions, uniform scale, mirror).
+    pub fn transformed(&self, x: &Xform) -> Geometry {
+        match self {
+            Geometry::Line(l) => Geometry::Line(LineCurve::new(x.point(l.from), x.point(l.to))),
+            Geometry::Polyline(p) => Geometry::Polyline(p.iter().map(|q| x.point(*q)).collect()),
+            Geometry::Arc(a) => Geometry::Arc(a.transformed(x)),
+            Geometry::Mesh(m) => {
+                let flip = x.flips();
+                Geometry::Mesh(Mesh {
+                    positions: m.positions.iter().map(|p| x.point(*p)).collect(),
+                    normals: m.normals.iter().map(|n| x.normal(*n)).collect(),
+                    triangles: if flip {
+                        m.triangles.iter().map(|t| [t[0], t[2], t[1]]).collect()
+                    } else {
+                        m.triangles.clone()
+                    },
+                })
+            }
+        }
+    }
+
+    /// Normal of a planar curve (Newell), if it has one.
+    pub fn curve_normal(&self) -> Option<Vec3> {
+        if let Geometry::Arc(a) = self {
+            return Some(a.plane.z);
+        }
+        let p = self.curve_points();
+        if p.len() < 3 {
+            return None;
+        }
+        let mut v = Vec3::new(0.0, 0.0, 0.0);
+        for i in 0..p.len() {
+            let (a, b) = (p[i], p[(i + 1) % p.len()]);
+            v = v + Vec3::new(
+                (a.y - b.y) * (a.z + b.z),
+                (a.z - b.z) * (a.x + b.x),
+                (a.x - b.x) * (a.y + b.y),
+            );
+        }
+        v.normalized()
     }
 
     pub fn bounding_box(&self) -> BoundingBox {
@@ -42,6 +113,7 @@ impl Geometry {
                 min: Point3::ORIGIN,
                 max: Point3::ORIGIN,
             }),
+            Geometry::Arc(a) => a.bounding_box(),
             Geometry::Mesh(m) => m.bounding_box().unwrap_or(BoundingBox {
                 min: Point3::ORIGIN,
                 max: Point3::ORIGIN,
@@ -55,6 +127,8 @@ pub struct Object {
     pub id: ObjectId,
     pub layer: LayerId,
     pub geometry: Geometry,
+    /// Changes whenever this object's geometry or layer changes (for display caches).
+    pub rev: u64,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -69,6 +143,7 @@ pub struct Layer {
 enum Change {
     Added(Object),
     Removed(Object),
+    Modified { before: Object, after: Object },
 }
 
 /// Length unit of a document.
@@ -104,6 +179,9 @@ pub struct Document {
     pub layers: Vec<Layer>,
     pub current_layer: LayerId,
     next_id: u64,
+    next_rev: u64,
+    /// Incremented on every change, undo and redo.
+    version: u64,
     undo: Vec<Vec<Change>>,
     redo: Vec<Vec<Change>>,
 }
@@ -123,6 +201,8 @@ impl Default for Document {
             }],
             current_layer: LayerId(0),
             next_id: 1,
+            next_rev: 1,
+            version: 0,
             undo: Vec::new(),
             redo: Vec::new(),
         }
@@ -132,6 +212,16 @@ impl Default for Document {
 impl Document {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Changes on every edit, undo and redo; cheap change detection for the UI.
+    pub fn version(&self) -> u64 {
+        self.version
+    }
+
+    /// Index of a layer by full path.
+    pub fn find_layer(&self, name: &str) -> Option<LayerId> {
+        self.layers.iter().position(|l| l.name == name).map(LayerId)
     }
 
     pub fn objects(&self) -> impl Iterator<Item = &Object> {
@@ -247,6 +337,17 @@ impl Document {
                 Geometry::Polyline(p) => {
                     let _ = writeln!(out, "#{} polyline [{}] {} points", o.id.0, layer, p.len());
                 }
+                Geometry::Arc(a) => {
+                    let _ = writeln!(
+                        out,
+                        "#{} {} [{}] center {} r {}",
+                        o.id.0,
+                        o.geometry.kind(),
+                        layer,
+                        a.center(),
+                        a.radius
+                    );
+                }
                 Geometry::Mesh(m) => {
                     let _ = writeln!(
                         out,
@@ -262,8 +363,9 @@ impl Document {
     }
 
     fn apply(&mut self, c: &Change) {
+        self.version += 1;
         match c {
-            Change::Added(o) => {
+            Change::Added(o) | Change::Modified { after: o, .. } => {
                 self.objects.insert(o.id, o.clone());
             }
             Change::Removed(o) => {
@@ -273,14 +375,20 @@ impl Document {
     }
 
     fn revert(&mut self, c: &Change) {
+        self.version += 1;
         match c {
             Change::Added(o) => {
                 self.objects.remove(&o.id);
             }
-            Change::Removed(o) => {
+            Change::Removed(o) | Change::Modified { before: o, .. } => {
                 self.objects.insert(o.id, o.clone());
             }
         }
+    }
+
+    fn take_rev(&mut self) -> u64 {
+        self.next_rev += 1;
+        self.next_rev
     }
 }
 
@@ -294,27 +402,20 @@ pub struct Transaction<'a> {
 impl Transaction<'_> {
     /// Add geometry on the current layer and return its id.
     pub fn add(&mut self, geometry: Geometry) -> ObjectId {
-        let id = ObjectId(self.doc.next_id);
-        self.doc.next_id += 1;
-        let obj = Object {
-            id,
-            layer: self.doc.current_layer,
-            geometry,
-        };
-        let change = Change::Added(obj);
-        self.doc.apply(&change);
-        self.changes.push(change);
-        id
+        let layer = self.doc.current_layer;
+        self.add_on_layer(geometry, layer)
     }
 
     /// Add geometry on a specific layer and return its id.
     pub fn add_on_layer(&mut self, geometry: Geometry, layer: LayerId) -> ObjectId {
         let id = ObjectId(self.doc.next_id);
         self.doc.next_id += 1;
+        let rev = self.doc.take_rev();
         let change = Change::Added(Object {
             id,
             layer,
             geometry,
+            rev,
         });
         self.doc.apply(&change);
         self.changes.push(change);
@@ -327,6 +428,40 @@ impl Transaction<'_> {
             return false;
         };
         let change = Change::Removed(obj);
+        self.doc.apply(&change);
+        self.changes.push(change);
+        true
+    }
+
+    /// Replace an object's geometry, keeping its id and layer.
+    pub fn replace(&mut self, id: ObjectId, geometry: Geometry) -> bool {
+        let Some(before) = self.doc.objects.get(&id).cloned() else {
+            return false;
+        };
+        let rev = self.doc.take_rev();
+        let after = Object {
+            geometry,
+            rev,
+            ..before.clone()
+        };
+        let change = Change::Modified { before, after };
+        self.doc.apply(&change);
+        self.changes.push(change);
+        true
+    }
+
+    /// Move an object to another layer.
+    pub fn set_layer(&mut self, id: ObjectId, layer: LayerId) -> bool {
+        let Some(before) = self.doc.objects.get(&id).cloned() else {
+            return false;
+        };
+        let rev = self.doc.take_rev();
+        let after = Object {
+            layer,
+            rev,
+            ..before.clone()
+        };
+        let change = Change::Modified { before, after };
         self.doc.apply(&change);
         self.changes.push(change);
         true
@@ -390,6 +525,28 @@ mod tests {
         }
         assert!(doc.is_empty());
         assert!(!doc.can_undo());
+    }
+
+    #[test]
+    fn replace_keeps_id_and_undoes() {
+        let mut doc = Document::new();
+        let mut t = doc.begin();
+        let id = t.add(line());
+        t.commit();
+        let rev0 = doc.object(id).unwrap().rev;
+        let moved = doc
+            .object(id)
+            .unwrap()
+            .geometry
+            .transformed(&Xform::translation(Vec3::new(0.0, 5.0, 0.0)));
+        let mut t = doc.begin();
+        t.replace(id, moved.clone());
+        t.commit();
+        assert_eq!(doc.object(id).unwrap().geometry, moved);
+        assert_ne!(doc.object(id).unwrap().rev, rev0);
+        doc.undo();
+        assert_eq!(doc.object(id).unwrap().geometry, line());
+        assert_eq!(doc.object(id).unwrap().rev, rev0);
     }
 
     #[test]
