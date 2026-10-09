@@ -78,9 +78,11 @@ fn main() {
     println!("cargo:rustc-link-lib=static=forma_on_zmem");
 
     if msvc {
-        // rpcrt4: UUIDs, shlwapi: paths, gdi32/user32: fonts and resource strings,
+        // rpcrt4: UUIDs, shlwapi/shell32: paths and known folders, gdi32/user32: fonts and resource strings,
         // advapi32: GetUserNameW (revision history).
-        for lib in ["rpcrt4", "shlwapi", "gdi32", "user32", "advapi32"] {
+        for lib in [
+            "rpcrt4", "shlwapi", "shell32", "gdi32", "user32", "advapi32",
+        ] {
             println!("cargo:rustc-link-lib={lib}");
         }
     } else if target.contains("apple") {
