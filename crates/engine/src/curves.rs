@@ -450,11 +450,16 @@ mod tests {
         e.run_line("Line 100,0 100,100").unwrap();
         e.run_line("Fillet 10 50,0 100,50").unwrap();
         assert_eq!(e.doc().len(), 3);
-        assert!(
-            e.doc().dump().contains("arc [Default] center 90,10,0 r 10"),
-            "{}",
-            e.doc().dump()
-        );
+        let arc = e
+            .doc()
+            .objects()
+            .find_map(|o| match &o.geometry {
+                Geometry::Arc(a) => Some(*a),
+                _ => None,
+            })
+            .expect("fillet arc");
+        assert!(near(arc.center(), Point3::new(90.0, 10.0, 0.0)), "{arc:?}");
+        assert!((arc.radius - 10.0).abs() < 1e-9);
         e.run_line("New").unwrap();
         e.run_line("Rectangle 0,0 100,50").unwrap();
         e.run_line("SelAll").unwrap();
