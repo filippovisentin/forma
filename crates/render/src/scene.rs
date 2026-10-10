@@ -259,6 +259,21 @@ fn build_entry(o: &Object, color: [u8; 3], origin: DVec3) -> Entry {
         }
         // Drawn by the UI as screen-space markers.
         Geometry::Point(_) => {}
+        // Annotations: dimension/extension/arrow lines; the text is drawn by the UI
+        // from `Geometry::annotation_label`.
+        g @ (Geometry::Text(_) | Geometry::Dimension(_)) => {
+            let c = wire_color(color);
+            for [a, b] in g.annotation_lines() {
+                e.lines.push(LineVertex {
+                    pos: local(&a),
+                    color: c,
+                });
+                e.lines.push(LineVertex {
+                    pos: local(&b),
+                    color: c,
+                });
+            }
+        }
         g => {
             let c = wire_color(color);
             let pts = g.curve_points();

@@ -203,6 +203,8 @@ impl SnapPoints {
                     }
                 }
                 Geometry::Point(p) => points.push((*p, SnapKind::Point)),
+                // Annotations give no snap points (their outline is only for picking).
+                Geometry::Text(_) | Geometry::Dimension(_) => {}
                 Geometry::Nurbs(n) => {
                     points.push((n.start(), SnapKind::End));
                     points.push((n.end(), SnapKind::End));

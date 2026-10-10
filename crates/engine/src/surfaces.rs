@@ -11,7 +11,7 @@ use forma_geom::{
 
 /// Add `items` (geometry with the attributes of its source object) as one undo
 /// step and select the new objects.
-fn add_selected(ctx: &mut Context, items: Vec<(Geometry, Object)>) -> Vec<ObjectId> {
+pub(crate) fn add_selected(ctx: &mut Context, items: Vec<(Geometry, Object)>) -> Vec<ObjectId> {
     let mut t = ctx.doc.begin();
     let ids: Vec<ObjectId> = items.into_iter().map(|(g, o)| t.add_like(g, &o)).collect();
     t.commit();
@@ -20,7 +20,7 @@ fn add_selected(ctx: &mut Context, items: Vec<(Geometry, Object)>) -> Vec<Object
 }
 
 /// Points of a closed curve without the repeated closing point.
-fn loop_points(g: &Geometry) -> Vec<Point3> {
+pub(crate) fn loop_points(g: &Geometry) -> Vec<Point3> {
     let mut p = g.curve_points();
     if p.len() > 1 && p[0].distance_to(*p.last().expect("len")) < 1e-9 {
         p.pop();
@@ -29,7 +29,7 @@ fn loop_points(g: &Geometry) -> Vec<Point3> {
 }
 
 /// Plane of a closed planar curve, if it is planar within `tol`.
-fn closed_plane(g: &Geometry, tol: f64) -> Option<(Plane, Vec<Point3>)> {
+pub(crate) fn closed_plane(g: &Geometry, tol: f64) -> Option<(Plane, Vec<Point3>)> {
     if !g.is_closed_curve() {
         return None;
     }
@@ -184,7 +184,7 @@ impl Command for Cap {
 }
 
 /// Selected curves (objects, in id order).
-fn selected_curves(ctx: &Context, cmd: &str) -> Result<Vec<Object>, CommandError> {
+pub(crate) fn selected_curves(ctx: &Context, cmd: &str) -> Result<Vec<Object>, CommandError> {
     Ok(ctx
         .selected(cmd)?
         .into_iter()

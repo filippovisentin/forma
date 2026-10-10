@@ -3,6 +3,7 @@
 
 #include "opennurbs_public.h"
 
+#include <algorithm>
 #include <cstring>
 #include <map>
 #include <string>
@@ -47,6 +48,7 @@ struct F3dmModel {
   std::vector<F3dmLayer> layers;
   std::vector<F3dmObject> objects;
   std::vector<long> object_colors;  // 0xRRGGBB, or -1 for "by layer"
+  std::vector<std::string> object_names;  // UTF-8, empty = no name
   // Geometry of each object (owned by `model`), and a brep for breps/extrusions
   // (extrusions are converted on demand and owned by `owned_breps`).
   std::vector<const ON_Geometry*> geometry;
@@ -162,6 +164,15 @@ F3dmModel* f3dm_read(const char* path) {
       rgb = (static_cast<long>(col.Red()) << 16) | (col.Green() << 8) | col.Blue();
     }
     m->object_colors.push_back(rgb);
+    {
+      std::string name;
+      if (a) {
+        const ON_wString wn = a->Name();
+        const ON_String utf8(wn);
+        name = static_cast<const char*>(utf8);
+      }
+      m->object_names.push_back(name);
+    }
     m->geometry.push_back(g);
     const ON_Brep* brep = ON_Brep::Cast(g);
     if (!brep) {
@@ -199,6 +210,19 @@ int f3dm_object_color(const F3dmModel* m, int i, unsigned char rgb[3]) {
   rgb[1] = static_cast<unsigned char>((c >> 8) & 255);
   rgb[2] = static_cast<unsigned char>(c & 255);
   return 1;
+}
+
+// Object name as UTF-8 into buf (NUL-terminated, truncated to cap). Returns the
+// full name length in bytes (0 = no name).
+int f3dm_object_name(const F3dmModel* m, int i, char* buf, int cap) {
+  if (i < 0 || static_cast<size_t>(i) >= m->object_names.size()) return 0;
+  const std::string& s = m->object_names[i];
+  if (buf && cap > 0) {
+    const size_t n = std::min(s.size(), static_cast<size_t>(cap - 1));
+    std::memcpy(buf, s.data(), n);
+    buf[n] = 0;
+  }
+  return static_cast<int>(s.size());
 }
 
 static const ON_Brep* brep_of(const F3dmModel* m, int obj) {
@@ -462,6 +486,7 @@ struct F3dmWriter {
   std::vector<int> layer_indices;   // model layer index by writer layer index
   bool has_color = false;           // colour for the next objects (else by layer)
   ON_Color color;
+  ON_wString name;                  // name for the next objects (empty = none)
 };
 
 F3dmWriter* f3dm_writer_new(int unit_system, double abs_tol) {
@@ -504,6 +529,7 @@ static int add_object(F3dmWriter* w, int layer, ON_Object* geometry) {
     a->SetColorSource(ON::color_from_object);
     a->m_color = w->color;
   }
+  if (!w->name.IsEmpty()) a->SetName(static_cast<const wchar_t*>(w->name), true);
   ON_ModelComponentReference ref = w->model.AddManagedModelGeometryComponent(geometry, a);
   return ref.IsEmpty() ? 0 : 1;
 }
@@ -592,6 +618,24 @@ int f3dm_writer_nurbs(F3dmWriter* w, int layer, int degree, int cv_count, const 
     return 0;
   }
   return add_object(w, layer, c);
+}
+
+// Name (UTF-8) for the objects added next; null or empty = no name.
+void f3dm_writer_name(F3dmWriter* w, const char* name) {
+  if (name && name[0]) {
+    w->name = ON_wString(ON_String(name));
+  } else {
+    w->name = ON_wString::EmptyString;
+  }
+}
+
+// Text dot with UTF-8 text and font height in points.
+int f3dm_writer_textdot(F3dmWriter* w, int layer, const double xyz[3], const char* text,
+                        int height) {
+  const ON_wString wtext{ON_String(text)};
+  ON_TextDot* dot = new ON_TextDot(ON_3dPoint(xyz), static_cast<const wchar_t*>(wtext), nullptr);
+  dot->SetHeightInPoints(height);
+  return add_object(w, layer, dot);
 }
 
 int f3dm_writer_point(F3dmWriter* w, int layer, const double xyz[3]) {

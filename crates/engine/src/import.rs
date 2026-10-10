@@ -20,6 +20,7 @@ pub fn open_3dm(path: &str) -> Result<Document, CommandError> {
     let imp = import_display(path).map_err(|e| CommandError::Invalid(e.to_string()))?;
     let mut doc = Document::new();
     doc.units = unit(imp.summary.units);
+    doc.dim_style = forma_doc::DimStyle::for_units(doc.units);
     doc.absolute_tolerance = imp.summary.absolute_tolerance;
     doc.path = Some(path.to_string());
     // The file's layers replace the default one.
@@ -47,6 +48,9 @@ pub fn open_3dm(path: &str) -> Result<Document, CommandError> {
             let id = t.add_on_layer(geometry, layer);
             if o.color.is_some() {
                 t.set_color(id, o.color);
+            }
+            if o.name.is_some() {
+                t.set_name(id, o.name);
             }
         }
         t.commit();

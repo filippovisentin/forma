@@ -4,23 +4,41 @@
 //! (curvo / truck / OpenCascade, see `docs/spikes/S2-kernel.md`) will live behind
 //! the types defined here.
 
+mod annotation;
 mod arc;
 mod curve;
+mod curvetools;
 mod faces;
+mod meshtools;
 mod nurbs;
 mod plane;
+mod primitives;
 mod solids;
 mod surface;
 mod xform;
 
+pub use annotation::{format_value, text_width, DimKind, Dimension, Label, Text};
 pub use arc::CircleArc;
 pub use curve::{
     carrier_intersections, chamfer_lines, crossings, extend, fillet_corners, fillet_lines, join,
     offset, side_of, split, trim, Chain, CurveError, ExtendTo, Seg,
 };
+pub use curvetools::{
+    arc_3pt, chain_points_at_lengths, chain_segments, circle_3pt, dist_to_segment,
+    division_lengths, in_plane, loop_inside, region_boolean, simplify_polyline, spiral_points,
+    step_lengths, RegionOp,
+};
 pub use faces::MeshFace;
+pub use meshtools::{
+    densify, mesh_border_loops, mesh_edge_segments, mesh_plane_section, polygon_centroid,
+    polyline_plane_points, Deform,
+};
 pub use nurbs::{Bezier2, NurbsCurve};
 pub use plane::Plane;
+pub use primitives::{
+    cone_mesh, coons_mesh, edge_curves_to_sides, ellipsoid_mesh, grid_mesh, miter_offset,
+    pipe_mesh, pyramid_mesh, ring, tapered_extrude_mesh, torus_mesh, tube_mesh,
+};
 pub use solids::{box_mesh, cylinder_mesh, extrude_mesh, sphere_mesh, triangulate_polygon};
 pub use surface::{
     cap_planar_holes, extrude_open_mesh, loft_mesh, newell_area, planar_mesh, point_in_polygon,

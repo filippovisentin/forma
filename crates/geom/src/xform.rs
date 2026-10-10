@@ -140,6 +140,22 @@ impl Xform {
         Self::about(plane.origin, m)
     }
 
+    /// Shear: every point moves along `dir` by `factor` times its distance from
+    /// `origin` measured along `across` (`p' = p + dir·factor·((p − origin)·across)`).
+    /// `dir` and `across` are normalised; they should be perpendicular.
+    pub fn shear(origin: Point3, dir: Vec3, across: Vec3, factor: f64) -> Xform {
+        let d = dir.normalized().unwrap_or(Vec3::X);
+        let n = across.normalized().unwrap_or(Vec3::Y);
+        let (d, n) = ([d.x, d.y, d.z], [n.x, n.y, n.z]);
+        let mut m = [[0.0; 3]; 3];
+        for (i, row) in m.iter_mut().enumerate() {
+            for (j, v) in row.iter_mut().enumerate() {
+                *v = f64::from(u8::from(i == j)) + factor * d[i] * n[j];
+            }
+        }
+        Self::about(origin, m)
+    }
+
     /// Orthogonal projection onto `plane`.
     pub fn projection(plane: &Plane) -> Xform {
         Self::scale_axes(plane, 1.0, 1.0, 0.0)
@@ -299,5 +315,15 @@ mod tests {
         // A face normal pointing +X at x=12 becomes a face at x=8 pointing −X.
         let n = m.normal(Vec3::X);
         assert!((n - Vec3::new(-1.0, 0.0, 0.0)).length() < 1e-9, "{n:?}");
+    }
+
+    #[test]
+    fn shear_moves_points_by_height() {
+        let x = Xform::shear(Point3::new(1.0, 1.0, 0.0), Vec3::X, Vec3::Y, 0.5);
+        let p = x.point(Point3::new(1.0, 3.0, 0.0));
+        assert!(p.distance_to(Point3::new(2.0, 3.0, 0.0)) < 1e-12);
+        let q = x.point(Point3::new(5.0, 1.0, 7.0));
+        assert!(q.distance_to(Point3::new(5.0, 1.0, 7.0)) < 1e-12);
+        assert!(!x.is_similarity());
     }
 }

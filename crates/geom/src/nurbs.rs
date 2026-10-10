@@ -177,6 +177,37 @@ impl NurbsCurve {
         BoundingBox::from_points(&self.points()).expect("points")
     }
 
+    /// Points at the given distances along the curve (measured on a fine
+    /// polyline; the points themselves lie exactly on the curve).
+    pub fn points_at_lengths(&self, lengths: &[f64]) -> Vec<Point3> {
+        let mut params = Vec::new();
+        for (a, b) in self.spans() {
+            let per = if self.degree == 1 { 1 } else { 128 };
+            for i in 0..per {
+                params.push(a + (b - a) * i as f64 / per as f64);
+            }
+        }
+        params.push(self.domain().1);
+        let pts: Vec<Point3> = params.iter().map(|t| self.point_at(*t)).collect();
+        let mut cum = vec![0.0];
+        for w in pts.windows(2) {
+            cum.push(cum.last().expect("len") + w[0].distance_to(w[1]));
+        }
+        lengths
+            .iter()
+            .map(|&s| {
+                let k = cum.partition_point(|c| *c < s).clamp(1, cum.len() - 1);
+                let seg = cum[k] - cum[k - 1];
+                let f = if seg > 0.0 {
+                    ((s - cum[k - 1]) / seg).clamp(0.0, 1.0)
+                } else {
+                    0.0
+                };
+                self.point_at(params[k - 1] + (params[k] - params[k - 1]) * f)
+            })
+            .collect()
+    }
+
     /// Transformed copy. Exact for every affine map (also non-uniform scale and
     /// projections): only the control points move.
     pub fn transformed(&self, x: &Xform) -> NurbsCurve {
@@ -509,5 +540,27 @@ mod tests {
         let s = c.transformed(&Xform::scale_axes(&Plane::TOP, 3.0, 1.0, 1.0));
         let p = s.point_at(t);
         assert!(((p.x / 3.0).powi(2) + p.y.powi(2) - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn points_at_lengths_on_a_circle() {
+        let c = NurbsCurve::from_arc(&CircleArc::circle(Plane::TOP, 10.0));
+        let quarter = std::f64::consts::TAU * 10.0 / 4.0;
+        let p = c.points_at_lengths(&[0.0, quarter, 2.0 * quarter]);
+        assert!(p[0].distance_to(Point3::new(10.0, 0.0, 0.0)) < 1e-9);
+        assert!(
+            p[1].distance_to(Point3::new(0.0, 10.0, 0.0)) < 1e-3,
+            "{}",
+            p[1]
+        );
+        assert!(
+            p[2].distance_to(Point3::new(-10.0, 0.0, 0.0)) < 1e-3,
+            "{}",
+            p[2]
+        );
+        // On the curve exactly.
+        assert!(p
+            .iter()
+            .all(|q| (q.distance_to(Point3::ORIGIN) - 10.0).abs() < 1e-9));
     }
 }

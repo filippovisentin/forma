@@ -93,6 +93,85 @@ pub fn builtin() -> Vec<Box<dyn Command>> {
         Box::new(Undo),
         Box::new(Redo),
         Box::new(Open),
+        // Curves
+        Box::new(crate::draw::Circle3Pt),
+        Box::new(crate::draw::Circle2Pt),
+        Box::new(crate::draw::Arc3Pt),
+        Box::new(crate::draw::Rectangle3Pt),
+        Box::new(crate::draw::RectangleCenter),
+        Box::new(crate::draw::RoundedRectangle),
+        Box::new(crate::draw::Slot),
+        Box::new(crate::draw::Helix),
+        Box::new(crate::draw::Spiral),
+        Box::new(crate::crvtools::Divide),
+        Box::new(crate::crvtools::DivideByLength),
+        Box::new(crate::crvtools::Contour),
+        Box::new(crate::crvtools::Section),
+        Box::new(crate::crvtools::DupBorder),
+        Box::new(crate::crvtools::DupEdge),
+        Box::new(crate::crvtools::CurveBoolean),
+        Box::new(crate::crvtools::Convert),
+        Box::new(crate::crvtools::Rebuild),
+        Box::new(crate::crvtools::CloseCrv),
+        Box::new(crate::crvtools::ExtractPt),
+        // Surfaces, solids, meshes
+        Box::new(crate::solids2::PlaneSrf),
+        Box::new(crate::solids2::SrfPt),
+        Box::new(crate::solids2::EdgeSrf),
+        Box::new(crate::solids2::Cone),
+        Box::new(crate::solids2::TCone),
+        Box::new(crate::solids2::Torus),
+        Box::new(crate::solids2::Ellipsoid),
+        Box::new(crate::solids2::Pyramid),
+        Box::new(crate::solids2::Tube),
+        Box::new(crate::solids2::Pipe),
+        Box::new(crate::solids2::ExtrudeCrvAlongCrv),
+        Box::new(crate::solids2::ExtrudeCrvTapered),
+        Box::new(crate::solids2::Slab),
+        Box::new(crate::solids2::Weld),
+        Box::new(crate::solids2::Unweld),
+        // Transforms
+        Box::new(crate::deform::Shear),
+        Box::new(crate::deform::Rotate3D),
+        Box::new(crate::deform::ScaleNU),
+        Box::new(crate::deform::SetPt),
+        Box::new(crate::deform::ArrayCrv),
+        Box::new(crate::deform::Twist),
+        Box::new(crate::deform::Taper),
+        // Attributes, selection, layers
+        Box::new(crate::layers::SetObjectName),
+        Box::new(crate::layers::SelName),
+        Box::new(crate::layers::SelLayer),
+        Box::new(crate::layers::SelColor),
+        Box::new(crate::layers::SelDup),
+        Box::new(crate::layers::SelOpenCrv),
+        Box::new(crate::layers::SelClosedCrv),
+        Box::new(crate::layers::SelPolyline),
+        Box::new(crate::layers::SelLine),
+        Box::new(crate::layers::SelText),
+        Box::new(crate::layers::SelDim),
+        Box::new(crate::layers::Purge),
+        Box::new(crate::layers::RenameLayer),
+        Box::new(crate::layers::DeleteLayer),
+        Box::new(crate::layers::OneLayerOn),
+        Box::new(crate::layers::AllLayersOn),
+        Box::new(crate::layers::ChangeToCurrentLayer),
+        Box::new(crate::layers::CopyObjectsToLayer),
+        // Analysis
+        Box::new(crate::measure::Angle),
+        Box::new(crate::measure::Radius),
+        Box::new(crate::measure::EvaluatePt),
+        Box::new(crate::measure::AreaCentroid),
+        Box::new(crate::measure::VolumeCentroid),
+        // Annotation
+        Box::new(crate::annotate::TextCmd),
+        Box::new(crate::annotate::TextDot),
+        Box::new(crate::annotate::Dim),
+        Box::new(crate::annotate::DimAligned),
+        Box::new(crate::annotate::DimRadius),
+        Box::new(crate::annotate::DimDiameter),
+        Box::new(crate::annotate::DimAngle),
+        Box::new(crate::annotate::DimStyle),
     ]
 }
 
@@ -323,5 +402,17 @@ mod tests {
         e.run_line("Delete #1").unwrap();
         assert!(e.doc().is_empty());
         assert!(e.run_line("Delete #99").is_err());
+    }
+
+    #[test]
+    fn names_and_aliases_are_unique() {
+        let mut seen = std::collections::HashMap::new();
+        for c in super::builtin() {
+            for n in std::iter::once(c.name()).chain(c.aliases().iter().copied()) {
+                if let Some(other) = seen.insert(n.to_lowercase(), c.name()) {
+                    panic!("{n} is used by {other} and {}", c.name());
+                }
+            }
+        }
     }
 }

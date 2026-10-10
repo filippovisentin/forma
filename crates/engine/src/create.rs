@@ -8,7 +8,7 @@ use forma_geom::{
     box_mesh, cylinder_mesh, extrude_mesh, sphere_mesh, CircleArc, NurbsCurve, Plane, Point3, Vec3,
 };
 
-fn finish(
+pub(crate) fn finish(
     ctx: &mut Context,
     geometry: Vec<Geometry>,
     select: bool,
@@ -22,7 +22,7 @@ fn finish(
     Ok(ids)
 }
 
-fn positive(v: f64, what: &str, ctx: &Context) -> Result<f64, CommandError> {
+pub(crate) fn positive(v: f64, what: &str, ctx: &Context) -> Result<f64, CommandError> {
     if v.abs() <= ctx.tolerance.absolute {
         Err(CommandError::Invalid(format!("{what} is too small")))
     } else {
@@ -239,7 +239,7 @@ impl Command for Extrude {
 }
 
 /// All remaining tokens as points (each relative to the previous one for `@`).
-fn point_list(
+pub(crate) fn point_list(
     ctx: &Context,
     args: &mut Args,
     first: &'static str,

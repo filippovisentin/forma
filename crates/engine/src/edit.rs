@@ -209,7 +209,7 @@ impl Command for Select {
     }
 }
 
-fn layer_named(doc: &mut Document, name: &str) -> LayerId {
+pub(crate) fn layer_named(doc: &mut Document, name: &str) -> LayerId {
     doc.find_layer(name).unwrap_or_else(|| {
         // Pleasant distinct colours for new layers.
         const PALETTE: [[u8; 3]; 6] = [
@@ -285,6 +285,7 @@ impl Command for New {
         };
         let mut doc = Document::new();
         doc.units = units;
+        doc.dim_style = forma_doc::DimStyle::for_units(units);
         doc.absolute_tolerance = match units {
             LengthUnit::Millimeters => 0.001,
             LengthUnit::Centimeters => 0.01,

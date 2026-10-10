@@ -28,7 +28,9 @@ fn units(u: LengthUnit) -> Units {
 
 /// Save `doc` to `path`. Curves are written as Rhino curves (lines, polylines,
 /// arcs/circles, polycurves, NURBS curves), points as point objects; solids and
-/// surfaces are written as meshes.
+/// surfaces are written as meshes. Annotations are written in a simplified form
+/// Rhino can display: text and text dots become text dots, dimensions become their
+/// lines plus a text dot with the measured value (not editable Rhino dimensions).
 pub fn write_document(path: impl AsRef<Path>, doc: &Document) -> Result<(), Error> {
     let path = path.as_ref();
     let cpath = c_path(path)?;
@@ -82,6 +84,13 @@ pub fn write_document(path: impl AsRef<Path>, doc: &Document) -> Result<(), Erro
         let rgb = o.color.unwrap_or([0, 0, 0]);
         // SAFETY: valid writer; rgb outlives the call.
         unsafe { ffi::f3dm_writer_color(w.0, c_int::from(o.color.is_some()), rgb.as_ptr()) };
+        let name = o
+            .name
+            .as_deref()
+            .and_then(|n| CString::new(n).ok())
+            .unwrap_or_default();
+        // SAFETY: valid writer, NUL-terminated name.
+        unsafe { ffi::f3dm_writer_name(w.0, name.as_ptr()) };
         // SAFETY (all calls): valid writer; buffers outlive the call.
         let ok = unsafe {
             match &o.geometry {
@@ -126,6 +135,28 @@ pub fn write_document(path: impl AsRef<Path>, doc: &Document) -> Result<(), Erro
                     ffi::f3dm_writer_polycurve(w.0, layer, data.as_ptr(), segs.len() as c_int)
                 }
                 Geometry::Point(p) => ffi::f3dm_writer_point(w.0, layer, [p.x, p.y, p.z].as_ptr()),
+                Geometry::Text(_) | Geometry::Dimension(_) => {
+                    let mut ok = 1;
+                    for [a, b] in o.geometry.annotation_lines() {
+                        ok &= ffi::f3dm_writer_line(
+                            w.0,
+                            layer,
+                            [a.x, a.y, a.z].as_ptr(),
+                            [b.x, b.y, b.z].as_ptr(),
+                        );
+                    }
+                    if let Some((p, text, _)) = o.geometry.label() {
+                        let text = CString::new(text).unwrap_or_default();
+                        ok &= ffi::f3dm_writer_textdot(
+                            w.0,
+                            layer,
+                            [p.x, p.y, p.z].as_ptr(),
+                            text.as_ptr(),
+                            14,
+                        );
+                    }
+                    ok
+                }
                 Geometry::Nurbs(n) => {
                     let xyz: Vec<f64> = n.points.iter().flat_map(|q| [q.x, q.y, q.z]).collect();
                     ffi::f3dm_writer_nurbs(

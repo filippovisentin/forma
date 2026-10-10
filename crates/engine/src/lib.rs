@@ -29,16 +29,23 @@ macro_rules! impl_meta {
 }
 
 mod analysis;
+mod annotate;
 mod args;
 mod attrs;
 mod commands;
 mod create;
+mod crvtools;
 mod curves;
+mod deform;
+mod draw;
 mod edit;
 mod files;
 mod import;
+mod layers;
+mod measure;
 mod select;
 mod solid;
+mod solids2;
 mod surfaces;
 mod transform;
 

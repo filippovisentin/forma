@@ -4,7 +4,8 @@
 //! they can be undone as one step.
 
 use forma_geom::{
-    BoundingBox, Chain, CircleArc, LineCurve, Mesh, NurbsCurve, Point3, Seg, Vec3, Xform,
+    BoundingBox, Chain, CircleArc, Dimension, Label, LineCurve, Mesh, NurbsCurve, Point3, Seg,
+    Text, Vec3, Xform,
 };
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
@@ -35,6 +36,10 @@ pub enum Geometry {
     Point(Point3),
     /// NURBS curve (free-form curves, ellipses, arcs after a non-uniform scale).
     Nurbs(NurbsCurve),
+    /// Text or text dot (annotation, not a curve).
+    Text(Text),
+    /// Dimension (annotation, not a curve).
+    Dimension(Dimension),
 }
 
 impl Geometry {
@@ -48,11 +53,49 @@ impl Geometry {
             Geometry::Mesh(_) => "mesh",
             Geometry::Point(_) => "point",
             Geometry::Nurbs(_) => "nurbs",
+            Geometry::Text(t) if t.dot => "textdot",
+            Geometry::Text(_) => "text",
+            Geometry::Dimension(_) => "dimension",
         }
     }
 
     pub fn is_curve(&self) -> bool {
-        !matches!(self, Geometry::Mesh(_) | Geometry::Point(_))
+        !matches!(
+            self,
+            Geometry::Mesh(_) | Geometry::Point(_) | Geometry::Text(_) | Geometry::Dimension(_)
+        )
+    }
+
+    /// True for text, text dots and dimensions.
+    pub fn is_annotation(&self) -> bool {
+        matches!(self, Geometry::Text(_) | Geometry::Dimension(_))
+    }
+
+    /// Line segments to draw for an annotation (dimension, extension and arrow
+    /// lines); empty for text and for every other geometry.
+    pub fn annotation_lines(&self) -> Vec<[Point3; 2]> {
+        match self {
+            Geometry::Dimension(d) => d.lines(),
+            _ => Vec::new(),
+        }
+    }
+
+    /// Text label of an annotation with its placement (anchor, reading and up
+    /// directions). See [`Label`] for the anchor convention.
+    pub fn annotation_label(&self) -> Option<Label> {
+        match self {
+            Geometry::Text(t) => Some(t.label()),
+            Geometry::Dimension(d) => Some(d.label()),
+            _ => None,
+        }
+    }
+
+    /// Text of an annotation: `(position, text, height)`. For dimensions the
+    /// position is the bottom centre of the text, for text objects the bottom-left
+    /// corner, for dots the dot point.
+    pub fn label(&self) -> Option<(Point3, String, f64)> {
+        self.annotation_label()
+            .map(|l| (l.position, l.text, l.height))
     }
 
     /// True for closed curves (closed polylines and circles).
@@ -79,7 +122,9 @@ impl Geometry {
             Geometry::Arc(a) => Some(Chain::new(vec![Seg::Arc(*a)])),
             Geometry::PolyCurve(s) => Some(Chain::new(s.clone())),
             Geometry::Nurbs(n) => Some(Chain::from_points(&n.points())),
-            Geometry::Mesh(_) | Geometry::Point(_) => None,
+            Geometry::Mesh(_) | Geometry::Point(_) | Geometry::Text(_) | Geometry::Dimension(_) => {
+                None
+            }
         }
     }
 
@@ -100,7 +145,8 @@ impl Geometry {
     }
 
     /// Points of a curve as a polyline (arcs and NURBS sampled). Empty for meshes
-    /// and points.
+    /// and points. For annotations: an outline used for picking and bounding boxes
+    /// (text box, dimension line path), not something to draw.
     pub fn curve_points(&self) -> Vec<Point3> {
         match self {
             Geometry::Line(l) => vec![l.from, l.to],
@@ -108,6 +154,8 @@ impl Geometry {
             Geometry::Arc(a) => a.points(96),
             Geometry::PolyCurve(s) => Chain::new(s.clone()).points(),
             Geometry::Nurbs(n) => n.points(),
+            Geometry::Text(t) => t.outline(),
+            Geometry::Dimension(d) => d.outline(),
             Geometry::Mesh(_) | Geometry::Point(_) => Vec::new(),
         }
     }
@@ -120,7 +168,9 @@ impl Geometry {
             Geometry::Arc(a) => Some(a.radius * a.sweep),
             Geometry::PolyCurve(s) => Some(s.iter().map(Seg::length).sum()),
             Geometry::Nurbs(n) => Some(n.length()),
-            Geometry::Mesh(_) | Geometry::Point(_) => None,
+            Geometry::Mesh(_) | Geometry::Point(_) | Geometry::Text(_) | Geometry::Dimension(_) => {
+                None
+            }
         }
     }
 
@@ -138,6 +188,7 @@ impl Geometry {
             Geometry::Nurbs(n) => Geometry::Nurbs(n.reversed()),
             Geometry::Mesh(m) => Geometry::Mesh(m.flipped()),
             Geometry::Point(p) => Geometry::Point(*p),
+            Geometry::Text(_) | Geometry::Dimension(_) => self.clone(),
         }
     }
 
@@ -151,6 +202,8 @@ impl Geometry {
             Geometry::Polyline(p) => Geometry::Polyline(p.iter().map(|q| x.point(*q)).collect()),
             Geometry::Point(p) => Geometry::Point(x.point(*p)),
             Geometry::Nurbs(n) => Geometry::Nurbs(n.transformed(x)),
+            Geometry::Text(t) => Geometry::Text(t.transformed(x)),
+            Geometry::Dimension(d) => Geometry::Dimension(d.transformed(x)),
             Geometry::Arc(a) if !similar => Geometry::Nurbs(NurbsCurve::from_arc(a).transformed(x)),
             Geometry::PolyCurve(s) if !similar && s.iter().any(|g| matches!(g, Seg::Arc(_))) => {
                 match NurbsCurve::from_segs(s) {
@@ -192,8 +245,11 @@ impl Geometry {
 
     /// Normal of a planar curve (Newell), if it has one.
     pub fn curve_normal(&self) -> Option<Vec3> {
-        if let Geometry::Arc(a) = self {
-            return Some(a.plane.z);
+        match self {
+            Geometry::Arc(a) => return Some(a.plane.z),
+            Geometry::Text(t) => return Some(t.plane.z),
+            Geometry::Dimension(d) => return Some(d.plane.z),
+            _ => {}
         }
         let p = self.curve_points();
         if p.len() < 3 {
@@ -219,8 +275,16 @@ impl Geometry {
                 max: Point3::ORIGIN,
             }),
             Geometry::Arc(a) => a.bounding_box(),
-            Geometry::PolyCurve(_) => {
-                BoundingBox::from_points(&self.curve_points()).unwrap_or(BoundingBox {
+            Geometry::PolyCurve(_) | Geometry::Text(_) | Geometry::Dimension(_) => {
+                let mut pts = self.curve_points();
+                if let Some(l) = self.annotation_label() {
+                    // Include the text box (approximate width).
+                    let w = forma_geom::text_width(&l.text, l.height);
+                    let left = if l.centered { -w / 2.0 } else { 0.0 };
+                    pts.push(l.position + l.x * left);
+                    pts.push(l.position + l.x * (left + w) + l.y * l.height);
+                }
+                BoundingBox::from_points(&pts).unwrap_or(BoundingBox {
                     min: Point3::ORIGIN,
                     max: Point3::ORIGIN,
                 })
@@ -251,6 +315,8 @@ pub struct Object {
     pub locked: bool,
     /// Group the object belongs to (Group / Ungroup), if any.
     pub group: Option<u32>,
+    /// Object name (SetObjectName), written to `.3dm` attributes.
+    pub name: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -261,6 +327,8 @@ pub struct Layer {
     pub locked: bool,
 }
 
+// `Modified` holds two objects; history entries are few, so boxing is not worth it.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone)]
 enum Change {
     Added(Object),
@@ -290,11 +358,39 @@ impl LengthUnit {
     }
 }
 
+/// Defaults for new annotations (Rhino's annotation style, reduced).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DimStyle {
+    /// Text height of new text and dimensions, in model units.
+    pub text_height: f64,
+    /// Decimal places of measured values (trailing zeros are dropped).
+    pub decimals: usize,
+}
+
+impl DimStyle {
+    /// A readable default for a document in `units` (10 cm, 100 mm, 0.1 m…).
+    pub fn for_units(units: LengthUnit) -> DimStyle {
+        let text_height = match units {
+            LengthUnit::Millimeters => 100.0,
+            LengthUnit::Centimeters => 10.0,
+            LengthUnit::Meters => 0.1,
+            LengthUnit::Inches => 4.0,
+            LengthUnit::Feet => 0.33,
+        };
+        DimStyle {
+            text_height,
+            decimals: 1,
+        }
+    }
+}
+
 /// The modelling document.
 #[derive(Debug, Clone)]
 pub struct Document {
     pub units: LengthUnit,
     pub absolute_tolerance: f64,
+    /// Defaults for new text and dimensions.
+    pub dim_style: DimStyle,
     /// Where the document was opened from, if anywhere.
     pub path: Option<String>,
     objects: BTreeMap<ObjectId, Object>,
@@ -313,6 +409,7 @@ impl Default for Document {
         Self {
             units: LengthUnit::Millimeters,
             absolute_tolerance: 0.001,
+            dim_style: DimStyle::for_units(LengthUnit::Millimeters),
             path: None,
             objects: BTreeMap::new(),
             layers: vec![Layer {
@@ -363,6 +460,86 @@ impl Document {
 
     pub fn layer(&self, id: LayerId) -> &Layer {
         &self.layers[id.0]
+    }
+
+    /// Rename a layer and its sub-layers (`old::child` → `new::child`). Not undoable,
+    /// like the other layer edits.
+    pub fn rename_layer(&mut self, id: LayerId, new_name: &str) {
+        let old = self.layers[id.0].name.clone();
+        let prefix = format!("{old}::");
+        for l in &mut self.layers {
+            if l.name == old {
+                l.name = new_name.to_string();
+            } else if let Some(rest) = l.name.strip_prefix(&prefix) {
+                l.name = format!("{new_name}::{rest}");
+            }
+        }
+        self.version += 1;
+    }
+
+    /// Remove empty layers. Objects keep their layers (indices are remapped, also
+    /// in the undo history); history entries that refer to a removed layer move to
+    /// the current layer. The current layer cannot be removed. Returns the names
+    /// of the removed layers.
+    pub fn remove_layers(&mut self, ids: &[LayerId]) -> Result<Vec<String>, String> {
+        for id in ids {
+            if id.0 >= self.layers.len() {
+                return Err(format!("no layer {}", id.0));
+            }
+            if *id == self.current_layer {
+                return Err(format!(
+                    "cannot remove the current layer {}",
+                    self.layers[id.0].name
+                ));
+            }
+            if self.objects.values().any(|o| o.layer == *id) {
+                return Err(format!("layer {} is not empty", self.layers[id.0].name));
+            }
+        }
+        let remove: std::collections::BTreeSet<usize> = ids.iter().map(|l| l.0).collect();
+        let mut map = vec![0usize; self.layers.len()];
+        let mut next = 0;
+        for (i, m) in map.iter_mut().enumerate() {
+            if !remove.contains(&i) {
+                *m = next;
+                next += 1;
+            }
+        }
+        let current = map[self.current_layer.0];
+        let remap = |l: &mut LayerId| {
+            l.0 = if remove.contains(&l.0) {
+                current
+            } else {
+                map[l.0]
+            };
+        };
+        for o in self.objects.values_mut() {
+            remap(&mut o.layer);
+        }
+        for step in self.undo.iter_mut().chain(self.redo.iter_mut()) {
+            for c in step {
+                match c {
+                    Change::Added(o) | Change::Removed(o) => remap(&mut o.layer),
+                    Change::Modified { before, after } => {
+                        remap(&mut before.layer);
+                        remap(&mut after.layer);
+                    }
+                }
+            }
+        }
+        let mut names = Vec::new();
+        let mut keep = Vec::new();
+        for (i, l) in self.layers.drain(..).enumerate() {
+            if remove.contains(&i) {
+                names.push(l.name);
+            } else {
+                keep.push(l);
+            }
+        }
+        self.layers = keep;
+        self.current_layer = LayerId(current);
+        self.version += 1;
+        Ok(names)
     }
 
     /// Change a layer's colour, visibility or lock (not undoable, like Rhino's
@@ -515,6 +692,28 @@ impl Document {
                 Geometry::Point(p) => {
                     let _ = writeln!(out, "#{} point [{}] {}", o.id.0, layer, p);
                 }
+                Geometry::Text(t) => {
+                    let _ = writeln!(
+                        out,
+                        "#{} {} [{}] {:?} h {} at {}",
+                        o.id.0,
+                        o.geometry.kind(),
+                        layer,
+                        t.text,
+                        t.height,
+                        t.plane.origin
+                    );
+                }
+                Geometry::Dimension(d) => {
+                    let _ = writeln!(
+                        out,
+                        "#{} dimension [{}] {:?} {:?}",
+                        o.id.0,
+                        layer,
+                        d.kind,
+                        d.text()
+                    );
+                }
                 Geometry::Nurbs(n) => {
                     let _ = writeln!(
                         out,
@@ -589,6 +788,7 @@ impl Transaction<'_> {
             hidden: false,
             locked: false,
             group: None,
+            name: None,
         });
         self.doc.apply(&change);
         self.changes.push(change);
@@ -681,25 +881,33 @@ impl Transaction<'_> {
         self.modify(id, |o| o.locked = locked)
     }
 
+    /// Set or clear an object's name.
+    pub fn set_name(&mut self, id: ObjectId, name: Option<String>) -> bool {
+        self.modify(id, |o| o.name = name)
+    }
+
     /// Put an object in a group (`None` = no group).
     pub fn set_group(&mut self, id: ObjectId, group: Option<u32>) -> bool {
         self.modify(id, |o| o.group = group)
     }
 
-    /// Add an object with the attributes (layer, colour) of `like`.
+    /// Add an object with the attributes (layer, colour, name) of `like`.
     pub fn add_like(&mut self, geometry: Geometry, like: &Object) -> ObjectId {
         let id = self.add_on_layer(geometry, like.layer);
-        if like.color.is_some() {
-            self.set_color_untracked(id, like.color);
+        if like.color.is_some() || like.name.is_some() {
+            self.set_attrs_untracked(id, like.color, like.name.clone());
         }
         id
     }
 
-    fn set_color_untracked(&mut self, id: ObjectId, color: Option<[u8; 3]>) {
+    fn set_attrs_untracked(&mut self, id: ObjectId, color: Option<[u8; 3]>, name: Option<String>) {
         if let Some(Change::Added(o)) = self.changes.last_mut() {
             if o.id == id {
                 o.color = color;
-                self.doc.objects.get_mut(&id).expect("just added").color = color;
+                o.name.clone_from(&name);
+                let obj = self.doc.objects.get_mut(&id).expect("just added");
+                obj.color = color;
+                obj.name = name;
             }
         }
     }
@@ -900,5 +1108,90 @@ mod tests {
         assert!(doc.is_empty());
         doc.undo();
         assert!(doc.object(id).is_some());
+    }
+
+    #[test]
+    fn annotations_are_not_curves_and_transform() {
+        let d = Geometry::Dimension(Dimension::linear(
+            &forma_geom::Plane::TOP,
+            Point3::ORIGIN,
+            Point3::new(120.0, 0.0, 0.0),
+            Point3::new(60.0, -20.0, 0.0),
+            5.0,
+            1,
+        ));
+        assert!(!d.is_curve() && d.is_annotation());
+        assert!(d.to_chain().is_none() && d.length().is_none());
+        assert_eq!(d.annotation_lines().len(), 7);
+        let (pos, text, h) = d.label().unwrap();
+        assert_eq!(text, "120");
+        assert!((h - 5.0).abs() < 1e-12);
+        assert!(pos.distance_to(Point3::new(60.0, -18.0, 0.0)) < 1e-9);
+        let b = d.bounding_box();
+        assert!(b.min.y < -19.0 && b.max.x > 119.0);
+        let moved = d.transformed(&Xform::translation(Vec3::new(0.0, 0.0, 5.0)));
+        assert!((moved.label().unwrap().0.z - 5.0).abs() < 1e-9);
+        let t = Geometry::Text(Text::new(forma_geom::Plane::TOP, "Bagno", 10.0, false));
+        assert_eq!(t.kind(), "text");
+        assert!(t.annotation_lines().is_empty());
+        let mut doc = Document::new();
+        let mut tr = doc.begin();
+        tr.add(d);
+        tr.add(t);
+        tr.commit();
+        let dump = doc.dump();
+        assert!(
+            dump.contains("#1 dimension [Default] Linear \"120\""),
+            "{dump}"
+        );
+        assert!(
+            dump.contains("#2 text [Default] \"Bagno\" h 10 at 0,0,0"),
+            "{dump}"
+        );
+    }
+
+    #[test]
+    fn names_follow_copies() {
+        let mut doc = Document::new();
+        let mut t = doc.begin();
+        let id = t.add(line());
+        t.set_name(id, Some("tavolo".into()));
+        t.commit();
+        let o = doc.object(id).unwrap().clone();
+        let mut t = doc.begin();
+        let c = t.add_like(line(), &o);
+        t.commit();
+        assert_eq!(doc.object(c).unwrap().name.as_deref(), Some("tavolo"));
+        doc.undo();
+        doc.undo();
+        assert!(doc.is_empty());
+    }
+
+    #[test]
+    fn remove_and_rename_layers_remaps_history() {
+        let mut doc = Document::new();
+        let a = doc.add_layer("muri", [1, 2, 3], true);
+        let b = doc.add_layer("arredi", [1, 2, 3], true);
+        doc.add_layer("arredi::sedie", [1, 2, 3], true);
+        let mut t = doc.begin();
+        let id = t.add_on_layer(line(), b);
+        t.commit();
+        // A removed object that lived on "muri" stays in the history.
+        let mut t = doc.begin();
+        let gone = t.add_on_layer(line(), a);
+        t.commit();
+        let mut t = doc.begin();
+        t.remove(gone);
+        t.commit();
+        assert!(doc.remove_layers(&[b]).is_err()); // not empty
+        assert!(doc.remove_layers(&[LayerId(0)]).is_err()); // current
+        let names = doc.remove_layers(&[a]).unwrap();
+        assert_eq!(names, vec!["muri".to_string()]);
+        assert_eq!(doc.layer(doc.object(id).unwrap().layer).name, "arredi");
+        doc.undo(); // the removed object comes back on the current layer
+        assert_eq!(doc.layer(doc.object(gone).unwrap().layer).name, "Default");
+        doc.rename_layer(doc.find_layer("arredi").unwrap(), "mobili");
+        assert!(doc.find_layer("mobili::sedie").is_some());
+        assert_eq!(doc.layer(doc.object(id).unwrap().layer).name, "mobili");
     }
 }
