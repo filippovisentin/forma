@@ -151,15 +151,15 @@ fn to_mesh(s: &Shape, lin: f64, opts: SolidOptions) -> Result<Mesh, KernelError>
         );
         fo_tess_free(t);
         let mut m = Mesh {
-            positions: pos
-                .chunks_exact(3)
-                .map(|c| Point3::new(c[0], c[1], c[2]))
+            positions: (0..nv)
+                .map(|i| Point3::new(pos[3 * i], pos[3 * i + 1], pos[3 * i + 2]))
                 .collect(),
-            normals: nrm
-                .chunks_exact(3)
-                .map(|c| Vec3::new(c[0], c[1], c[2]))
+            normals: (0..nv)
+                .map(|i| Vec3::new(nrm[3 * i], nrm[3 * i + 1], nrm[3 * i + 2]))
                 .collect(),
-            triangles: tri.chunks_exact(3).map(|c| [c[0], c[1], c[2]]).collect(),
+            triangles: (0..nt)
+                .map(|i| [tri[3 * i], tri[3 * i + 1], tri[3 * i + 2]])
+                .collect(),
         };
         weld_smooth_seams(&mut m, &face, 30f64.to_radians());
         Ok(m)
