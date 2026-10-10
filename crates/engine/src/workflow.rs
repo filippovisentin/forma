@@ -1423,6 +1423,62 @@ impl Command for Smooth {
     }
 }
 
+simple_command!(
+    MeshRepair,
+    "MeshRepair",
+    &["CheckMesh"],
+    "MeshRepair — fix the selected meshes: merge duplicate vertices, drop degenerate triangles, make the faces point the same way (outwards when closed), fill flat holes; reports what was done"
+);
+impl Command for MeshRepair {
+    impl_meta!(MeshRepair);
+    fn run(&self, ctx: &mut Context, _args: &mut Args) -> CommandResult {
+        let ids = ctx.selected("MeshRepair")?;
+        let tol = ctx.tolerance.absolute.max(1e-9);
+        let mut report = Vec::new();
+        let mut t = ctx.doc.begin();
+        for id in ids {
+            let Geometry::Mesh(m) = &t.doc().object(id).expect("selected").geometry else {
+                continue;
+            };
+            let before_v = m.positions.len();
+            let before_t = m.triangles.len();
+            let w = m.welded(tol);
+            let degenerate = before_t - w.triangles.len();
+            let (u, flipped) = w.unified(tol);
+            let holes = u.boundary_loops().len();
+            let fixed = if holes > 0 {
+                let (capped, _) = forma_geom::cap_planar_holes(&u, tol);
+                if capped.is_closed(tol) {
+                    capped.unified(tol).0
+                } else {
+                    u
+                }
+            } else {
+                u
+            };
+            let closed = fixed.is_closed(tol);
+            report.push(format!(
+                "#{}: {} → {} vertices, {degenerate} degenerate triangle(s) removed, {flipped} flipped, {}",
+                id.0,
+                before_v,
+                fixed.positions.len(),
+                if closed {
+                    "closed".to_string()
+                } else {
+                    format!("open ({} border loop(s))", fixed.boundary_loops().len())
+                }
+            ));
+            let fixed = fixed.split_by_angle(30f64.to_radians(), tol);
+            t.replace(id, Geometry::Mesh(fixed));
+        }
+        if report.is_empty() {
+            return Err(CommandError::Invalid("MeshRepair: select meshes".into()));
+        }
+        t.commit();
+        Ok(report.join("\n"))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::Engine;
@@ -1660,6 +1716,28 @@ mod tests {
         e.run_line("Box 0,0 10,10 10").unwrap();
         e.run_line("SelLast").unwrap();
         e.run_line("Smooth").unwrap();
+    }
+
+    #[test]
+    fn mesh_repair_closes_an_open_box() {
+        let mut e = Engine::new();
+        e.run_line("Box 0,0 10,10 10").unwrap();
+        // Remove the two top triangles: a box with a hole.
+        let Geometry::Mesh(mut m) = e.doc().objects().next().unwrap().geometry.clone() else {
+            panic!()
+        };
+        m.triangles.retain(|t| {
+            !t.iter()
+                .all(|i| (m.positions[*i as usize].z - 10.0).abs() < 1e-9)
+        });
+        {
+            let mut t = e.ctx.doc.begin();
+            t.replace(forma_doc::ObjectId(1), Geometry::Mesh(m));
+            t.commit();
+        }
+        e.run_line("SelAll").unwrap();
+        let out = e.run_line("MeshRepair").unwrap();
+        assert!(out.contains("closed"), "{out}");
     }
 
     #[test]

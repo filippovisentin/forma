@@ -12,7 +12,7 @@ is in `Help` and `forma-cli commands`.
 
 ## Summary
 
-279 Rhino commands: **180 ✓**, **55 partial**, **26 ✗**, **18 needs kernel**.
+279 Rhino commands: **181 ✓**, **55 partial**, **25 ✗**, **18 needs kernel**.
 
 ## Drawing: points and lines
 
@@ -173,7 +173,7 @@ is in `Help` and `forma-cli commands`.
 | QuadRemesh | ✗ |  |
 | FillMeshHoles | partial | `Cap` fills planar holes only |
 | UnifyMeshNormals | ✓ | `UnifyMeshNormals` |
-| MeshRepair | ✗ |  |
+| MeshRepair | ✓ | `MeshRepair`: weld, degenerate triangles, normals, flat holes |
 
 ## Transform
 
