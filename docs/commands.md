@@ -6,13 +6,13 @@ documentation. Statuses: **✓** works like the Rhino command for everyday use;
 **partial** exists with the limits noted; **✗** not yet, possible without a
 solid kernel; **needs kernel** needs NURBS surfaces from OpenCascade (milestone M4; booleans, fillets and shells already use it on closed meshes).
 
-Surfaces and solids are display meshes until the kernel lands, so surface
-commands that produce them are *partial* by definition. Forma command syntax
+Since v0.9.0 surfaces and solids are exact openNURBS polysurfaces (ADR 0006); Loft,
+Sweep and fillets still give meshes, so they stay *partial*. Forma command syntax
 is in `Help` and `forma-cli commands`.
 
 ## Summary
 
-279 Rhino commands: **181 ✓**, **55 partial**, **25 ✗**, **18 needs kernel**.
+279 Rhino commands: **194 ✓**, **44 partial**, **25 ✗**, **16 needs kernel**.
 
 ## Drawing: points and lines
 
@@ -64,8 +64,8 @@ is in `Help` and `forma-cli commands`.
 | Extend | ✓ | `Extend` to boundary objects |
 | Trim | ✓ | `Trim` curves with cutting objects |
 | Split | ✓ | `Split` curves at cutting objects |
-| Join | ✓ | `Join` curves → polycurves, meshes → one mesh |
-| Explode | ✓ | `Explode` curves → segments, meshes → faces |
+| Join | ✓ | `Join` curves → polycurves, surfaces → polysurfaces at matching edges, meshes → one mesh |
+| Explode | ✓ | `Explode` curves → segments, polysurfaces → exact faces, meshes → pieces |
 | Rebuild | ✓ | `Rebuild <points> [degree]` (curves; NURBS surfaces need the kernel) |
 | Fair | ✗ |  |
 | Smooth | ✓ | `Smooth [factor] [steps]` curves and meshes |
@@ -88,9 +88,9 @@ is in `Help` and `forma-cli commands`.
 | Section | partial | `Section <start> <end>` on meshes |
 | Project | partial | `Project [direction]` onto meshes, first surface met; polyline result |
 | Pull | partial | `Pull` onto meshes (closest point); polyline result |
-| DupEdge | partial | `DupEdge` on meshes (visible edges) |
-| DupBorder | partial | `DupBorder` on meshes |
-| DupFaceBorder | partial | `DupFaceBorder #id <point>` flat faces of meshes |
+| DupEdge | ✓ | `DupEdge` exact edges of polysurfaces; visible edges of meshes |
+| DupBorder | ✓ | `DupBorder` exact naked edges of surfaces, borders of meshes |
+| DupFaceBorder | ✓ | `DupFaceBorder #id <point>` exact face border |
 | Intersect | partial | `Intersect` curve–curve points only |
 | ExtractIsocurve | needs kernel |  |
 | ExtractPt | ✓ | `ExtractPt` |
@@ -102,12 +102,12 @@ is in `Help` and `forma-cli commands`.
 
 | Rhino command | Forma | Notes |
 |---|---|---|
-| PlanarSrf | partial | `PlanarSrf` with holes — display mesh |
+| PlanarSrf | ✓ | `PlanarSrf` exact trimmed planes, with holes |
 | Plane | partial | `Plane <c1> <c2>` — mesh |
 | SrfPt | partial | `SrfPt` 3 or 4 corners — mesh |
 | EdgeSrf | partial | `EdgeSrf` 2–4 curves (Coons patch) — mesh |
 | Loft | partial | `Loft` — mesh, no style options |
-| Revolve | partial | `Revolve` — mesh |
+| Revolve | ✓ | `Revolve` exact surfaces of revolution (profile closing on the axis → solid) |
 | RailRevolve | ✗ |  |
 | Sweep1 | partial | `Sweep1` — mesh, rotation-minimising frames |
 | Sweep2 | partial | `Sweep2 #rail1 #rail2` — mesh, profile scaled between the rails |
@@ -117,7 +117,7 @@ is in `Help` and `forma-cli commands`.
 | ExtrudeCrvAlongCrv | partial | `ExtrudeCrvAlongCrv #path` — mesh |
 | ExtrudeCrvTapered | partial | `ExtrudeCrvTapered <distance> <draft°>` — mesh |
 | ExtrudeCrvToPoint | partial | `ExtrudeCrvToPoint <apex>` — mesh, closed planar curves capped |
-| ExtrudeSrf | partial | `ExtrudeSrf` — mesh |
+| ExtrudeSrf | ✓ | `ExtrudeSrf` exact (closed solid) |
 | Pipe | partial | `Pipe <radius> [open]` — mesh |
 | OffsetSrf | partial | `OffsetSrf <distance>` on closed meshes (OpenCascade), mesh result |
 | FilletSrf | needs kernel |  |
@@ -128,7 +128,7 @@ is in `Help` and `forma-cli commands`.
 | Split / Trim (surfaces) | needs kernel |  |
 | ShrinkTrimmedSrf | needs kernel |  |
 | Untrim | needs kernel |  |
-| ExtractSrf | partial | mesh faces via `Explode`; face picking with Ctrl+Shift+click |
+| ExtractSrf | partial | `Explode` gives the exact faces; face picking with Ctrl+Shift+click |
 
 ## Solids
 
@@ -144,17 +144,17 @@ is in `Help` and `forma-cli commands`.
 | Torus | ✓ | `Torus` |
 | Tube | ✓ | `Tube` |
 | Slab | ✓ | `Slab <thickness> <height> [center|left|right]` |
-| Cap | ✓ | `Cap` planar holes |
-| MoveFace | partial | `MoveFace` flat faces of mesh solids |
-| PushPull | partial | `PushPull` flat faces of mesh solids |
-| BooleanUnion | partial | `BooleanUnion` on closed meshes (OpenCascade), mesh result |
-| BooleanDifference | partial | `BooleanDifference #a #b …` closed meshes, mesh result |
-| BooleanIntersection | partial | closed meshes, mesh result |
-| BooleanSplit | partial | closed meshes, mesh result |
+| Cap | ✓ | `Cap` planar holes (exact, round ones too) |
+| MoveFace | ✓ | `MoveFace` flat faces; flat-faced polysurfaces stay exact |
+| PushPull | ✓ | `PushPull` flat faces; flat-faced polysurfaces stay exact |
+| BooleanUnion | partial | `BooleanUnion` (OpenCascade): exact polysurface for flat-faced solids, else mesh |
+| BooleanDifference | partial | `BooleanDifference #a #b …` exact for flat-faced solids, else mesh |
+| BooleanIntersection | partial | exact for flat-faced solids, else mesh |
+| BooleanSplit | partial | exact for flat-faced solids, else mesh |
 | FilletEdge | partial | `FilletEdge #id <radius> <points near edges>` closed meshes |
-| ChamferEdge | partial | `ChamferEdge #id <distance> <points near edges>` closed meshes |
-| Shell | partial | `Shell #id <thickness> <points on removed faces>` closed meshes |
-| MergeAllFaces | needs kernel |  |
+| ChamferEdge | partial | `ChamferEdge #id <distance> <points near edges>` exact for flat-faced solids |
+| Shell | partial | `Shell #id <thickness> <points on removed faces>` exact for flat-faced solids |
+| MergeAllFaces | ✓ | `MergeAllCoplanarFaces` (flat-faced polysurfaces) |
 | CreateSolid | needs kernel |  |
 | Wirecut | needs kernel |  |
 
@@ -162,8 +162,8 @@ is in `Help` and `forma-cli commands`.
 
 | Rhino command | Forma | Notes |
 |---|---|---|
-| Mesh (from NURBS) | partial | every surface / solid is a display mesh already |
-| MeshToNURB | needs kernel |  |
+| Mesh (from NURBS) | ✓ | `Mesh` (welded mesh copy of the selected surfaces) |
+| MeshToNURB | ✓ | `MeshToNURB` flat-faced meshes → exact polysurfaces (coplanar triangles merged) |
 | Weld | ✓ | `Weld [angle]` |
 | Unweld | ✓ | `Unweld [angle]` |
 | ExplodeMesh | ✓ | `Explode` |
@@ -242,8 +242,8 @@ is in `Help` and `forma-cli commands`.
 | SelCrv | ✓ |  |
 | SelPt | ✓ |  |
 | SelMesh | ✓ |  |
-| SelSrf | partial | `SelOpenMesh` (surfaces are meshes) |
-| SelPolysrf / SelClosedPolysrf | partial | `SelClosedMesh` (alias SelClosedPolysrf) |
+| SelSrf | ✓ | `SelSrf` (single-face surfaces) |
+| SelPolysrf / SelClosedPolysrf | ✓ | `SelPolysrf`; `SelClosedMesh` (alias SelClosedPolysrf) selects closed surfaces and meshes |
 | SelOpenCrv | ✓ |  |
 | SelClosedCrv | ✓ |  |
 | SelPolyline | ✓ |  |

@@ -98,9 +98,13 @@ Comandi principali (si scrivono come in Rhino; elenco completo: F1 o docs/comman
               Stretch, punti di controllo (F10)
   Superfici:  PlanarSrf, ExtrudeCrv (curve una dentro l'altra = muro con il
               foro), ExtrudeSrf, Loft, Revolve, Sweep1, Sweep2, Cap
-  Solidi:     Box, Cylinder, Sphere, BooleanUnion/Difference/Intersection/Split,
-              FilletEdge, ChamferEdge, Shell, OffsetSrf, MoveFace / PushPull
-  Mesh:       ReduceMesh (alleggerisce le mesh pesanti), UnifyMeshNormals, Weld
+  Solidi:     Box, Cylinder, Sphere, Cone, TCone, Torus, Ellipsoid, Tube,
+              Pyramid, Slab (tutti polisuperfici esatte), MoveFace / PushPull,
+              MergeAllCoplanarFaces, BooleanUnion/Difference/Intersection/Split,
+              FilletEdge, ChamferEdge, Shell, OffsetSrf
+  Mesh:       Mesh (copia mesh di una polisuperficie), MeshToNURB, MeshBox,
+              MeshSphere, ReduceMesh (alleggerisce le mesh pesanti),
+              UnifyMeshNormals, Weld
   Trasforma:  Move, Copy, Rotate, Scale, Mirror, Orient, Align, Array (finestra),
               Box Edit (finestra), Bend, Twist, Taper
   Blocchi:    Block, Insert, ExplodeBlock (i blocchi di Rhino si aprono come gruppi)
@@ -123,12 +127,17 @@ Osnap
   Project (proietta sul piano) e Disable.
 
 Limiti di questa versione
-  - Loft, Revolve, Sweep, PlanarSrf, ExtrudeSrf e Cap creano mesh, non
-    superfici NURBS. Curve, InterpCrv ed Ellipse sono vere NURBS.
-  - Booleane, FilletEdge e Shell funzionano su solidi chiusi (mesh) con il kernel
-    OpenCascade incluso; il risultato è una mesh.
+  - Solidi e superfici sono esatti: le polisuperfici di Rhino si aprono e si
+    salvano come polisuperfici (anche dopo Move, Rotate, Scale, Mirror).
+    Box, Cylinder, Sphere, Extrude, PlanarSrf, ExtrudeSrf, Revolve, Cap,
+    Join ed Explode lavorano su geometria esatta.
+  - Restano mesh: Loft, Sweep1/Sweep2, FilletEdge e le booleane quando ci sono
+    facce curve (con solidi a facce piane, es. muri e scatole, il risultato
+    torna una polisuperficie esatta).
+  - I punti di controllo (F10) delle superfici curve non sono ancora
+    modificabili; quelli dei solidi a facce piane sì (spigoli).
   - Salvando un file aperto da Rhino, la prima volta Forma propone un nuovo nome
-    (nome-forma.3dm): le superfici importate vengono salvate come mesh.
+    (nome-forma.3dm), per non sovrascrivere l'originale.
 
 forma-cli.exe: versione a riga di comando (info, render in PNG, script).
 

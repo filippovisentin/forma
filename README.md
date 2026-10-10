@@ -18,14 +18,15 @@ architect and reviewer.
 
 Forma **works**: you can draw a room in centimetres, extrude walls, push and pull faces,
 arrange furniture, colour things by layer, and save a `.3dm` file. But it is young
-(**v0.8.0**), and one thing matters before you rely on it:
+(**v0.9.0**), so know its limits before you rely on it:
 
-> **Solids and surfaces are display meshes for now.** Box, Cylinder, Sphere, extrusions,
-> Loft, Revolve, Sweep1 and PlanarSrf produce triangle meshes, not exact NURBS solids.
-> Booleans (`BooleanUnion`, `BooleanDifference`, …), `FilletEdge`, `ChamferEdge` and `Shell`
-> work on closed meshes through the OpenCascade kernel in the Windows build
-> ([ADR 0001](docs/adr/0001-geometry-kernel.md)); exact NURBS surfaces come next.
-> Curves are exact: lines, arcs, circles, polylines, polycurves and NURBS curves.
+> **Solids and surfaces are exact (since v0.9.0).** Rhino polysurfaces, extrusions and
+> surfaces are kept as they are and saved back unchanged, also after Move, Rotate, Scale
+> or Mirror. Box, Cylinder, Sphere, Cone, Torus, Extrude, PlanarSrf, Revolve, Cap and
+> friends make exact polysurfaces; push / pull, Join and booleans of flat-faced solids
+> stay exact ([ADR 0006](docs/adr/0006-exact-breps.md)). Still meshes: Loft, Sweep,
+> fillets, and booleans involving curved faces (they go through the OpenCascade kernel
+> on meshes, [ADR 0001](docs/adr/0001-geometry-kernel.md)). Curves are exact too.
 
 It is a personal project with one user (me). Expect rough edges, and keep backups of
 files you care about.
@@ -101,10 +102,11 @@ with short aliases (`L`, `PL`, `C`, `Rec`, `Ext`). `Help` (F1) lists them all in
 |---|---|
 | Curves | `Point`, `Points`, `Line`, `Polyline`, `Curve`, `InterpCrv`, `Rectangle`, `Circle`, `Arc`, `Ellipse`, `Polygon` |
 | Curve tools | `Offset`, `Trim`, `Split`, `Extend`, `Fillet`, `Chamfer`, `FilletCorners`, `Join`, `Explode`, `Flip`, `Intersect`, `ProjectToCPlane` |
-| Surfaces *(meshes)* | `PlanarSrf` (with holes), `ExtrudeSrf`, `Loft`, `Revolve`, `Sweep1`, `Cap` |
-| Solids *(meshes)* | `Box`, `Cylinder`, `Sphere`, `Extrude` / `ExtrudeCrv`, `MoveFace`, `PushPull` |
+| Surfaces *(exact)* | `PlanarSrf` (with holes), `ExtrudeSrf`, `Revolve`, `Cap`, `Plane`; `Loft`, `Sweep1` *(meshes)* |
+| Solids *(exact)* | `Box`, `Cylinder`, `Sphere`, `Cone`, `TCone`, `Torus`, `Ellipsoid`, `Tube`, `Pyramid`, `Slab`, `Extrude` / `ExtrudeCrv`, `MoveFace`, `PushPull`, `MergeAllCoplanarFaces` |
+| Meshes | `Mesh`, `MeshToNURB`, `MeshBox`, `MeshSphere`, `Weld`, `ReduceMesh` |
 | Transform | `Move`, `Copy`, `Rotate`, `Scale`, `Scale1D`, `Scale2D`, `Mirror`, `Orient`, `Align`, `Array`, `ArrayLinear`, `ArrayPolar`, `Delete` |
-| Selection | `SelAll`, `SelNone`, `Select`, `Invert`, `SelLast`, `SelCrv`, `SelMesh`, `SelPt`, `SelGroup` |
+| Selection | `SelAll`, `SelNone`, `Select`, `Invert`, `SelLast`, `SelCrv`, `SelSrf`, `SelPolysrf`, `SelMesh`, `SelPt`, `SelGroup` |
 | Visibility & groups | `Hide`, `Show`, `Isolate`, `Lock`, `Unlock`, `Group`, `Ungroup` |
 | Layers & colour | `Layer`, `ChangeLayer`, `LayerColor`, `LayerVisible`, `LayerLock`, `SetObjectColor`, `MatchProperties` |
 | Analysis | `Distance`, `Length`, `Area`, `Volume`, `BoundingBox`, `What` |
@@ -136,15 +138,15 @@ file library. It is a working exchange format, not yet a lossless round trip.
 | Units and tolerance | kept | written |
 | Layers (nested `parent::child`, colour, visibility) | kept | written (layer lock is not) |
 | Object colours | kept | written |
-| Lines, arcs, circles, polylines, polycurves, NURBS curves | **converted to polylines** | written exactly |
+| Lines, arcs, circles, polylines, polycurves, NURBS curves | kept exactly | written exactly |
 | Points | kept | written |
-| Breps, extrusions (Rhino solids and surfaces) | **converted to display meshes** | written as meshes |
+| Breps, extrusions, surfaces (Rhino solids and surfaces) | **kept exactly** (shown through a display mesh) | written as they were (transformed if moved) |
 | Meshes | kept | written |
 | Block instances, text, dimensions, annotations | **skipped** | — |
 | Materials, groups, hidden / locked state | not read | not written |
 
 When you save a file that was opened from Rhino, Forma first proposes a new name
-(`name-forma.3dm`) so the original is not overwritten with meshes.
+(`name-forma.3dm`) so the original is never overwritten by accident.
 
 `forma-cli info model.3dm` prints a summary of any `.3dm` file (units, layers, object
 types, blocks) without opening the app.
@@ -262,10 +264,11 @@ revisore e unico utente.
 
 **Stato.** Funziona: si disegna una stanza in centimetri, si estrudono i muri, si
 spingono e tirano le facce, si organizzano layer e colori e si salva in `.3dm`. È però
-giovane (v0.8.0): **solidi e superfici sono per ora mesh di visualizzazione**, non solidi
-NURBS esatti. Booleane, `FilletEdge`, `ChamferEdge` e `Shell` funzionano già sulle mesh
-chiuse grazie al kernel OpenCascade (versione Windows); le superfici NURBS esatte arriveranno
-dopo. Le curve invece sono esatte.
+giovane (v0.9.0). **Solidi e superfici sono esatti**: le polisuperfici, estrusioni e
+superfici di Rhino restano tali e tornano a Rhino invariate (anche dopo Sposta, Ruota,
+Scala, Specchia); Box, Cylinder, Sphere, Extrude, PlanarSrf, Revolve, Cap… creano
+polisuperfici esatte, e push/pull, Join e booleane di solidi a facce piane restano esatti.
+Restano mesh: Loft, Sweep, raccordi e booleane con facce curve. Le curve sono esatte.
 
 **Download.** Dalla [pagina dell'ultima release](https://github.com/filippovisentin/forma/releases/latest)
 scarica `Forma-windows.zip`, estrai la cartella e fai doppio clic su `forma.exe` (Windows
@@ -280,10 +283,9 @@ lo zoom, clic destro = Invio; Ctrl+Maiusc+clic su una faccia per il push/pull. C
 comandi (vedi la tabella *Features* sopra), 11 osnap, SmartTrack, gumball, misure in
 tempo reale.
 
-**File `.3dm`.** Lettura e scrittura tramite openNURBS. All'apertura curve → polilinee e
-solidi/superfici Rhino → mesh; blocchi, testi e quote vengono saltati. Al salvataggio le
-curve sono esatte e solidi/superfici diventano mesh; layer annidati, colori e unità si
-conservano. Se salvi un file aperto da Rhino, Forma propone un nuovo nome (`nome-forma.3dm`).
+**File `.3dm`.** Lettura e scrittura tramite openNURBS. Curve, polisuperfici, estrusioni e
+superfici di Rhino si aprono esatte e si salvano esatte; i blocchi diventano gruppi, testi
+e quote si leggono; layer annidati, colori e unità si conservano. Se salvi un file aperto da Rhino, Forma propone un nuovo nome (`nome-forma.3dm`).
 
 **Compilare.** Rust stabile, un compilatore C++ e CMake, poi
 `git submodule update --init --depth 1` e `cargo run -p forma --release`.

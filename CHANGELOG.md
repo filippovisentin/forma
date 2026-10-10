@@ -7,6 +7,33 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.9.0] — 2026-10-11
+
+### Added
+- **Exact solids and surfaces** ([ADR 0006](docs/adr/0006-exact-breps.md)). Rhino
+  polysurfaces, extrusions and surfaces open as they are and are saved back unchanged,
+  also after Move, Rotate, Scale (non-uniform too), Mirror. Curves open exactly (lines,
+  arcs, polycurves, NURBS) instead of polylines.
+- Exact creation: `Box`, `Cylinder`, `Sphere`, `Cone`, `TCone`, `Torus`, `Ellipsoid`,
+  `Tube`, `Pyramid`, `Slab`, `Plane`, `Extrude` (walls with holes; open curves become
+  surfaces), `PlanarSrf`, `ExtrudeSrf`, `Revolve`, `Cap` (round holes too), `BoundingBox`.
+- Exact editing: `PushPull` / `MoveFace`, `Join` (joins surfaces at their edges into
+  polysurfaces and solids), `Explode` (polysurface → faces), `Flip`, control points of
+  flat-faced solids (F10), booleans / `Shell` / `ChamferEdge` of flat-faced solids.
+- `DupEdge`, `DupBorder`, `DupFaceBorder` give the exact edge curves.
+- New commands: `Mesh`, `MeshToNURB`, `MergeAllCoplanarFaces`, `MeshBox`, `MeshSphere`,
+  `SelSrf`, `SelPolysrf`.
+- Snapping to the corners and edge midpoints of polysurfaces.
+
+### Changed
+- Curved faces are displayed with more triangles where they bend (about one per 10°),
+  and neighbouring faces share their edge points (no cracks).
+- `SelMesh` selects meshes only.
+
+### Known limits
+- Loft, Sweep1/Sweep2, FilletEdge, OffsetSrf and booleans with curved faces still give
+  meshes; control points of curved surfaces are not editable yet.
+
 ## [0.8.1] — 2026-10-10
 
 ### Added
