@@ -138,6 +138,19 @@ impl Tool {
         if self.selecting {
             return out;
         }
+        if let ToolKind::Seq(s) = self.kind {
+            out = (s.preview)(&super::seq::View {
+                vals: &self.vals,
+                cur,
+                plane: &self.plane,
+                skeleton: &self.skeleton,
+            });
+            if !self.multi.is_empty() {
+                poly(&mut out, &self.multi);
+                out.push([*self.multi.last().expect("non-empty"), cur]);
+            }
+            return out;
+        }
         match (self.kind, n) {
             (Curve | InterpCrv, _) if n >= 1 => {
                 let mut pts = self.pts.clone();

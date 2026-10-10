@@ -1,7 +1,8 @@
-//! The menu bar (File, Edit, View, Curve, Surface, Solid, Transform, Tools,
-//! Analyze, Help), in the order and wording of Rhino 8.
+//! The menu bar (File, Edit, View, Curve, Surface, Solid, Mesh, Dimension,
+//! Transform, Tools, Analyze, Help), in the order of Rhino 8.
 
 use crate::snap::SnapKind;
+use crate::tools::seq as q;
 use crate::tools::ToolKind;
 use crate::{Act, FormaApp, SidePanel};
 use eframe::egui;
@@ -126,6 +127,7 @@ impl FormaApp {
                     item(ui, &mut act, "All Objects", "Ctrl+A", Act::Cmd("SelAll"));
                     item(ui, &mut act, "None", "Esc", Act::Cmd("SelNone"));
                     item(ui, &mut act, "Invert", "", Act::Cmd("Invert"));
+                    item(ui, &mut act, "Visible Objects", "", Act::Cmd("SelVisible"));
                     item(
                         ui,
                         &mut act,
@@ -137,6 +139,22 @@ impl FormaApp {
                     item(ui, &mut act, "Curves", "", Act::Cmd("SelCrv"));
                     item(ui, &mut act, "Surfaces / Meshes", "", Act::Cmd("SelMesh"));
                     item(ui, &mut act, "Points", "", Act::Cmd("SelPt"));
+                    ui.menu_button("Curve Filters", |ui| {
+                        item(ui, &mut act, "Open Curves", "", Act::Cmd("SelOpenCrv"));
+                        item(ui, &mut act, "Closed Curves", "", Act::Cmd("SelClosedCrv"));
+                        item(ui, &mut act, "Polylines", "", Act::Cmd("SelPolyline"));
+                        item(ui, &mut act, "Lines", "", Act::Cmd("SelLine"));
+                    });
+                    item(ui, &mut act, "Closed Meshes (Solids)", "", Act::Cmd("SelClosedMesh"));
+                    item(ui, &mut act, "Open Meshes (Surfaces)", "", Act::Cmd("SelOpenMesh"));
+                    item(ui, &mut act, "Text and Dots", "", Act::Cmd("SelText"));
+                    item(ui, &mut act, "Dimensions", "", Act::Cmd("SelDim"));
+                    ui.separator();
+                    item(ui, &mut act, "By Layer…", "", Act::Prefill("SelLayer ", "SelLayer <layer> — select all objects on a layer"));
+                    item(ui, &mut act, "By Colour…", "", Act::Prefill("SelColor ", "SelColor <r,g,b | #rrggbb | name> — select objects shown in that colour"));
+                    item(ui, &mut act, "By Name…", "", Act::Prefill("SelName ", "SelName <name> — select objects by name (* wildcards)"));
+                    item(ui, &mut act, "Small Objects…", "", Act::Prefill("SelSmall ", "SelSmall <size> — select objects smaller than size"));
+                    item(ui, &mut act, "Duplicates", "", Act::Cmd("SelDup"));
                 });
                 ui.separator();
                 tool(ui, &mut act, "Join", K::Join);
@@ -171,8 +189,10 @@ impl FormaApp {
                     item(ui, &mut act, "Hide", "Ctrl+H", Act::Tool(K::OnSel("Hide")));
                     item(ui, &mut act, "Show", "Ctrl+Alt+H", Act::Cmd("Show"));
                     item(ui, &mut act, "Isolate", "", Act::Tool(K::OnSel("Isolate")));
+                    item(ui, &mut act, "Swap Hidden and Visible", "", Act::Cmd("HideSwap"));
                     item(ui, &mut act, "Lock", "Ctrl+L", Act::Tool(K::OnSel("Lock")));
                     item(ui, &mut act, "Unlock", "Ctrl+Alt+L", Act::Cmd("Unlock"));
+                    item(ui, &mut act, "Swap Locked and Unlocked", "", Act::Cmd("LockSwap"));
                 });
                 ui.menu_button("Layers", |ui| {
                     item(
@@ -189,7 +209,17 @@ impl FormaApp {
                         "",
                         Act::Panel(SidePanel::Properties),
                     );
+                    tool(ui, &mut act, "Change Object to Current Layer", K::Seq(&q::CHANGE_TO_CURRENT));
+                    item(ui, &mut act, "Copy Objects to Layer…", "", Act::Prefill("CopyObjectsToLayer ", "CopyObjectsToLayer <layer> — copy the selection to a layer"));
+                    ui.separator();
+                    item(ui, &mut act, "One Layer On…", "", Act::Prefill("OneLayerOn ", "OneLayerOn <layer> — show only this layer"));
+                    item(ui, &mut act, "One Layer Off…", "", Act::Prefill("OneLayerOff ", "OneLayerOff <layer> — hide one layer"));
+                    item(ui, &mut act, "All Layers On", "", Act::Cmd("AllLayersOn"));
+                    item(ui, &mut act, "Rename Layer…", "", Act::Prefill("RenameLayer ", "RenameLayer <old name> <new name>"));
+                    item(ui, &mut act, "Delete Layer…", "", Act::Prefill("DeleteLayer ", "DeleteLayer <layer> — delete a layer and its objects"));
+                    item(ui, &mut act, "Purge Empty Layers", "", Act::Cmd("Purge"));
                 });
+                item(ui, &mut act, "Object Name…", "", Act::Prefill("SetObjectName ", "SetObjectName <name> — name the selected objects"));
                 tool(ui, &mut act, "Match Properties", K::MatchProperties);
                 item(
                     ui,
@@ -233,7 +263,14 @@ impl FormaApp {
                 ui.checkbox(&mut self.show_osnap, "Osnap Toolbar");
             });
             ui.menu_button("Curve", |ui| {
-                tool(ui, &mut act, "Point Object", K::Point);
+                ui.menu_button("Point Object", |ui| {
+                    tool(ui, &mut act, "Single Point", K::Point);
+                    ui.menu_button("Divide Curve By", |ui| {
+                        tool(ui, &mut act, "Number of Segments", K::Seq(&q::DIVIDE));
+                        tool(ui, &mut act, "Length of Segments", K::Seq(&q::DIVIDE_LENGTH));
+                    });
+                    tool(ui, &mut act, "Extract Points", K::Seq(&q::EXTRACTPT));
+                });
                 ui.menu_button("Line", |ui| {
                     tool(ui, &mut act, "Single Line", K::Line);
                 });
@@ -242,17 +279,33 @@ impl FormaApp {
                     tool(ui, &mut act, "Control Points", K::Curve);
                     tool(ui, &mut act, "Interpolate Points", K::InterpCrv);
                 });
-                tool(ui, &mut act, "Rectangle", K::Rectangle);
+                ui.menu_button("Rectangle", |ui| {
+                    tool(ui, &mut act, "Corner to Corner", K::Rectangle);
+                    tool(ui, &mut act, "Center, Corner", K::Seq(&q::RECTANGLE_CENTER));
+                    tool(ui, &mut act, "3 Points", K::Seq(&q::RECTANGLE3PT));
+                    tool(ui, &mut act, "Rounded", K::Seq(&q::ROUNDED_RECTANGLE));
+                });
                 tool(ui, &mut act, "Polygon", K::Polygon);
-                tool(ui, &mut act, "Circle", K::Circle);
-                tool(ui, &mut act, "Arc", K::Arc);
+                ui.menu_button("Circle", |ui| {
+                    tool(ui, &mut act, "Center, Radius", K::Circle);
+                    tool(ui, &mut act, "2 Points", K::Seq(&q::CIRCLE2PT));
+                    tool(ui, &mut act, "3 Points", K::Seq(&q::CIRCLE3PT));
+                });
+                ui.menu_button("Arc", |ui| {
+                    tool(ui, &mut act, "Center, Start, Angle", K::Arc);
+                    tool(ui, &mut act, "Start, End, Point on Arc", K::Seq(&q::ARC3PT));
+                });
                 tool(ui, &mut act, "Ellipse", K::Ellipse);
+                tool(ui, &mut act, "Slot", K::Seq(&q::SLOT));
+                tool(ui, &mut act, "Helix", K::Seq(&q::HELIX));
+                tool(ui, &mut act, "Spiral", K::Seq(&q::SPIRAL));
                 ui.separator();
                 tool(ui, &mut act, "Fillet Curves", K::Fillet);
                 tool(ui, &mut act, "Chamfer Curves", K::Chamfer);
                 tool(ui, &mut act, "Fillet Corners", K::FilletCorners);
                 tool(ui, &mut act, "Offset Curve", K::Offset);
                 tool(ui, &mut act, "Extend Curve", K::Extend);
+                tool(ui, &mut act, "Curve Boolean", K::Seq(&q::CURVE_BOOLEAN));
                 ui.separator();
                 ui.menu_button("Curve Edit Tools", |ui| {
                     tool(ui, &mut act, "Join", K::Join);
@@ -260,9 +313,18 @@ impl FormaApp {
                     tool(ui, &mut act, "Trim", K::Trim);
                     tool(ui, &mut act, "Split", K::Split);
                     tool(ui, &mut act, "Flip Direction", K::OnSel("Flip"));
+                    tool(ui, &mut act, "Rebuild", K::Seq(&q::REBUILD));
+                    tool(ui, &mut act, "Convert to Polyline", K::Seq(&q::CONVERT));
+                    tool(ui, &mut act, "Close Open Curve", K::Seq(&q::CLOSECRV));
                 });
                 ui.menu_button("Curve From Objects", |ui| {
+                    tool(ui, &mut act, "Project", K::Seq(&q::PROJECT));
+                    tool(ui, &mut act, "Pull", K::Seq(&q::PULL));
+                    tool(ui, &mut act, "Duplicate Edge", K::Seq(&q::DUPEDGE));
+                    tool(ui, &mut act, "Duplicate Border", K::Seq(&q::DUPBORDER));
                     tool(ui, &mut act, "Intersection", K::OnSel("Intersect"));
+                    tool(ui, &mut act, "Contour", K::Seq(&q::CONTOUR));
+                    tool(ui, &mut act, "Section", K::Seq(&q::SECTION));
                     tool(
                         ui,
                         &mut act,
@@ -272,13 +334,20 @@ impl FormaApp {
                 });
             });
             ui.menu_button("Surface", |ui| {
+                tool(ui, &mut act, "Corner Points", K::Seq(&q::SRFPT));
+                tool(ui, &mut act, "Edge Curves", K::Seq(&q::EDGESRF));
                 tool(ui, &mut act, "Planar Curves", K::OnSel("PlanarSrf"));
+                tool(ui, &mut act, "Rectangle (Plane)", K::Seq(&q::PLANE));
                 ui.menu_button("Extrude Curve", |ui| {
                     tool(ui, &mut act, "Straight", K::Extrude);
+                    tool(ui, &mut act, "Along Curve", K::Seq(&q::EXTRUDE_ALONG));
+                    tool(ui, &mut act, "Tapered", K::Seq(&q::EXTRUDE_TAPERED));
+                    tool(ui, &mut act, "To Point", K::Seq(&q::EXTRUDE_TO_POINT));
                 });
                 tool(ui, &mut act, "Loft", K::OnSel("Loft"));
                 tool(ui, &mut act, "Revolve", K::Revolve);
                 tool(ui, &mut act, "Sweep 1 Rail", K::Sweep1);
+                tool(ui, &mut act, "Pipe", K::Seq(&q::PIPE));
                 ui.separator();
                 kernel(ui, "Offset Surface");
                 ui.label(
@@ -290,7 +359,15 @@ impl FormaApp {
             ui.menu_button("Solid", |ui| {
                 tool(ui, &mut act, "Box", K::Box);
                 tool(ui, &mut act, "Sphere", K::Sphere);
+                tool(ui, &mut act, "Ellipsoid", K::Seq(&q::ELLIPSOID));
+                tool(ui, &mut act, "Cone", K::Seq(&q::CONE));
+                tool(ui, &mut act, "Truncated Cone", K::Seq(&q::TCONE));
+                tool(ui, &mut act, "Pyramid", K::Seq(&q::PYRAMID));
                 tool(ui, &mut act, "Cylinder", K::Cylinder);
+                tool(ui, &mut act, "Tube", K::Seq(&q::TUBE));
+                tool(ui, &mut act, "Pipe", K::Seq(&q::PIPE));
+                tool(ui, &mut act, "Torus", K::Seq(&q::TORUS));
+                tool(ui, &mut act, "Wall / Slab from Curves", K::Seq(&q::SLAB));
                 ui.separator();
                 ui.menu_button("Extrude Planar Curve", |ui| {
                     tool(ui, &mut act, "Straight", K::Extrude);
@@ -313,30 +390,88 @@ impl FormaApp {
                 kernel(ui, "Difference");
                 kernel(ui, "Intersection");
                 kernel(ui, "Fillet Edge");
+                kernel(ui, "Shell");
+            });
+            ui.menu_button("Mesh", |ui| {
+                tool(ui, &mut act, "Weld (smooth)", K::Seq(&q::WELD));
+                tool(ui, &mut act, "Unweld (show edges)", K::Seq(&q::UNWELD));
+                tool(ui, &mut act, "Explode into Faces", K::Explode);
+                tool(ui, &mut act, "Join Meshes", K::Join);
+                ui.separator();
+                tool(ui, &mut act, "Duplicate Mesh Edges", K::Seq(&q::DUPEDGE));
+                tool(ui, &mut act, "Duplicate Mesh Border", K::Seq(&q::DUPBORDER));
+                tool(ui, &mut act, "Contour", K::Seq(&q::CONTOUR));
+                tool(ui, &mut act, "Section", K::Seq(&q::SECTION));
+            });
+            ui.menu_button("Dimension", |ui| {
+                tool(ui, &mut act, "Linear Dimension", K::Seq(&q::DIM));
+                tool(ui, &mut act, "Aligned Dimension", K::Seq(&q::DIM_ALIGNED));
+                tool(ui, &mut act, "Radial Dimension", K::Seq(&q::DIM_RADIUS));
+                tool(ui, &mut act, "Diameter Dimension", K::Seq(&q::DIM_DIAMETER));
+                tool(ui, &mut act, "Angle Dimension", K::Seq(&q::DIM_ANGLE));
+                tool(ui, &mut act, "Leader", K::Seq(&q::LEADER));
+                ui.separator();
+                tool(ui, &mut act, "Text", K::Seq(&q::TEXT));
+                tool(ui, &mut act, "Text Dot", K::Seq(&q::DOT));
+                tool(ui, &mut act, "Hatch", K::Seq(&q::HATCH));
+                ui.separator();
+                item(
+                    ui,
+                    &mut act,
+                    "Annotation Style…",
+                    "",
+                    Act::Prefill(
+                        "DimStyle ",
+                        "DimStyle [text height] [decimals] — style of new text and dimensions (Enter shows it)",
+                    ),
+                );
             });
             ui.menu_button("Transform", |ui| {
                 tool(ui, &mut act, "Move", K::Move);
                 tool(ui, &mut act, "Copy", K::Copy);
                 tool(ui, &mut act, "Rotate", K::Rotate);
+                tool(ui, &mut act, "Rotate 3-D", K::Seq(&q::ROTATE3D));
                 ui.menu_button("Scale", |ui| {
                     tool(ui, &mut act, "Scale 3-D", K::Scale);
                     tool(ui, &mut act, "Scale 2-D", K::Scale2D);
                     tool(ui, &mut act, "Scale 1-D", K::Scale1D);
+                    tool(ui, &mut act, "Non-Uniform Scale", K::Seq(&q::SCALENU));
                 });
-                tool(ui, &mut act, "Mirror", K::Mirror);
+                ui.menu_button("Mirror", |ui| {
+                    tool(ui, &mut act, "Mirror (line)", K::Mirror);
+                    tool(ui, &mut act, "Mirror 3 Points", K::Seq(&q::MIRROR3PT));
+                });
                 tool(ui, &mut act, "Orient: 2 Points", K::Orient);
+                tool(ui, &mut act, "Orient: 3 Points", K::Seq(&q::ORIENT3PT));
+                tool(ui, &mut act, "Shear", K::Seq(&q::SHEAR));
+                tool(ui, &mut act, "Bend", K::Seq(&q::BEND));
+                tool(ui, &mut act, "Twist", K::Seq(&q::TWIST));
+                tool(ui, &mut act, "Taper", K::Seq(&q::TAPER));
                 ui.separator();
                 ui.menu_button("Array", |ui| {
                     item(ui, &mut act, "Rectangular", "", ARRAY_PREFILL);
                     tool(ui, &mut act, "Linear", K::ArrayLinear);
                     tool(ui, &mut act, "Polar", K::ArrayPolar);
+                    tool(ui, &mut act, "Along Curve", K::Seq(&q::ARRAYCRV));
                 });
                 ui.menu_button("Align", |ui| {
                     for (label, cmd) in ALIGN {
                         item(ui, &mut act, label, "", Act::Submit(cmd));
                     }
                 });
+                tool(ui, &mut act, "Distribute", K::Seq(&q::DISTRIBUTE));
                 ui.separator();
+                tool(ui, &mut act, "Set Points", K::Seq(&q::SETPT));
+                item(
+                    ui,
+                    &mut act,
+                    "Box Edit…",
+                    "",
+                    Act::Prefill(
+                        "BoxEdit ",
+                        "BoxEdit [x=<size>] [y=<size>] [z=<size>] [uniform] [center] [at=x,y,z] — exact size and position of the selection",
+                    ),
+                );
                 tool(
                     ui,
                     &mut act,
@@ -357,11 +492,16 @@ impl FormaApp {
                 ui.checkbox(&mut self.snap.planar, "Planar");
             });
             ui.menu_button("Analyze", |ui| {
+                tool(ui, &mut act, "Point (Evaluate)", K::Seq(&q::EVALUATE_PT));
                 tool(ui, &mut act, "Distance", K::Distance);
+                tool(ui, &mut act, "Angle", K::Seq(&q::ANGLE));
+                tool(ui, &mut act, "Radius", K::Seq(&q::RADIUS));
                 tool(ui, &mut act, "Length", K::OnSel("Length"));
                 ui.menu_button("Mass Properties", |ui| {
                     tool(ui, &mut act, "Area", K::OnSel("Area"));
+                    tool(ui, &mut act, "Area Centroid", K::Seq(&q::AREA_CENTROID));
                     tool(ui, &mut act, "Volume", K::OnSel("Volume"));
+                    tool(ui, &mut act, "Volume Centroid", K::Seq(&q::VOLUME_CENTROID));
                 });
                 tool(ui, &mut act, "Bounding Box", K::OnSel("BoundingBox"));
                 tool(ui, &mut act, "Object Details (What)", K::OnSel("What"));

@@ -4,9 +4,11 @@
 
 mod kind;
 mod preview;
+pub mod seq;
 
 pub use kind::{ToolKind, SELECTION_COMMANDS};
 pub use preview::Measure;
+use seq::{In, Val};
 
 use forma_geom::{Chain, Plane, Point3, Vec3};
 
@@ -29,6 +31,10 @@ pub enum Want {
         from: Point3,
         dir: Vec3,
     },
+    /// A line of text typed in the command line (spaces allowed).
+    Text,
+    /// One of the words offered in the prompt.
+    Choice,
 }
 
 pub enum Step {
@@ -78,18 +84,22 @@ pub struct Tool {
     pub stash: Vec<u64>,
     /// Typed factor waiting for a direction (Scale1D).
     factor: Option<f64>,
+    /// Values collected by a sequence tool.
+    pub vals: Vec<Val>,
+    /// Points of a sequence tool's open point list (Leader).
+    pub multi: Vec<Point3>,
 }
 
-fn fmt_p(p: Point3) -> String {
+pub(crate) fn fmt_p(p: Point3) -> String {
     format!("{},{},{}", round(p.x), round(p.y), round(p.z))
 }
 
-fn fmt_v(v: Vec3) -> String {
+pub(crate) fn fmt_v(v: Vec3) -> String {
     format!("{},{},{}", round(v.x), round(v.y), round(v.z))
 }
 
 /// Trim float noise (1e-12) from emitted numbers so command history stays readable.
-fn round(x: f64) -> f64 {
+pub(crate) fn round(x: f64) -> f64 {
     let r = (x * 1e9).round() / 1e9;
     if r == 0.0 {
         0.0
@@ -120,6 +130,45 @@ impl Tool {
             phase: 0,
             stash: Vec::new(),
             factor: None,
+            vals: Vec::new(),
+            multi: Vec::new(),
+        }
+    }
+
+    /// The sequence tool and its current input, if this is one.
+    pub fn seq_step(&self) -> Option<(&'static seq::Seq, In)> {
+        match self.kind {
+            ToolKind::Seq(s) => s.steps.get(self.vals.len()).map(|i| (s, *i)),
+            _ => None,
+        }
+    }
+
+    /// Store a value of a sequence tool; emit the command after the last one.
+    fn seq_push(&mut self, v: Val) -> Step {
+        let ToolKind::Seq(s) = self.kind else {
+            return Step::Continue;
+        };
+        match &v {
+            Val::P(p) => self.pts.push(*p),
+            Val::Ps(_) => self.multi.clear(),
+            _ => {}
+        }
+        self.vals.push(v);
+        if self.vals.len() >= s.steps.len() {
+            Step::Done(vec![(s.emit)(&self.vals, &self.plane)])
+        } else {
+            Step::Continue
+        }
+    }
+
+    /// Typed text (Text, Dot, Leader).
+    pub fn feed_text(&mut self, text: &str) -> Step {
+        match self.seq_step() {
+            Some((_, In::Text(_))) if !text.trim().is_empty() => {
+                self.seq_push(Val::T(text.trim().to_string()))
+            }
+            Some((_, In::Text(_))) => Step::Continue,
+            _ => Step::Continue,
         }
     }
 
@@ -138,6 +187,19 @@ impl Tool {
                 _ => "select objects",
             };
             return format!("{} — {what}, press Enter when done", self.kind.name());
+        }
+        if let Some((s, step)) = self.seq_step() {
+            let p = match step {
+                In::Point(p) | In::Dist(p, _) | In::Height(p, _) | In::Text(p) => p.to_string(),
+                In::Object(p) | In::Choice(p, _) => p.to_string(),
+                In::Num(p, Some(d)) => format!("{p} <{}>", round(d)),
+                In::Num(p, None) => p.to_string(),
+                In::Points(p, min) if self.multi.len() < min => {
+                    p.split(" (").next().unwrap_or(p).to_string()
+                }
+                In::Points(p, _) => p.to_string(),
+            };
+            return format!("{} — {p}", s.name);
         }
         let n = self.pts.len();
         let p = match (self.kind, n) {
@@ -213,7 +275,7 @@ impl Tool {
             (Distance, 0) => "First point for distance",
             (Distance, _) => "Second point for distance",
             (MatchProperties, _) => "Select the object to match",
-            (OnSel(_), _) => "press Enter",
+            (OnSel(_) | Seq(_), _) => "press Enter",
         };
         format!("{} — {p}", self.kind.name())
     }
@@ -222,6 +284,20 @@ impl Tool {
         use ToolKind::*;
         if self.selecting {
             return Want::Selection;
+        }
+        if let Some((_, step)) = self.seq_step() {
+            return match step {
+                In::Point(_) | In::Points(..) => Want::Point,
+                In::Dist(..) => Want::PointOrNumber,
+                In::Height(_, from) => Want::Height {
+                    from: self.vals.get(from).map_or(self.anchor, Val::p),
+                    dir: self.plane.z,
+                },
+                In::Num(..) => Want::Number,
+                In::Text(_) => Want::Text,
+                In::Object(_) => Want::PickObject,
+                In::Choice(..) => Want::Choice,
+            };
         }
         let n = self.pts.len();
         match (self.kind, n) {
@@ -262,6 +338,9 @@ impl Tool {
         if self.kind == ToolKind::Copy && !self.pts.is_empty() {
             return Some(self.pts[0]);
         }
+        if let Some(p) = self.multi.last() {
+            return Some(*p);
+        }
         self.pts.last().copied()
     }
 
@@ -281,6 +360,23 @@ impl Tool {
         if let Want::Height { from, dir } = self.want() {
             let h = (p - from).dot(dir.normalized().unwrap_or(Vec3::Z));
             return self.feed_number(h);
+        }
+        if let Some((_, step)) = self.seq_step() {
+            return match step {
+                In::Point(_) => self.seq_push(Val::P(p)),
+                In::Points(..) => {
+                    if self.multi.last().is_none_or(|q| q.distance_to(p) > 1e-9) {
+                        self.multi.push(p);
+                    }
+                    Step::Continue
+                }
+                In::Dist(_, from) => {
+                    let o = self.vals.get(from).map_or(p, Val::p);
+                    let d = self.plane.moved_to(o).project(p).distance_to(o);
+                    self.seq_push(Val::N(d))
+                }
+                _ => Step::Continue,
+            };
         }
         let n = self.pts.len();
         match (self.kind, n) {
@@ -461,6 +557,12 @@ impl Tool {
         if self.selecting {
             return Step::Continue;
         }
+        if let Some((_, step)) = self.seq_step() {
+            return match step {
+                In::Dist(..) | In::Height(..) | In::Num(..) => self.seq_push(Val::N(x)),
+                _ => Step::Cancel("a point is expected here".into()),
+            };
+        }
         let n = self.pts.len();
         match (self.kind, n) {
             (Circle, 1) => Step::Done(vec![format!(
@@ -573,12 +675,16 @@ impl Tool {
             ToolKind::OnSel("ProjectToCPlane") => {
                 format!("ProjectToCPlane {} {}", self.n(), fmt_p(self.plane.origin))
             }
+            ToolKind::Seq(s) => (s.emit)(&[], &self.plane),
             k => k.name().to_string(),
         }
     }
 
     /// An object was clicked (rail, property source).
     pub fn feed_object(&mut self, id: u64) -> Step {
+        if let Some((_, In::Object(_))) = self.seq_step() {
+            return self.seq_push(Val::O(id));
+        }
         match self.kind {
             ToolKind::Sweep1 => Step::Done(vec![format!("Sweep1 #{id}")]),
             ToolKind::MatchProperties => Step::Done(vec![format!("MatchProperties #{id}")]),
@@ -606,6 +712,16 @@ impl Tool {
             }
             return Step::Cancel("nothing selected".into());
         }
+        if let Some((_, step)) = self.seq_step() {
+            return match step {
+                In::Num(_, Some(d)) => self.seq_push(Val::N(d)),
+                In::Points(_, min) if self.multi.len() >= min => {
+                    let pts = self.multi.clone();
+                    self.seq_push(Val::Ps(pts))
+                }
+                _ => Step::Cancel("cancelled".into()),
+            };
+        }
         match self.kind {
             ToolKind::Polyline if self.pts.len() >= 2 => self.finish_polyline(false),
             ToolKind::Copy if !self.pts.is_empty() => Step::Done(Vec::new()),
@@ -622,6 +738,17 @@ impl Tool {
     /// last point.
     pub fn option(&mut self, word: &str) -> Option<Step> {
         let w = word.to_lowercase();
+        match self.seq_step() {
+            Some((_, In::Choice(_, words))) => {
+                let found = words.iter().find(|c| c.eq_ignore_ascii_case(word))?;
+                return Some(self.seq_push(Val::W(found)));
+            }
+            Some((_, In::Points(..))) if (w == "u" || w == "undo") && !self.multi.is_empty() => {
+                self.multi.pop();
+                return Some(Step::Continue);
+            }
+            _ => {}
+        }
         if self.kind == ToolKind::Polyline && (w == "c" || w == "close") && self.pts.len() >= 3 {
             return Some(self.finish_polyline(true));
         }
@@ -653,6 +780,17 @@ impl Tool {
             label: name.to_string(),
             action: OptAction::Word(name),
         };
+        match self.seq_step() {
+            Some((_, In::Choice(_, words))) => {
+                v.extend(words.iter().map(|w| word(w)));
+                return v;
+            }
+            Some((_, In::Points(..))) if !self.multi.is_empty() => {
+                v.push(word("Undo"));
+                return v;
+            }
+            _ => {}
+        }
         match self.kind {
             Polyline if n >= 3 => v.extend([word("Close"), word("Undo")]),
             Polyline | Curve | InterpCrv if n >= 1 => v.push(word("Undo")),

@@ -74,6 +74,7 @@ impl FormaApp {
         let p = painter.with_clip_rect(vp.rect);
         let pr = vp.projector(self.origin());
         self.draw_point_objects(&p, &pr);
+        self.draw_annotations(&p, &pr);
         if let (Some(t), Some(h)) = (self.tool.as_ref(), self.hover.as_ref()) {
             self.draw_tool(&p, &pr, vi, t, h);
         }
@@ -105,6 +106,73 @@ impl FormaApp {
                 p.rect_filled(r, 0.0, c);
                 p.rect_stroke(r, 0.0, Stroke::new(1.0, INK), StrokeKind::Outside);
             }
+        }
+    }
+
+    /// Text of text objects and dimensions (drawn in their plane, scaled with
+    /// the view) and text dots (screen-sized labels). Their lines are rendered
+    /// by `forma-render`.
+    fn draw_annotations(&self, p: &Painter, pr: &Projector) {
+        let doc = self.engine.doc();
+        for o in doc.objects() {
+            if !o.geometry.is_annotation() || !doc.is_visible(o) {
+                continue;
+            }
+            let Some(l) = o.geometry.annotation_label() else {
+                continue;
+            };
+            let color = if self.engine.ctx.selection.contains(&o.id) {
+                YELLOW
+            } else {
+                let [r, g, b] = doc.display_color(o);
+                Color32::from_rgb(r, g, b)
+            };
+            let Some(sp) = pr.to_screen(l.position) else {
+                continue;
+            };
+            if matches!(&o.geometry, forma_doc::Geometry::Text(t) if t.dot) {
+                let galley =
+                    p.layout_no_wrap(l.text, egui::FontId::proportional(12.0), Color32::WHITE);
+                let r = Rect::from_center_size(sp, galley.size() + egui::vec2(8.0, 4.0));
+                p.rect_filled(r, 3.0, color);
+                p.rect_stroke(r, 3.0, Stroke::new(1.0, INK), StrokeKind::Outside);
+                let text = if color == YELLOW { INK } else { Color32::WHITE };
+                p.galley(r.min + egui::vec2(4.0, 2.0), galley, text);
+                continue;
+            }
+            let (Some(sx), Some(sy)) = (
+                pr.to_screen(l.position + l.x * l.height),
+                pr.to_screen(l.position + l.y * l.height),
+            ) else {
+                continue;
+            };
+            // Screen size of the text height; nothing when the text is tiny or
+            // its plane is seen edge-on (Rhino shows it as a line then).
+            let (vx, vy) = (sx - sp, sy - sp);
+            let h_px = vy.length();
+            let area = (vx.x * vy.y - vx.y * vy.x).abs();
+            if h_px < 3.0 || area < 0.2 * vx.length().max(h_px).powi(2) {
+                continue;
+            }
+            let ux = (sx - sp).normalized();
+            let ux = if ux.x.is_finite() && ux.length() > 0.5 {
+                ux
+            } else {
+                egui::vec2(1.0, 0.0)
+            };
+            // Text upright on screen: never upside down.
+            let ux = if ux.x < -1e-3 { -ux } else { ux };
+            let angle = ux.y.atan2(ux.x);
+            // Cap height ≈ 0.7 × font size.
+            let size = (h_px / 0.7).min(400.0);
+            let galley = p.layout_no_wrap(l.text, egui::FontId::proportional(size), color);
+            let down = egui::vec2(-ux.y, ux.x);
+            let (w, gh) = (galley.size().x, galley.size().y);
+            let mut top_left = sp - down * (gh * 0.85);
+            if l.centered {
+                top_left -= ux * (w / 2.0);
+            }
+            p.add(egui::epaint::TextShape::new(top_left, galley, color).with_angle(angle));
         }
     }
 

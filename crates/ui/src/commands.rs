@@ -419,6 +419,15 @@ impl FormaApp {
             }
             return;
         }
+        if let Some(t) = self
+            .tool
+            .as_mut()
+            .filter(|t| t.want() == crate::tools::Want::Text)
+        {
+            let step = t.feed_text(text.trim());
+            self.handle_step(step);
+            return;
+        }
         if self.tool.is_some() {
             for t in &toks {
                 self.feed_token(t);
@@ -440,6 +449,11 @@ impl FormaApp {
             return;
         }
         if let Some(kind) = ToolKind::from_name(&first) {
+            // A sequence command typed with its arguments runs as written.
+            if toks.len() > 1 && matches!(kind, ToolKind::Seq(_)) {
+                self.run_engine(text);
+                return;
+            }
             self.start_tool(kind);
             for t in &toks[1..] {
                 self.feed_token(t);
@@ -566,6 +580,15 @@ impl FormaApp {
                     return;
                 }
             },
+            Want::Text => t.feed_text(tok),
+            Want::Choice => {
+                let words: Vec<String> = t.options().into_iter().map(|o| o.label).collect();
+                self.log(
+                    LogKind::Error,
+                    format!("choose one of: {} — got {tok}", words.join(", ")),
+                );
+                return;
+            }
             Want::PickObject => match tok.trim_start_matches('#').parse::<u64>() {
                 Ok(id) => t.feed_object(id),
                 Err(_) => {
@@ -651,6 +674,11 @@ impl FormaApp {
         for k in ToolKind::CURVE_TOOLS.iter().chain(&ToolKind::EDIT) {
             lines.push(format!("  {}", k.tooltip()));
         }
+        let more: Vec<&str> = crate::tools::seq::ALL.iter().map(|s| s.name).collect();
+        lines.push(format!(
+            "More tools (menus Curve, Surface, Solid, Mesh, Dimension, Transform, Analyze): {}",
+            more.join(" · ")
+        ));
         lines.push("Attributes: SetObjectColor <r,g,b|#hex|rosso…|ByLayer> · LayerColor <colour> [layer] · LayerVisible on|off [layer] · LayerLock on|off [layer] · Layer <name> · ChangeLayer <name>".into());
         lines.push("Other: Array nx ny nz dx,dy,dz · Delete · SelAll · SelNone · Undo · Redo · Save · Open · New [mm|cm|m] · ZE · ZEA".into());
         lines.push("Command line: while typing, a list of matching commands appears (↑/↓ choose, Enter/Tab/Space accept) · ↑/↓ on an empty line recalls recent commands · options in ( ) can be clicked".into());

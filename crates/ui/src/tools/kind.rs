@@ -1,5 +1,7 @@
 //! The tool kinds: names, aliases, shortcuts, tooltips and how they start.
 
+use super::seq;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ToolKind {
     Point,
@@ -42,6 +44,8 @@ pub enum ToolKind {
     MatchProperties,
     /// An engine command that acts on the selection (asks for one if empty).
     OnSel(&'static str),
+    /// A command described by its inputs (see `seq.rs`).
+    Seq(&'static seq::Seq),
 }
 
 /// Commands that only need a selection, then run as typed.
@@ -185,6 +189,7 @@ impl ToolKind {
             Distance => "Distance",
             MatchProperties => "MatchProperties",
             OnSel(n) => n,
+            Seq(s) => s.name,
         }
     }
 
@@ -250,6 +255,7 @@ impl ToolKind {
             OnSel("Cut") => "Cut (Ctrl+X)",
             OnSel("Delete") => "Delete (Del)",
             OnSel(_) => "",
+            Seq(s) => s.tip,
         }
     }
 
@@ -295,7 +301,7 @@ impl ToolKind {
             "arraypolar" | "ap" => ArrayPolar,
             "distance" | "dist" => Distance,
             "matchproperties" | "matchprop" | "ma" => MatchProperties,
-            _ => return None,
+            _ => return seq::by_name(&l).map(ToolKind::Seq),
         })
     }
 
@@ -407,7 +413,7 @@ impl ToolKind {
                 | ArrayPolar
                 | MatchProperties
                 | OnSel(_)
-        )
+        ) || matches!(self, Seq(s) if s.sel)
     }
 
     /// Tools that are a single engine command once objects are selected.
@@ -415,6 +421,6 @@ impl ToolKind {
         matches!(
             self,
             ToolKind::Join | ToolKind::Explode | ToolKind::OnSel(_)
-        )
+        ) || matches!(self, ToolKind::Seq(s) if s.steps.is_empty())
     }
 }

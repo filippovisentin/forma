@@ -251,9 +251,20 @@ impl FormaApp {
                         t.plane = self.viewports[vi].cplane();
                     }
                 }
-                if self.tool.as_ref().is_some_and(|t| t.want() == Want::Number) {
-                    self.log(LogKind::Error, "type a number in the command line");
-                    return;
+                match self.tool.as_ref().map(Tool::want) {
+                    Some(Want::Number) => {
+                        self.log(LogKind::Error, "type a number in the command line");
+                        return;
+                    }
+                    Some(Want::Text) => {
+                        self.log(LogKind::Error, "type the text in the command line");
+                        return;
+                    }
+                    Some(Want::Choice) => {
+                        self.log(LogKind::Error, "click an option in the command line");
+                        return;
+                    }
+                    _ => {}
                 }
                 if self
                     .tool

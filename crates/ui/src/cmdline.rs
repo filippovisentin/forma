@@ -128,7 +128,11 @@ impl FormaApp {
             }
             if resp.changed() {
                 self.history.reset();
-                if self.command.ends_with(' ') {
+                let typing_text = self
+                    .tool
+                    .as_ref()
+                    .is_some_and(|t| t.want() == crate::tools::Want::Text);
+                if self.command.ends_with(' ') && !typing_text {
                     let typed = self.command.trim_end().to_string();
                     self.command = typed;
                     let text = self.take_command();
