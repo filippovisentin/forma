@@ -12,7 +12,7 @@ is in `Help` and `forma-cli commands`.
 
 ## Summary
 
-279 Rhino commands: **175 ✓**, **57 partial**, **29 ✗**, **18 needs kernel**.
+279 Rhino commands: **176 ✓**, **57 partial**, **28 ✗**, **18 needs kernel**.
 
 ## Drawing: points and lines
 
@@ -169,7 +169,7 @@ is in `Help` and `forma-cli commands`.
 | ExplodeMesh | ✓ | `Explode` |
 | Join (meshes) | ✓ | `Join` |
 | MeshBooleanUnion / Difference | ✓ | the Boolean commands work on closed meshes |
-| ReduceMesh | ✗ |  |
+| ReduceMesh | ✓ | `ReduceMesh [percent]` (quadric edge collapse, borders kept, one thread per mesh) |
 | QuadRemesh | ✗ |  |
 | FillMeshHoles | partial | `Cap` fills planar holes only |
 | UnifyMeshNormals | ✓ | `UnifyMeshNormals` |

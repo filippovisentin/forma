@@ -1148,6 +1148,61 @@ impl Command for SimplifyCrv {
     }
 }
 
+simple_command!(
+    ReduceMesh,
+    "ReduceMesh",
+    &[],
+    "ReduceMesh [percent=50] — fewer triangles in the selected meshes (keeps the given percentage), borders and shape kept; lighter files and faster views"
+);
+impl Command for ReduceMesh {
+    impl_meta!(ReduceMesh);
+    fn run(&self, ctx: &mut Context, args: &mut Args) -> CommandResult {
+        let pct = args.optional_number().unwrap_or(50.0);
+        if !(1.0..100.0).contains(&pct) {
+            return Err(CommandError::Invalid("percent between 1 and 99".into()));
+        }
+        let ids = ctx.selected("ReduceMesh")?;
+        let tol = ctx.tolerance.absolute.max(1e-9);
+        let meshes: Vec<(ObjectId, &Mesh)> = ids
+            .iter()
+            .filter_map(|id| match &ctx.doc.object(*id)?.geometry {
+                Geometry::Mesh(m) => Some((*id, m)),
+                _ => None,
+            })
+            .collect();
+        // Each mesh on its own thread: big imported models have many heavy meshes.
+        let reduced: Vec<(ObjectId, usize, Mesh)> = std::thread::scope(|s| {
+            let jobs: Vec<_> = meshes
+                .iter()
+                .map(|(id, m)| {
+                    s.spawn(move || {
+                        let n = m.triangles.len();
+                        let target = ((n as f64) * pct / 100.0).round() as usize;
+                        let r = forma_geom::reduce_mesh(m, target, tol)
+                            .split_by_angle(30f64.to_radians(), tol);
+                        (*id, n, r)
+                    })
+                })
+                .collect();
+            jobs.into_iter()
+                .map(|j| j.join().expect("reduce thread"))
+                .collect()
+        });
+        let (mut before, mut after) = (0, 0);
+        let mut t = ctx.doc.begin();
+        for (id, n, r) in reduced {
+            before += n;
+            after += r.triangles.len();
+            t.replace(id, Geometry::Mesh(r));
+        }
+        if before == 0 {
+            return Err(CommandError::Invalid("ReduceMesh: select meshes".into()));
+        }
+        t.commit();
+        Ok(format!("{before} → {after} triangles"))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::Engine;
@@ -1318,6 +1373,27 @@ mod tests {
         };
         assert_eq!(p.len(), 3);
         assert_eq!(e.run_line("SimplifyCrv").unwrap(), "0 curve(s) simplified");
+    }
+
+    #[test]
+    fn reduce_mesh_halves_a_sphere() {
+        let mut e = Engine::new();
+        e.run_line("Sphere 0,0,0 50").unwrap();
+        e.run_line("SelAll").unwrap();
+        let Geometry::Mesh(m) = &e.doc().objects().next().unwrap().geometry else {
+            panic!()
+        };
+        let n = m.triangles.len();
+        e.run_line("ReduceMesh 25").unwrap();
+        let Geometry::Mesh(m) = &e.doc().objects().next().unwrap().geometry else {
+            panic!()
+        };
+        assert!(
+            m.triangles.len() <= n / 4 + 2,
+            "{} of {n}",
+            m.triangles.len()
+        );
+        assert!(e.run_line("ReduceMesh 0").is_err());
     }
 
     #[test]

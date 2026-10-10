@@ -447,6 +447,7 @@ impl FormaApp {
                 tool(ui, &mut act, "Duplicate Mesh Edges", K::Seq(&q::DUPEDGE));
                 tool(ui, &mut act, "Duplicate Mesh Border", K::Seq(&q::DUPBORDER));
                 tool(ui, &mut act, "Unify Normals", K::Seq(&q::UNIFY_MESH_NORMALS));
+                tool(ui, &mut act, "Reduce Mesh", K::Seq(&q::REDUCE_MESH));
                 tool(ui, &mut act, "Contour", K::Seq(&q::CONTOUR));
                 tool(ui, &mut act, "Section", K::Seq(&q::SECTION));
             });

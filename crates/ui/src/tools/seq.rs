@@ -1748,8 +1748,18 @@ pub static CLIPPING_PLANE: Seq = Seq {
     preview: none,
 };
 
+pub static REDUCE_MESH: Seq = Seq {
+    name: "ReduceMesh",
+    tip: "ReduceMesh — fewer triangles in the selected meshes",
+    sel: true,
+    steps: &[In::Num("Percentage of triangles to keep", Some(50.0))],
+    emit: |v, _| format!("ReduceMesh {}", round(v[0].n())),
+    preview: none,
+};
+
 /// Every sequence tool (for typed names, help and tests).
 pub static ALL: &[&Seq] = &[
+    &REDUCE_MESH,
     &DIM_ROTATED,
     &CLIPPING_PLANE,
     &BLEND_CRV,

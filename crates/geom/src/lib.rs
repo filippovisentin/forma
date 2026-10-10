@@ -15,6 +15,7 @@ mod meshtools;
 mod nurbs;
 mod plane;
 mod primitives;
+mod reduce;
 mod solids;
 mod surface;
 mod xform;
@@ -46,6 +47,7 @@ pub use primitives::{
     cone_mesh, coons_mesh, edge_curves_to_sides, ellipsoid_mesh, grid_mesh, miter_offset,
     pipe_mesh, pyramid_mesh, ring, tapered_extrude_mesh, torus_mesh, tube_mesh,
 };
+pub use reduce::reduce_mesh;
 pub use solids::{box_mesh, cylinder_mesh, extrude_mesh, sphere_mesh, triangulate_polygon};
 pub use surface::{
     cap_planar_holes, extrude_open_mesh, loft_mesh, newell_area, planar_mesh, point_in_polygon,

@@ -97,6 +97,7 @@ pub fn builtin() -> Vec<Box<dyn Command>> {
         Box::new(crate::workflow::ArcDirection),
         Box::new(crate::workflow::BlendCrv),
         Box::new(crate::workflow::SimplifyCrv),
+        Box::new(crate::workflow::ReduceMesh),
         Box::new(crate::annotate::DimRotated),
         Box::new(crate::layers::LayerState),
         Box::new(crate::edit::IncrementalSave),
