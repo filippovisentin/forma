@@ -197,7 +197,7 @@ impl Tool {
                 | In::Dist(p, _)
                 | In::Height(p, _)
                 | In::Text(p) => p.to_string(),
-                In::Object(p) | In::Choice(p, _) => p.to_string(),
+                In::Object(p) | In::CurveNear(p) | In::Choice(p, _) => p.to_string(),
                 In::Num(p, Some(d)) => format!("{p} <{}>", round(d)),
                 In::Num(p, None) => p.to_string(),
                 In::Points(p, min) | In::SurfacePoints(p, min) if self.multi.len() < min => {
@@ -302,7 +302,7 @@ impl Tool {
                 },
                 In::Num(..) => Want::Number,
                 In::Text(_) => Want::Text,
-                In::Object(_) => Want::PickObject,
+                In::Object(_) | In::CurveNear(_) => Want::PickObject,
                 In::Choice(..) => Want::Choice,
             };
         }
@@ -685,6 +685,14 @@ impl Tool {
             ToolKind::Seq(s) => (s.emit)(&[], &self.plane),
             k => k.name().to_string(),
         }
+    }
+
+    /// An object was clicked at a point on it (for `CurveNear` steps).
+    pub fn feed_object_at(&mut self, id: u64, p: Point3) -> Step {
+        if let Some((_, In::CurveNear(_))) = self.seq_step() {
+            return self.seq_push(Val::OP(id, p));
+        }
+        self.feed_object(id)
     }
 
     /// An object was clicked (rail, property source).

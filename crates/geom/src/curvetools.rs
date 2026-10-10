@@ -553,6 +553,149 @@ pub fn in_plane(v: Vec3, n: Vec3) -> Option<Vec3> {
     (v - n * v.dot(n)).normalized()
 }
 
+/// Circle of radius `r` tangent to two curves, on the side of the pick points
+/// `p1` (near `c1`) and `p2` (near `c2`), in `plane`. Solved numerically on the
+/// exact line / arc segments; `None` when there is no such circle.
+pub fn circle_tangent_tangent(
+    c1: &Chain,
+    p1: Point3,
+    c2: &Chain,
+    p2: Point3,
+    r: f64,
+    plane: &Plane,
+    tol: f64,
+) -> Option<CircleArc> {
+    if r <= tol {
+        return None;
+    }
+    let flat = |p: Point3| plane.project(p);
+    let foot = |c: &Chain, p: Point3| flat(c.point_at(c.closest(p).0));
+    let (q1, q2) = (foot(c1, p1), foot(c2, p2));
+    let mid = flat(Point3::ORIGIN + ((p1.to_vec() + p2.to_vec()) * 0.5));
+    let side = |q: Point3, p: Point3| (flat(p) - q).normalized();
+    let mut starts = vec![mid, flat(p1), flat(p2), (q1 + (q2 - q1) * 0.5)];
+    if let (Some(a), Some(b)) = (side(q1, p2), side(q2, p1)) {
+        starts.push(q1 + a * r);
+        starts.push(q2 + b * r);
+        starts.push((q1 + (q2 - q1) * 0.5) + (a + b) * (r * 0.5));
+    }
+    let mut best: Option<(f64, Point3)> = None;
+    for s in starts {
+        let mut c = s;
+        for _ in 0..200 {
+            // Residuals d_i - r and their gradients (unit vectors from the feet).
+            let (f1, f2) = (foot(c1, c), foot(c2, c));
+            let (Some(g1), Some(g2)) = ((c - f1).normalized(), (c - f2).normalized()) else {
+                // On a curve: step off it towards the other pick and retry.
+                c = c + (mid - c) * 0.1 + plane.x * (r * 1e-3);
+                continue;
+            };
+            let (e1, e2) = (c.distance_to(f1) - r, c.distance_to(f2) - r);
+            // Solve [g1; g2] dx = -[e1; e2] in the plane (2x2 system).
+            let (a, b) = (plane.x, plane.y);
+            // Damped least squares: (JᵀJ + λI) dx = -Jᵀe, robust when the two
+            // gradients are (nearly) parallel.
+            let j = [[g1.dot(a), g1.dot(b)], [g2.dot(a), g2.dot(b)]];
+            let lambda = 1e-3;
+            let n00 = j[0][0] * j[0][0] + j[1][0] * j[1][0] + lambda;
+            let n01 = j[0][0] * j[0][1] + j[1][0] * j[1][1];
+            let n11 = j[0][1] * j[0][1] + j[1][1] * j[1][1] + lambda;
+            let r0 = -(j[0][0] * e1 + j[1][0] * e2);
+            let r1 = -(j[0][1] * e1 + j[1][1] * e2);
+            let det = n00 * n11 - n01 * n01;
+            let du = (r0 * n11 - r1 * n01) / det;
+            let dv = (r1 * n00 - r0 * n01) / det;
+            c = c + a * du + b * dv;
+            if du.hypot(dv) < tol * 1e-3 {
+                break;
+            }
+        }
+        let ok = (c.distance_to(foot(c1, c)) - r).abs() < tol
+            && (c.distance_to(foot(c2, c)) - r).abs() < tol;
+        // The solution on the picked side: nearest the picks.
+        let score = c.distance_to(flat(p1)) + c.distance_to(flat(p2));
+        if ok && best.is_none_or(|b| score < b.0 - tol) {
+            best = Some((score, c));
+        }
+    }
+    let (_, c) = best?;
+    Some(CircleArc::circle(plane.moved_to(c), r))
+}
+
+/// Arc from `start`, leaving in direction `dir`, ending at `end` (Rhino's Arc
+/// with the Direction option).
+pub fn arc_start_dir_end(start: Point3, dir: Vec3, end: Point3) -> Option<CircleArc> {
+    let chord = end - start;
+    let n = dir.cross(chord).normalized()?;
+    let t = dir.normalized()?;
+    // Centre on the perpendicular to `dir` at `start`, equidistant from both ends.
+    let perp = n.cross(t);
+    let denom = 2.0 * perp.dot(chord);
+    if denom.abs() < 1e-12 {
+        return None;
+    }
+    let k = chord.dot(chord) / denom;
+    let center = start + perp * k;
+    CircleArc::from_center_start_end(center, start, end, n)
+}
+
+#[cfg(test)]
+mod tangent_tests {
+    use super::*;
+
+    #[test]
+    fn circle_in_a_corner_and_arc_by_direction() {
+        let p = |x: f64, y: f64| Point3::new(x, y, 0.0);
+        let a = Chain::new(vec![Seg::Line(p(0.0, 0.0), p(100.0, 0.0))]);
+        let b = Chain::new(vec![Seg::Line(p(0.0, 0.0), p(0.0, 100.0))]);
+        let c = circle_tangent_tangent(&a, p(30.0, 1.0), &b, p(1.0, 30.0), 10.0, &Plane::TOP, 1e-6)
+            .unwrap();
+        assert!(
+            c.center().distance_to(p(10.0, 10.0)) < 1e-6,
+            "{:?}",
+            c.center()
+        );
+        // Tangent to a circle and a line.
+        let circle = Chain::new(vec![Seg::Arc(CircleArc::circle(
+            Plane::TOP.moved_to(p(50.0, 50.0)),
+            20.0,
+        ))]);
+        let c = circle_tangent_tangent(
+            &a,
+            p(70.0, 1.0),
+            &circle,
+            p(65.0, 38.0),
+            20.0,
+            &Plane::TOP,
+            1e-6,
+        )
+        .unwrap();
+        assert!((c.center().y - 20.0).abs() < 1e-6, "{:?}", c.center());
+        assert!(
+            (c.center().distance_to(p(50.0, 50.0)) - 40.0).abs() < 1e-6,
+            "{:?}",
+            c.center()
+        );
+        assert!(c.center().x > 50.0);
+        // Too far apart for this radius: no circle.
+        assert!(circle_tangent_tangent(
+            &a,
+            p(50.0, 1.0),
+            &circle,
+            p(50.0, 31.0),
+            5.0,
+            &Plane::TOP,
+            1e-6
+        )
+        .is_none());
+        // Arc leaving (0,0) along +x and ending at (10,10): a quarter of radius 10.
+        let arc = arc_start_dir_end(p(0.0, 0.0), Vec3::X, p(10.0, 10.0)).unwrap();
+        assert!((arc.radius - 10.0).abs() < 1e-9);
+        assert!(arc.center().distance_to(p(0.0, 10.0)) < 1e-9);
+        assert!((arc.sweep - std::f64::consts::FRAC_PI_2).abs() < 1e-9);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -305,9 +305,17 @@ impl FormaApp {
                         pos,
                         origin,
                     );
+                    let at = pick::pick_curve_point(
+                        self.engine.doc(),
+                        &self.index,
+                        &self.viewports[vi],
+                        pos,
+                        origin,
+                    )
+                    .unwrap_or_else(|| self.viewports[vi].cplane_point(pos, origin));
                     match (id, self.tool.as_mut()) {
                         (Some(id), Some(t)) => {
-                            let step = t.feed_object(id.0);
+                            let step = t.feed_object_at(id.0, at);
                             self.handle_step(step);
                         }
                         _ => self.log(LogKind::Error, "no object there — click on an object"),

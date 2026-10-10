@@ -25,6 +25,8 @@ pub enum In {
     Text(&'static str),
     /// A clicked object (or a typed `#id`).
     Object(&'static str),
+    /// A clicked curve and where it was clicked (tangent circles, blends…).
+    CurveNear(&'static str),
     /// Points until Enter, at least this many.
     Points(&'static str, usize),
     /// One point clicked on the surface of a mesh or solid.
@@ -45,6 +47,8 @@ pub enum Val {
     O(u64),
     Ps(Vec<Point3>),
     W(&'static str),
+    /// An object and a point on it.
+    OP(u64, Point3),
 }
 
 impl Val {
@@ -52,6 +56,7 @@ impl Val {
         match self {
             Val::P(p) => *p,
             Val::Ps(v) => *v.last().unwrap_or(&Point3::ORIGIN),
+            Val::OP(_, p) => *p,
             _ => Point3::ORIGIN,
         }
     }
@@ -70,7 +75,7 @@ impl Val {
     }
     fn o(&self) -> u64 {
         match self {
-            Val::O(i) => *i,
+            Val::O(i) | Val::OP(i, _) => *i,
             _ => 0,
         }
     }
@@ -1625,8 +1630,62 @@ pub static MAKE2D: Seq = Seq {
     preview: none,
 };
 
+pub static CIRCLE_TTR: Seq = Seq {
+    name: "CircleTTR",
+    tip: "CircleTTR — circle of a given radius tangent to two curves",
+    sel: false,
+    steps: &[
+        In::CurveNear("First curve (click near the tangent point)"),
+        In::CurveNear("Second curve"),
+        In::Num("Radius", None),
+    ],
+    emit: |v, _| {
+        format!(
+            "CircleTTR #{} {} #{} {} {}",
+            v[0].o(),
+            fmt_p(v[0].p()),
+            v[1].o(),
+            fmt_p(v[1].p()),
+            round(v[2].n())
+        )
+    },
+    preview: none,
+};
+
+pub static ARC_DIRECTION: Seq = Seq {
+    name: "ArcDirection",
+    tip: "ArcDirection — arc from a start point, tangent to a direction, to an end point",
+    sel: false,
+    steps: &[
+        In::Point("Start of arc"),
+        In::Point("Direction at start"),
+        In::Point("End of arc"),
+    ],
+    emit: |v, _| {
+        format!(
+            "ArcDirection {} {} {}",
+            fmt_p(v[0].p()),
+            fmt_p(v[1].p()),
+            fmt_p(v[2].p())
+        )
+    },
+    preview: |v| match v.vals.len() {
+        1 => vec![[v.p(0), v.cur]],
+        2 => {
+            let mut out = vec![[v.p(0), v.p(1)]];
+            if let Some(a) = forma_geom::arc_start_dir_end(v.p(0), v.p(1) - v.p(0), v.cur) {
+                out.extend(poly(&a.points(48)));
+            }
+            out
+        }
+        _ => Vec::new(),
+    },
+};
+
 /// Every sequence tool (for typed names, help and tests).
 pub static ALL: &[&Seq] = &[
+    &CIRCLE_TTR,
+    &ARC_DIRECTION,
     &MAKE2D,
     &CPLANE,
     &CPLANE_ORIGIN,

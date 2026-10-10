@@ -60,6 +60,22 @@ impl FormaApp {
             return;
         }
         let first = line.split_whitespace().next().unwrap_or("").to_lowercase();
+        if first == "silhouette" && line.split_whitespace().count() == 1 {
+            // Seen from the active view.
+            let d = -self.viewports[self.active].camera.back();
+            let line = format!(
+                "Silhouette {},{},{}",
+                crate::tools::round(d.x),
+                crate::tools::round(d.y),
+                crate::tools::round(d.z)
+            );
+            self.run_engine_as(&line, remember);
+            return;
+        }
+        if first == "namedview" {
+            self.named_view(line);
+            return;
+        }
         if first == "viewcapturetofile" || first == "capture" {
             let rest = line
                 .split_once(' ')
@@ -714,6 +730,63 @@ impl FormaApp {
             self.cplane_dirty = true;
         }
         self.fit(Some(self.active));
+    }
+
+    /// `NamedView Save <name>` / `NamedView <name>` (restore) / `NamedView Delete <name>`.
+    pub(crate) fn named_view(&mut self, line: &str) {
+        let rest = line.split_once(' ').map_or("", |(_, r)| r).trim();
+        let (verb, name) = match rest.split_once(' ') {
+            Some((v, n)) if ["save", "delete", "restore"].contains(&v.to_lowercase().as_str()) => {
+                (v.to_lowercase(), n.trim().trim_matches('"').to_string())
+            }
+            _ => ("restore".to_string(), rest.trim_matches('"').to_string()),
+        };
+        self.log(LogKind::Command, format!("Command: {line}"));
+        if name.is_empty() {
+            let names: Vec<&str> = self.named_views.iter().map(|v| v.0.as_str()).collect();
+            let msg = if names.is_empty() {
+                "no named views — NamedView Save <name>".to_string()
+            } else {
+                format!("named views: {}", names.join(", "))
+            };
+            self.log(LogKind::Normal, msg);
+            return;
+        }
+        let pos = self
+            .named_views
+            .iter()
+            .position(|v| v.0.eq_ignore_ascii_case(&name));
+        match verb.as_str() {
+            "save" => {
+                let vp = &self.viewports[self.active];
+                let entry = (name.clone(), vp.kind, vp.camera, vp.custom_cplane);
+                match pos {
+                    Some(i) => self.named_views[i] = entry,
+                    None => self.named_views.push(entry),
+                }
+                self.log(LogKind::Normal, format!("view \"{name}\" saved"));
+            }
+            "delete" => match pos {
+                Some(i) => {
+                    self.named_views.remove(i);
+                    self.log(LogKind::Normal, format!("view \"{name}\" deleted"));
+                }
+                None => self.log(LogKind::Error, format!("no named view \"{name}\"")),
+            },
+            _ => match pos {
+                Some(i) => {
+                    let (_, kind, cam, cp) = self.named_views[i].clone();
+                    let vp = &mut self.viewports[self.active];
+                    vp.kind = kind;
+                    vp.camera = cam;
+                    vp.custom_cplane = cp;
+                    vp.dirty = true;
+                    self.cplane_dirty = true;
+                    self.log(LogKind::Normal, format!("view \"{name}\" restored"));
+                }
+                None => self.log(LogKind::Error, format!("no named view \"{name}\"")),
+            },
+        }
     }
 
     pub(crate) fn toggle_maximize(&mut self) {

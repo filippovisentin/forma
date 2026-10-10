@@ -211,6 +211,15 @@ pub(crate) static DIM_STYLE: Form = Form {
     needs_selection: false,
 };
 
+pub(crate) static SAVE_VIEW: Form = Form {
+    title: "Save named view",
+    help: "Saves the active view's camera (and CPlane) under a name, to restore it later.",
+    fields: &[Field::Text("Name")],
+    init: one_blank,
+    emit: |v| Ok(format!("NamedView Save {}", need(&v[0], "name")?)),
+    needs_selection: false,
+};
+
 pub(crate) static SEL_LAYER: Form = Form {
     title: "Select by layer",
     help: "Selects every visible object on the layer.",

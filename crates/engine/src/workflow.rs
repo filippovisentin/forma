@@ -879,6 +879,131 @@ impl Command for Make2D {
     }
 }
 
+simple_command!(
+    Silhouette,
+    "Silhouette",
+    &[],
+    "Silhouette [view direction] — curves along the outline, borders and sharp edges of the selected solids and meshes as seen along the direction (default from above)"
+);
+impl Command for Silhouette {
+    impl_meta!(Silhouette);
+    fn run(&self, ctx: &mut Context, args: &mut Args) -> CommandResult {
+        let dir = args
+            .optional_vector()
+            .unwrap_or(Vec3::new(0.0, 0.0, -1.0))
+            .normalized()
+            .ok_or_else(|| CommandError::Invalid("the direction is zero".into()))?;
+        let ids = ctx.selected("Silhouette")?;
+        let tol = ctx.tolerance.absolute;
+        let mut curves = Vec::new();
+        for id in &ids {
+            let Geometry::Mesh(m) = &ctx.doc.object(*id).expect("selected").geometry else {
+                continue;
+            };
+            let chains: Vec<Chain> = forma_geom::outline_edges(m, dir, 20f64.to_radians(), tol)
+                .into_iter()
+                .map(|[a, b]| Chain::new(vec![Seg::Line(a, b)]))
+                .collect();
+            for c in forma_geom::join(chains, tol) {
+                let p = merge_collinear(&c.points(), tol);
+                curves.push(if p.len() == 2 {
+                    Geometry::Line(LineCurve::new(p[0], p[1]))
+                } else {
+                    Geometry::Polyline(p)
+                });
+            }
+        }
+        if curves.is_empty() {
+            return Err(CommandError::Invalid(
+                "Silhouette: select solids or meshes".into(),
+            ));
+        }
+        let n = curves.len();
+        let mut t = ctx.doc.begin();
+        let new: Vec<ObjectId> = curves.into_iter().map(|g| t.add(g)).collect();
+        t.commit();
+        ctx.selection = new.into_iter().collect();
+        Ok(format!("{n} silhouette curve(s)"))
+    }
+}
+
+/// `#id` token → object id that exists.
+fn object_arg(
+    ctx: &Context,
+    args: &mut Args,
+    what: &'static str,
+) -> Result<ObjectId, CommandError> {
+    let tok = args.next_token().ok_or(CommandError::MissingInput(what))?;
+    let id = parse_ids(vec![tok])?
+        .first()
+        .copied()
+        .ok_or_else(|| CommandError::BadInput(tok.to_string()))?;
+    if ctx.doc.object(id).is_none() {
+        return Err(CommandError::Invalid(format!("no object #{}", id.0)));
+    }
+    Ok(id)
+}
+
+simple_command!(
+    CircleTTR,
+    "CircleTTR",
+    &["CircleTangent"],
+    "CircleTTR #curve1 <point near it> #curve2 <point near it> <radius> — circle of the radius tangent to two curves, on the side of the points"
+);
+impl Command for CircleTTR {
+    impl_meta!(CircleTTR);
+    fn run(&self, ctx: &mut Context, args: &mut Args) -> CommandResult {
+        let a = object_arg(ctx, args, "first curve")?;
+        let pa = args.point("point near the first curve", ctx.last_point)?;
+        let b = object_arg(ctx, args, "second curve")?;
+        let pb = args.point("point near the second curve", Some(pa))?;
+        let r = args.number("radius")?;
+        let chain = |id: ObjectId| {
+            ctx.doc
+                .object(id)
+                .and_then(|o| o.geometry.to_chain())
+                .ok_or_else(|| CommandError::Invalid(format!("#{} is not a curve", id.0)))
+        };
+        let (ca, cb) = (chain(a)?, chain(b)?);
+        // A line has no plane of its own: use the other curve's, else world Z.
+        let n = [a, b]
+            .iter()
+            .find_map(|id| ctx.doc.object(*id).and_then(|o| o.geometry.curve_normal()))
+            .unwrap_or(Vec3::Z);
+        let plane = forma_geom::Plane::from_normal(pa, n);
+        let tol = ctx.tolerance.absolute;
+        let c = forma_geom::circle_tangent_tangent(&ca, pa, &cb, pb, r, &plane, tol).ok_or_else(
+            || CommandError::Invalid("no circle of that radius touches both curves there".into()),
+        )?;
+        let mut t = ctx.doc.begin();
+        let id = t.add(Geometry::Arc(c));
+        t.commit();
+        Ok(format!("added #{} circle, radius {r}", id.0))
+    }
+}
+
+simple_command!(
+    ArcDirection,
+    "ArcDirection",
+    &["ArcSED"],
+    "ArcDirection <start> <direction point> <end> — arc leaving the start towards the direction point (tangent) and ending at the end"
+);
+impl Command for ArcDirection {
+    impl_meta!(ArcDirection);
+    fn run(&self, ctx: &mut Context, args: &mut Args) -> CommandResult {
+        let s = args.point("start of arc", ctx.last_point)?;
+        let d = args.point("direction at start", Some(s))?;
+        let e = args.point("end of arc", Some(s))?;
+        let arc = forma_geom::arc_start_dir_end(s, d - s, e)
+            .ok_or_else(|| CommandError::Invalid("the points are in a line".into()))?;
+        let mut t = ctx.doc.begin();
+        let id = t.add(Geometry::Arc(arc));
+        t.commit();
+        ctx.last_point = Some(e);
+        Ok(format!("added #{} arc", id.0))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::Engine;
@@ -972,6 +1097,44 @@ mod tests {
             assert!(b.min.x > 100.0 && b.max.z.abs() < 1e-9, "{b:?}");
         }
         assert!(e.run_line("Make2D sideways").is_err());
+    }
+
+    #[test]
+    fn silhouette_of_a_box_from_above() {
+        let mut e = Engine::new();
+        e.run_line("Box 0,0 10,20 5").unwrap();
+        e.run_line("SelAll").unwrap();
+        e.run_line("Silhouette 0,0,-1").unwrap();
+        // Top and bottom rectangles and the four vertical edges (all sharp).
+        let len: f64 = e
+            .ctx
+            .selection
+            .iter()
+            .map(|id| e.doc().object(*id).unwrap().geometry.length().unwrap())
+            .sum();
+        assert!((len - (60.0 * 2.0 + 20.0)).abs() < 1e-6, "{len}");
+    }
+
+    #[test]
+    fn tangent_circle_and_arc_by_direction() {
+        let mut e = Engine::new();
+        e.run_line("Line 0,0 100,0").unwrap();
+        e.run_line("Line 0,0 0,100").unwrap();
+        e.run_line("CircleTTR #1 30,1 #2 1,30 10").unwrap();
+        let Geometry::Arc(c) = &e.doc().objects().last().unwrap().geometry else {
+            panic!()
+        };
+        assert!(
+            c.center()
+                .distance_to(forma_geom::Point3::new(10.0, 10.0, 0.0))
+                < 1e-6
+        );
+        assert!(e.run_line("CircleTTR #1 30,1 #2 1,30 0").is_err());
+        e.run_line("ArcDirection 0,0 10,0 10,10").unwrap();
+        let Geometry::Arc(a) = &e.doc().objects().last().unwrap().geometry else {
+            panic!()
+        };
+        assert!((a.radius - 10.0).abs() < 1e-9);
     }
 
     #[test]

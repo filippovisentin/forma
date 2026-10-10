@@ -9,7 +9,11 @@ pub struct Entry {
 }
 
 /// Commands that only exist in the UI (views, display modes, toggles).
-pub const UI_COMMANDS: [(&str, &str); 27] = [
+pub const UI_COMMANDS: [(&str, &str); 28] = [
+    (
+        "NamedView",
+        "Save / restore a view: NamedView Save <name>, NamedView <name>",
+    ),
     ("ViewCaptureToFile", "Save the active view as a PNG image"),
     (
         "CPlane",

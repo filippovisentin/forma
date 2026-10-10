@@ -322,6 +322,13 @@ struct FormaApp {
     form: Option<dialogs::OpenForm>,
     /// A view capture to save (View → Capture View to Image).
     capture: Option<capture::Capture>,
+    /// Named views of this session: name, view kind, camera, CPlane.
+    named_views: Vec<(
+        String,
+        forma_render::StandardView,
+        forma_render::Camera,
+        Option<forma_geom::Plane>,
+    )>,
     /// Tool values remembered between uses (Offset distance, Fillet radius…).
     offset_distance: f64,
     fillet_radius: f64,

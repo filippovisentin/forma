@@ -12,7 +12,7 @@ is in `Help` and `forma-cli commands`.
 
 ## Summary
 
-279 Rhino commands: **168 ✓**, **55 partial**, **38 ✗**, **18 needs kernel**.
+279 Rhino commands: **171 ✓**, **56 partial**, **34 ✗**, **18 needs kernel**.
 
 ## Drawing: points and lines
 
@@ -42,10 +42,10 @@ is in `Help` and `forma-cli commands`.
 | Circle (Center, Radius) | ✓ | `Circle` (C) |
 | Circle 2Point | ✓ | `Circle2Pt` (alias CircleD) |
 | Circle 3Point | ✓ | `Circle3Pt` |
-| Circle Tangent | ✗ |  |
+| Circle Tangent | partial | `CircleTTR` (tangent, tangent, radius) on lines, arcs and polylines |
 | Arc (Center, Start, Angle) | ✓ | `Arc` |
 | Arc Start End Point | ✓ | `Arc3Pt` |
-| Arc Tangent / Direction | ✗ |  |
+| Arc Tangent / Direction | partial | `ArcDirection <start> <direction> <end>` |
 | Ellipse | ✓ | `Ellipse` (center, axis, axis) |
 | Polygon | ✓ | `Polygon` with NumSides |
 | Slot | ✓ | `Slot <c1> <c2> <width>` |
@@ -95,7 +95,7 @@ is in `Help` and `forma-cli commands`.
 | ExtractIsocurve | needs kernel |  |
 | ExtractPt | ✓ | `ExtractPt` |
 | ProjectToCPlane | ✓ | `ProjectToCPlane` |
-| Silhouette | ✗ |  |
+| Silhouette | ✓ | `Silhouette [direction]` (active view in the app) |
 | Make2D | partial | `Make2D [top|front|right|back|left|bottom] [hidden]`: parallel views, meshes and curves; no perspective |
 
 ## Surfaces
@@ -347,7 +347,7 @@ is in `Help` and `forma-cli commands`.
 | SetView Top / Front / Right / Perspective | ✓ |  |
 | SetView Bottom / Left / Back | ✓ | `Bottom`, `Left`, `Back` |
 | 4 viewports, MaxViewport | ✓ |  |
-| NamedView | ✗ |  |
+| NamedView | ✓ | `NamedView Save <name>` / `NamedView <name>`; View → Named Views (this session) |
 | CPlane (custom) | ✓ | `CPlane World / <origin> / 3 points / Face #id <point>` per view, with its grid |
 | Grid | ✓ | F7 |
 | Wireframe / Shaded / Ghosted / X-Ray | ✓ |  |
@@ -356,7 +356,7 @@ is in `Help` and `forma-cli commands`.
 | Ortho / Snap / Planar | ✓ | F8 / F9 |
 | Osnap | ✓ | End, Near, Point, Mid, Cen, Int, Perp, Tan, Quad, Knot, Vertex |
 | SmartTrack | ✓ |  |
-| ViewCaptureToFile | partial | `forma-cli render` (offscreen PNG) |
+| ViewCaptureToFile | ✓ | File → Capture View to Image (PNG of the active view, texts included) |
 
 ## File
 

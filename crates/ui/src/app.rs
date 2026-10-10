@@ -110,6 +110,7 @@ impl FormaApp {
             cplane_dirty: false,
             form: None,
             capture: None,
+            named_views: Vec::new(),
             face_drag: None,
             face_typed: false,
             face_hot: false,

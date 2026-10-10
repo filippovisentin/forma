@@ -38,6 +38,8 @@ impl FormaApp {
         let mut act: Option<Act> = None;
         let mut open_recent: Option<String> = None;
         let mut clear_recent = false;
+        let view_names: Vec<String> = self.named_views.iter().map(|v| v.0.clone()).collect();
+        let mut restore_view: Option<String> = None;
         let item = |ui: &mut egui::Ui, act: &mut Option<Act>, label: &str, key: &str, a: Act| {
             let b = egui::Button::new(label).shortcut_text(key);
             if ui.add(b).clicked() {
@@ -248,6 +250,18 @@ impl FormaApp {
                         item(ui, &mut act, label, "", Act::Submit(cmd));
                     }
                 });
+                ui.menu_button("Named Views", |ui| {
+                    item(ui, &mut act, "Save Current View…", "", Act::Form(&crate::dialogs::SAVE_VIEW));
+                    if !view_names.is_empty() {
+                        ui.separator();
+                    }
+                    for n in &view_names {
+                        if ui.button(n).clicked() {
+                            restore_view = Some(n.clone());
+                            ui.close();
+                        }
+                    }
+                });
                 ui.menu_button("Set CPlane", |ui| {
                     item(ui, &mut act, "World (standard)", "", Act::Submit("CPlane World"));
                     tool(ui, &mut act, "Origin", K::Seq(&q::CPLANE_ORIGIN));
@@ -305,10 +319,12 @@ impl FormaApp {
                     tool(ui, &mut act, "Center, Radius", K::Circle);
                     tool(ui, &mut act, "2 Points", K::Seq(&q::CIRCLE2PT));
                     tool(ui, &mut act, "3 Points", K::Seq(&q::CIRCLE3PT));
+                    tool(ui, &mut act, "Tangent, Tangent, Radius", K::Seq(&q::CIRCLE_TTR));
                 });
                 ui.menu_button("Arc", |ui| {
                     tool(ui, &mut act, "Center, Start, Angle", K::Arc);
                     tool(ui, &mut act, "Start, End, Point on Arc", K::Seq(&q::ARC3PT));
+                    tool(ui, &mut act, "Start, Direction, End", K::Seq(&q::ARC_DIRECTION));
                 });
                 tool(ui, &mut act, "Ellipse", K::Ellipse);
                 tool(ui, &mut act, "Slot", K::Seq(&q::SLOT));
@@ -338,6 +354,7 @@ impl FormaApp {
                     tool(ui, &mut act, "Duplicate Edge", K::Seq(&q::DUPEDGE));
                     tool(ui, &mut act, "Duplicate Border", K::Seq(&q::DUPBORDER));
                     tool(ui, &mut act, "Duplicate Face Border", K::Seq(&q::DUP_FACE_BORDER));
+                    tool(ui, &mut act, "Silhouette", K::OnSel("Silhouette"));
                     tool(ui, &mut act, "Intersection", K::OnSel("Intersect"));
                     tool(ui, &mut act, "Contour", K::Seq(&q::CONTOUR));
                     tool(ui, &mut act, "Section", K::Seq(&q::SECTION));
@@ -535,6 +552,9 @@ impl FormaApp {
         });
         if let Some(a) = act {
             self.act(ui.ctx(), a);
+        }
+        if let Some(n) = restore_view {
+            self.named_view(&format!("NamedView {n}"));
         }
         if let Some(p) = open_recent {
             self.run_engine(&format!("Open {p}"));
