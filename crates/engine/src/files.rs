@@ -333,6 +333,9 @@ mod tests {
 
     /// Block instances arrive expanded, one named group per instance. Needs
     /// rhino3dm (McNeel's Python reader/writer) to make the file; skipped without it.
+    // Not on Windows: a child process inherits the open file handles of the
+    // other tests running in parallel and keeps their files locked.
+    #[cfg(not(windows))]
     #[test]
     fn open_expands_blocks() {
         let dir = std::env::temp_dir().join(format!("forma-blocks-{}", std::process::id()));
@@ -458,7 +461,8 @@ mod tests {
             assert not cs[1].IsClosed and cs[1].Degree == 3\n\
             assert sum(isinstance(o.Geometry, rhino3dm.Point) for o in m.Objects) == 2\n\
             print('ok')\n";
-        if let Ok(out) = std::process::Command::new("python3")
+        // (Not on Windows: see `open_expands_blocks`.)
+        if let Ok(out) = std::process::Command::new(if cfg!(windows) { "-" } else { "python3" })
             .args(["-c", script, p])
             .output()
         {
