@@ -84,6 +84,7 @@ fn gggg_display() {
     let mut meshes = 0;
     let mut tris = 0;
     let mut lines = 0;
+    let mut texts = 0;
     let mut missing = std::collections::BTreeMap::new();
     for o in &imp.objects {
         match &o.geometry {
@@ -96,12 +97,16 @@ fn gggg_display() {
                     .all(|p| p.x.is_finite() && p.y.is_finite() && p.z.is_finite()));
             }
             Some(DisplayGeometry::Polyline(_) | DisplayGeometry::Point(_)) => lines += 1,
+            Some(DisplayGeometry::Text { .. }) => texts += 1,
             None => *missing.entry(format!("{:?}", o.kind)).or_insert(0) += 1,
         }
     }
     eprintln!("gggg: {meshes} meshes ({tris} triangles), {lines} polylines, not displayed: {missing:?}, {elapsed:?}");
     assert_eq!(imp.layers.len(), 14);
-    assert_eq!(meshes + lines + missing.values().sum::<usize>(), 950);
+    assert_eq!(
+        meshes + lines + texts + missing.values().sum::<usize>(),
+        950
+    );
     // Every brep, extrusion and mesh must produce triangles.
     assert_eq!(meshes, 262 + 368 + 11);
     assert_eq!(lines, 1 + 73 + 205 + 30);

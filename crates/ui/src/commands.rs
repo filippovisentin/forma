@@ -766,6 +766,9 @@ impl FormaApp {
                 self.log(LogKind::Normal, usage);
             }
             Act::Open => self.open_dialog(),
+            Act::Form(f) => self.open_form(f),
+            Act::Import => self.import_dialog(),
+            Act::Export => self.export_dialog(),
             Act::Save => {
                 self.save(false);
             }

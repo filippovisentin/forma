@@ -27,6 +27,7 @@ enum F3dmKind {
   F3DM_SURFACE = 11,
   F3DM_SUBD = 12,
   F3DM_ANNOTATION = 13,
+  F3DM_TEXTDOT = 14,
 };
 
 struct F3dmObject {
@@ -59,6 +60,9 @@ struct F3dmModel {
   // Block instance number of each object, -1 for plain objects.
   std::vector<int> object_instance;
   int instance_count = 0;
+  // Per object: bit 0 hidden, bit 1 locked; and its (top) group index or -1.
+  std::vector<int> object_state;
+  std::vector<int> object_group;
   // Scratch buffers for the two-call "size, then copy" pattern.
   std::vector<std::vector<double>> scratch_loops;  // uv pairs per loop
   std::vector<int> scratch_loop_outer;
@@ -87,6 +91,7 @@ static int kind_of(const ON_Geometry* g) {
   if (ON_SubD::Cast(g)) return F3DM_SUBD;
   if (ON_Surface::Cast(g)) return F3DM_SURFACE;
   if (ON_Annotation::Cast(g)) return F3DM_ANNOTATION;
+  if (ON_TextDot::Cast(g)) return F3DM_TEXTDOT;
   return F3DM_OTHER;
 }
 
@@ -136,6 +141,18 @@ static void read_object(F3dmModel* m, const std::map<int, int>& index_to_pos,
     m->object_names.push_back(utf8(wn));
   }
   m->object_instance.push_back(instance);
+  {
+    int state = 0;
+    int group = -1;
+    // Block members follow their instance (only plain objects carry state).
+    if (a && instance < 0) {
+      if (!a->IsVisible()) state |= 1;
+      if (a->Mode() == ON::locked_object) state |= 2;
+      if (a->GroupCount() > 0) group = a->TopGroup();
+    }
+    m->object_state.push_back(state);
+    m->object_group.push_back(group);
+  }
   m->geometry.push_back(g);
   const ON_Brep* brep = ON_Brep::Cast(g);
   if (!brep) {
@@ -269,6 +286,55 @@ void f3dm_layer_display(const F3dmModel* m, int i, unsigned char rgb[3], int* vi
   rgb[1] = m->layers[i].rgb[1];
   rgb[2] = m->layers[i].rgb[2];
   *visible = m->layers[i].visible;
+}
+
+// Text of a text object (returns 1) or text dot (returns 2), 0 otherwise.
+// plane: origin, x axis, y axis (9 doubles); height in model units (dots: 0);
+// text as UTF-8 into buf (NUL-terminated, truncated to cap), full length in *len.
+int f3dm_text(const F3dmModel* m, int obj, double* plane, double* height, char* buf, int cap,
+              int* len) {
+  if (obj < 0 || static_cast<size_t>(obj) >= m->geometry.size()) return 0;
+  const ON_Geometry* g = m->geometry[obj];
+  std::string text;
+  int kind = 0;
+  if (const ON_Text* t = ON_Text::Cast(g)) {
+    const ON_ModelComponentReference r = m->model.DimensionStyleFromId(t->DimensionStyleId());
+    const ON_DimStyle* ds = ON_DimStyle::FromModelComponentRef(r, &ON_DimStyle::Default);
+    const ON_Plane& p = t->Plane();
+    const double v[9] = {p.origin.x, p.origin.y, p.origin.z, p.xaxis.x, p.xaxis.y,
+                         p.xaxis.z,  p.yaxis.x,  p.yaxis.y,  p.yaxis.z};
+    std::memcpy(plane, v, sizeof v);
+    *height = t->TextHeight(ds);
+    text = utf8(t->PlainText());
+    kind = 1;
+  } else if (const ON_TextDot* d = ON_TextDot::Cast(g)) {
+    const ON_3dPoint c = d->CenterPoint();
+    const double v[9] = {c.x, c.y, c.z, 1, 0, 0, 0, 1, 0};
+    std::memcpy(plane, v, sizeof v);
+    *height = 0.0;
+    text = utf8(ON_wString(d->PrimaryText()));
+    kind = 2;
+  } else {
+    return 0;
+  }
+  // One line: Forma texts are single-line.
+  for (char& c : text) {
+    if (c == '\r' || c == '\n') c = ' ';
+  }
+  *len = static_cast<int>(text.size());
+  if (buf && cap > 0) {
+    const size_t n = (std::min)(text.size(), static_cast<size_t>(cap - 1));
+    std::memcpy(buf, text.data(), n);
+    buf[n] = 0;
+  }
+  return kind;
+}
+
+// Hidden (bit 0) / locked (bit 1) state of an object and its group (-1 = none).
+int f3dm_object_state(const F3dmModel* m, int i, int* group) {
+  if (i < 0 || static_cast<size_t>(i) >= m->object_state.size()) return 0;
+  *group = m->object_group[i];
+  return m->object_state[i];
 }
 
 // Block instance number of an object (members of one instance share it), or -1.
@@ -563,6 +629,10 @@ struct F3dmWriter {
   bool has_color = false;           // colour for the next objects (else by layer)
   ON_Color color;
   ON_wString name;                  // name for the next objects (empty = none)
+  bool hidden = false;              // state of the next objects
+  bool locked = false;
+  int group = -1;                   // Forma group of the next objects, -1 = none
+  std::map<int, int> groups;        // Forma group -> model group index
 };
 
 F3dmWriter* f3dm_writer_new(int unit_system, double abs_tol) {
@@ -606,8 +676,47 @@ static int add_object(F3dmWriter* w, int layer, ON_Object* geometry) {
     a->m_color = w->color;
   }
   if (!w->name.IsEmpty()) a->SetName(static_cast<const wchar_t*>(w->name), true);
+  if (w->hidden) a->SetVisible(false);
+  if (w->locked) a->SetMode(ON::locked_object);
+  if (w->group >= 0) {
+    auto it = w->groups.find(w->group);
+    if (it == w->groups.end()) {
+      ON_Group g;
+      const ON_ModelComponentReference gr = w->model.AddModelComponent(g, true);
+      const ON_Group* mg = ON_Group::FromModelComponentRef(gr, nullptr);
+      if (mg) it = w->groups.emplace(w->group, mg->Index()).first;
+    }
+    if (it != w->groups.end()) a->AddToGroup(it->second);
+  }
   ON_ModelComponentReference ref = w->model.AddManagedModelGeometryComponent(geometry, a);
   return ref.IsEmpty() ? 0 : 1;
+}
+
+// Single-line text in the plane (origin = bottom-left, x = reading direction,
+// y = up), UTF-8, height in model units. Rhino shows it as a normal text object.
+int f3dm_writer_text(F3dmWriter* w, int layer, const double origin[3], const double xaxis[3],
+                     const double yaxis[3], const char* text, double height) {
+  const ON_DimStyle& ds = ON_DimStyle::Default;
+  const ON_wString s{ON_String(text)};
+  const ON_3dPoint o(origin[0], origin[1], origin[2]);
+  const ON_3dVector x(xaxis[0], xaxis[1], xaxis[2]);
+  const ON_3dVector y(yaxis[0], yaxis[1], yaxis[2]);
+  ON_Plane pl(o, x, y);
+  if (!pl.IsValid()) pl = ON_Plane(o, ON_3dVector::ZAxis);
+  ON_Text* t = new ON_Text();
+  if (!t->Create(static_cast<const wchar_t*>(s), &ds, pl)) {
+    delete t;
+    return 0;
+  }
+  if (height > 0.0) t->SetTextHeight(&ds, height);
+  return add_object(w, layer, t);
+}
+
+// Hidden / locked state and group (-1 = none) of the objects added next.
+void f3dm_writer_state(F3dmWriter* w, int hidden, int locked, int group) {
+  w->hidden = hidden != 0;
+  w->locked = locked != 0;
+  w->group = group;
 }
 
 // Colour for the objects added next: has = 0 means "by layer".

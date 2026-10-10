@@ -36,6 +36,14 @@ pub fn open_3dm(path: &str) -> Result<Document, CommandError> {
     }
     doc.current_layer = LayerId(0);
 
+    // Block instances become groups 1..=n, the file's groups follow.
+    let instances = imp
+        .objects
+        .iter()
+        .filter_map(|o| o.instance)
+        .max()
+        .map_or(0, |m| m + 1);
+    let dot_height = doc.dim_style.text_height;
     {
         let mut t = doc.begin();
         for o in imp.objects {
@@ -44,6 +52,21 @@ pub fn open_3dm(path: &str) -> Result<Document, CommandError> {
                 Some(DisplayGeometry::Mesh(m)) => Geometry::Mesh(m),
                 Some(DisplayGeometry::Polyline(p)) => Geometry::Polyline(p),
                 Some(DisplayGeometry::Point(p)) => Geometry::Point(p),
+                Some(DisplayGeometry::Text {
+                    origin,
+                    x,
+                    y,
+                    height,
+                    text,
+                    dot,
+                }) => {
+                    let x = x.normalized().unwrap_or(forma_geom::Vec3::X);
+                    let y = y.normalized().unwrap_or(forma_geom::Vec3::Y);
+                    let z = x.cross(y).normalized().unwrap_or(forma_geom::Vec3::Z);
+                    let plane = forma_geom::Plane { origin, x, y, z };
+                    let h = if height > 0.0 { height } else { dot_height };
+                    Geometry::Text(forma_geom::Text::new(plane, &text, h, dot))
+                }
                 None => continue,
             };
             let id = t.add_on_layer(geometry, layer);
@@ -55,6 +78,14 @@ pub fn open_3dm(path: &str) -> Result<Document, CommandError> {
             }
             if let Some(i) = o.instance {
                 t.set_group(id, u32::try_from(i + 1).ok());
+            } else if let Some(g) = o.group {
+                t.set_group(id, u32::try_from(instances + g + 1).ok());
+            }
+            if o.hidden {
+                t.set_hidden(id, true);
+            }
+            if o.locked {
+                t.set_locked(id, true);
             }
         }
         t.commit();

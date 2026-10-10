@@ -14,6 +14,7 @@ mod cmdline;
 mod commands;
 mod complete;
 mod cplane;
+mod dialogs;
 mod files;
 mod grips;
 mod gumball;
@@ -214,6 +215,11 @@ enum Act {
     Mode(DisplayMode),
     /// Copy / paste through the engine clipboard.
     Clip(&'static str),
+    /// Open a command dialog.
+    Form(&'static dialogs::Form),
+    /// File dialogs for Import and Export Selected.
+    Import,
+    Export,
 }
 
 /// An action that would lose unsaved changes, waiting for "Save changes?".
@@ -311,6 +317,8 @@ struct FormaApp {
     grips: grips::Grips,
     /// A viewport's custom construction plane changed: re-upload the grids.
     cplane_dirty: bool,
+    /// The open command dialog (Array, Box Edit, layer operations…).
+    form: Option<dialogs::OpenForm>,
     /// Tool values remembered between uses (Offset distance, Fillet radius…).
     offset_distance: f64,
     fillet_radius: f64,

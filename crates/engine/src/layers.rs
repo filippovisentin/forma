@@ -53,10 +53,38 @@ fn select_objects(ctx: &mut Context, f: impl Fn(&Object) -> bool) -> CommandResu
 /// The rest of the line as a name (`""` means none).
 fn name_arg(args: &mut Args, what: &'static str) -> Result<String, CommandError> {
     let name = args.rest().join(" ");
+    let name = name.trim().trim_matches('"').to_string();
     if name.is_empty() {
         return Err(CommandError::MissingInput(what));
     }
     Ok(name)
+}
+
+/// Words of `s`, where "double quoted" text is one word.
+pub(crate) fn quoted_words(s: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut cur = String::new();
+    let mut quoted = false;
+    for c in s.chars() {
+        match c {
+            '"' => {
+                if quoted || !cur.is_empty() {
+                    out.push(std::mem::take(&mut cur));
+                }
+                quoted = !quoted;
+            }
+            c if c.is_whitespace() && !quoted => {
+                if !cur.is_empty() {
+                    out.push(std::mem::take(&mut cur));
+                }
+            }
+            c => cur.push(c),
+        }
+    }
+    if !cur.is_empty() {
+        out.push(cur);
+    }
+    out
 }
 
 fn layer_arg(ctx: &Context, args: &mut Args) -> Result<LayerId, CommandError> {
@@ -75,8 +103,12 @@ simple_command!(
 impl Command for SetObjectName {
     impl_meta!(SetObjectName);
     fn run(&self, ctx: &mut Context, args: &mut Args) -> CommandResult {
-        let name = name_arg(args, "object name")?;
-        let name = (name != "\"\"").then_some(name);
+        let raw = args.rest().join(" ");
+        if raw.trim().is_empty() {
+            return Err(CommandError::MissingInput("object name"));
+        }
+        let name = raw.trim().trim_matches('"').to_string();
+        let name = (!name.is_empty()).then_some(name);
         let ids = ctx.selected("SetObjectName")?;
         let mut t = ctx.doc.begin();
         for id in &ids {
@@ -359,17 +391,25 @@ simple_command!(
     RenameLayer,
     "RenameLayer",
     &["LayerRename"],
-    "RenameLayer <old name> <new name> — rename a layer (and the paths of its sub-layers); names without spaces"
+    "RenameLayer <old name> <new name> — rename a layer (and the paths of its sub-layers); quote names with spaces: RenameLayer \"Muri esterni\" Facciata"
 );
 impl Command for RenameLayer {
     impl_meta!(RenameLayer);
     fn run(&self, ctx: &mut Context, args: &mut Args) -> CommandResult {
-        let old = args
-            .next_token()
-            .ok_or(CommandError::MissingInput("layer name"))?;
-        let new = args
-            .next_token()
-            .ok_or(CommandError::MissingInput("new layer name"))?;
+        let names = quoted_words(&args.rest().join(" "));
+        let old = names
+            .first()
+            .ok_or(CommandError::MissingInput("layer name"))?
+            .as_str();
+        let new = names
+            .get(1)
+            .ok_or(CommandError::MissingInput("new layer name"))?
+            .as_str();
+        if names.len() > 2 {
+            return Err(CommandError::BadInput(
+                "quote layer names with spaces: \"old name\" \"new name\"".into(),
+            ));
+        }
         let ids = layers_under(ctx, old);
         if ids.is_empty() {
             return Err(CommandError::Invalid(format!("no layer {old}")));
@@ -682,7 +722,11 @@ mod tests {
         e.run_line("Purge").unwrap();
         assert!(e.doc().find_layer("vuoto").is_none());
         assert!(e.doc().find_layer("arredi::sedie").is_some());
-        e.run_line("RenameLayer arredi mobili").unwrap();
+        e.run_line("RenameLayer arredi \"mobili su misura\"")
+            .unwrap();
+        assert!(e.doc().find_layer("mobili su misura::sedie").is_some());
+        e.run_line("RenameLayer \"mobili su misura\" mobili")
+            .unwrap();
         assert!(e.doc().find_layer("mobili::sedie").is_some());
         e.run_line("OneLayerOn mobili::sedie").unwrap();
         let muri = e.doc().find_layer("muri").unwrap();

@@ -82,6 +82,20 @@ pub fn write_document(path: impl AsRef<Path>, doc: &Document) -> Result<(), Erro
     for o in doc.objects() {
         let layer = layer_index.get(o.layer.0).copied().unwrap_or(-1);
         let rgb = o.color.unwrap_or([0, 0, 0]);
+        // A dimension is written as lines and a text: keep its pieces together in a
+        // group of their own when it has none.
+        let own = matches!(o.geometry, Geometry::Dimension(_))
+            .then(|| c_int::try_from(o.id.0 + 1_000_000).ok())
+            .flatten();
+        let group = o
+            .group
+            .and_then(|g| c_int::try_from(g).ok())
+            .or(own)
+            .unwrap_or(-1);
+        // SAFETY: valid writer.
+        unsafe {
+            ffi::f3dm_writer_state(w.0, c_int::from(o.hidden), c_int::from(o.locked), group);
+        }
         // SAFETY: valid writer; rgb outlives the call.
         unsafe { ffi::f3dm_writer_color(w.0, c_int::from(o.color.is_some()), rgb.as_ptr()) };
         let name = o
@@ -135,7 +149,48 @@ pub fn write_document(path: impl AsRef<Path>, doc: &Document) -> Result<(), Erro
                     ffi::f3dm_writer_polycurve(w.0, layer, data.as_ptr(), segs.len() as c_int)
                 }
                 Geometry::Point(p) => ffi::f3dm_writer_point(w.0, layer, [p.x, p.y, p.z].as_ptr()),
-                Geometry::Text(_) | Geometry::Dimension(_) => {
+                Geometry::Text(t) if !t.dot => {
+                    let l = o.geometry.annotation_label().expect("text has a label");
+                    let text = CString::new(l.text).unwrap_or_default();
+                    let p = l.position;
+                    ffi::f3dm_writer_text(
+                        w.0,
+                        layer,
+                        [p.x, p.y, p.z].as_ptr(),
+                        [l.x.x, l.x.y, l.x.z].as_ptr(),
+                        [l.y.x, l.y.y, l.y.z].as_ptr(),
+                        text.as_ptr(),
+                        l.height,
+                    )
+                }
+                Geometry::Dimension(_) => {
+                    let mut ok = 1;
+                    for [a, b] in o.geometry.annotation_lines() {
+                        ok &= ffi::f3dm_writer_line(
+                            w.0,
+                            layer,
+                            [a.x, a.y, a.z].as_ptr(),
+                            [b.x, b.y, b.z].as_ptr(),
+                        );
+                    }
+                    if let Some(l) = o.geometry.annotation_label() {
+                        // The label is centred on its anchor.
+                        let half = forma_geom::text_width(&l.text, l.height) / 2.0;
+                        let p = l.position - l.x * half;
+                        let text = CString::new(l.text).unwrap_or_default();
+                        ok &= ffi::f3dm_writer_text(
+                            w.0,
+                            layer,
+                            [p.x, p.y, p.z].as_ptr(),
+                            [l.x.x, l.x.y, l.x.z].as_ptr(),
+                            [l.y.x, l.y.y, l.y.z].as_ptr(),
+                            text.as_ptr(),
+                            l.height,
+                        );
+                    }
+                    ok
+                }
+                Geometry::Text(_) => {
                     let mut ok = 1;
                     for [a, b] in o.geometry.annotation_lines() {
                         ok &= ffi::f3dm_writer_line(

@@ -27,6 +27,15 @@ pub enum DisplayGeometry {
     Mesh(Mesh),
     Polyline(Vec<Point3>),
     Point(Point3),
+    /// Text (`dot` = text dot): plane origin and axes, height (0 for dots).
+    Text {
+        origin: Point3,
+        x: Vec3,
+        y: Vec3,
+        height: f64,
+        text: String,
+        dot: bool,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -43,6 +52,11 @@ pub struct ImportedObject {
     /// Block instance this object comes from (members of one instance share the
     /// number); `None` for plain objects. Instances are expanded on import.
     pub instance: Option<usize>,
+    /// Hidden / locked in the file.
+    pub hidden: bool,
+    pub locked: bool,
+    /// The file's group of the object (Rhino group index), if any.
+    pub group: Option<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -98,6 +112,7 @@ pub fn import_display(path: impl AsRef<Path>) -> Result<Import, Error> {
                     (unsafe { ffi::f3dm_point(m, obj, xyz.as_mut_ptr()) } != 0)
                         .then(|| DisplayGeometry::Point(Point3::new(xyz[0], xyz[1], xyz[2])))
                 }
+                ObjectKind::Annotation | ObjectKind::TextDot => unsafe { text_object(m, obj) },
                 _ => None,
             };
             let mut rgb = [0u8; 3];
@@ -113,8 +128,14 @@ pub fn import_display(path: impl AsRef<Path>) -> Result<Import, Error> {
             });
             // SAFETY: model valid, obj in range.
             let instance = usize::try_from(unsafe { ffi::f3dm_object_instance(m, obj) }).ok();
+            let mut group: c_int = -1;
+            // SAFETY: model valid, obj in range, out-pointer valid.
+            let state = unsafe { ffi::f3dm_object_state(m, obj, &mut group) };
             ImportedObject {
                 instance,
+                hidden: state & 1 != 0,
+                locked: state & 2 != 0,
+                group: usize::try_from(group).ok(),
                 kind: info.kind,
                 layer: info.layer,
                 color: has.then_some(rgb),
@@ -128,6 +149,38 @@ pub fn import_display(path: impl AsRef<Path>) -> Result<Import, Error> {
         summary,
         layers,
         objects,
+    })
+}
+
+unsafe fn text_object(m: *mut ffi::Model, obj: c_int) -> Option<DisplayGeometry> {
+    let mut plane = [0.0f64; 9];
+    let mut height = 0.0;
+    let mut len: c_int = 0;
+    let mut buf = vec![0u8; 1024];
+    let kind = ffi::f3dm_text(
+        m,
+        obj,
+        plane.as_mut_ptr(),
+        &mut height,
+        buf.as_mut_ptr().cast(),
+        buf.len() as c_int,
+        &mut len,
+    );
+    if kind == 0 {
+        return None;
+    }
+    let n = usize::try_from(len).unwrap_or(0).min(buf.len() - 1);
+    let text = String::from_utf8_lossy(&buf[..n]).trim().to_string();
+    if text.is_empty() {
+        return None;
+    }
+    Some(DisplayGeometry::Text {
+        origin: Point3::new(plane[0], plane[1], plane[2]),
+        x: Vec3::new(plane[3], plane[4], plane[5]),
+        y: Vec3::new(plane[6], plane[7], plane[8]),
+        height,
+        text,
+        dot: kind == 2,
     })
 }
 

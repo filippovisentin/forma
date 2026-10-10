@@ -126,7 +126,7 @@ impl FormaApp {
     }
 
     /// Folder for file dialogs: the current file's, else the last one used.
-    fn start_dir(&self) -> Option<String> {
+    pub(crate) fn start_dir(&self) -> Option<String> {
         self.engine
             .doc()
             .path

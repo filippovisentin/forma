@@ -373,6 +373,62 @@ mod tests {
     }
 
     #[test]
+    fn save_keeps_groups_hidden_and_locked() {
+        let dir = std::env::temp_dir().join(format!("forma-state-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("stato.3dm");
+        let mut e = Engine::new();
+        e.run_line("Line 0,0 10,0").unwrap();
+        e.run_line("Line 0,5 10,5").unwrap();
+        e.run_line("Line 0,9 10,9").unwrap();
+        e.run_line("Line 0,12 10,12").unwrap();
+        e.run_line("Select #1 #2").unwrap();
+        e.run_line("Group").unwrap();
+        e.run_line("Hide #3").unwrap();
+        e.run_line("Lock #4").unwrap();
+        e.run_line("Text 0,20 5 Cucina abitabile").unwrap();
+        e.run_line("Dot 50,50 A1").unwrap();
+        e.run_line(&format!("Save {}", path.display())).unwrap();
+        let mut f = Engine::new();
+        f.run_line(&format!("Open {}", path.display())).unwrap();
+        let o: Vec<_> = f
+            .doc()
+            .objects()
+            .map(|o| (o.group, o.hidden, o.locked))
+            .collect();
+        assert_eq!(o.len(), 6, "{o:?}");
+        let texts: Vec<(String, bool)> = f
+            .doc()
+            .objects()
+            .filter_map(|o| match &o.geometry {
+                forma_doc::Geometry::Text(t) => Some((t.text.clone(), t.dot)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            texts,
+            vec![
+                ("Cucina abitabile".to_string(), false),
+                ("A1".to_string(), true)
+            ]
+        );
+        let forma_doc::Geometry::Text(t) = &f.doc().objects().nth(4).unwrap().geometry else {
+            panic!()
+        };
+        assert!(
+            (t.height - 5.0).abs() < 1e-9
+                && t.plane
+                    .origin
+                    .distance_to(forma_geom::Point3::new(0.0, 20.0, 0.0))
+                    < 1e-9,
+            "{t:?}"
+        );
+        assert!(o[0].0.is_some() && o[0].0 == o[1].0, "{o:?}");
+        assert_eq!((o[2].1, o[3].2), (true, true), "{o:?}");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
     fn export_obj_and_stl() {
         let dir = std::env::temp_dir().join(format!("forma-objstl-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();

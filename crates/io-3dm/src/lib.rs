@@ -50,6 +50,16 @@ pub(crate) mod ffi {
         pub fn f3dm_layer_path(m: *const Model, i: c_int, buf: *mut c_char, cap: usize) -> usize;
         pub fn f3dm_object_count(m: *const Model) -> c_int;
         pub fn f3dm_object_instance(m: *const Model, i: c_int) -> c_int;
+        pub fn f3dm_text(
+            m: *const Model,
+            obj: c_int,
+            plane: *mut f64,
+            height: *mut f64,
+            buf: *mut c_char,
+            cap: c_int,
+            len: *mut c_int,
+        ) -> c_int;
+        pub fn f3dm_object_state(m: *const Model, i: c_int, group: *mut c_int) -> c_int;
         pub fn f3dm_object(m: *const Model, i: c_int, out: *mut Object) -> c_int;
         pub fn f3dm_layer_display(m: *const Model, i: c_int, rgb: *mut u8, visible: *mut c_int);
         pub fn f3dm_face_count(m: *const Model, obj: c_int) -> c_int;
@@ -123,6 +133,16 @@ pub(crate) mod ffi {
             nt: c_int,
         ) -> c_int;
         pub fn f3dm_object_color(m: *const Model, i: c_int, rgb: *mut u8) -> c_int;
+        pub fn f3dm_writer_text(
+            w: *mut Writer,
+            layer: c_int,
+            origin: *const f64,
+            xaxis: *const f64,
+            yaxis: *const f64,
+            text: *const c_char,
+            height: f64,
+        ) -> c_int;
+        pub fn f3dm_writer_state(w: *mut Writer, hidden: c_int, locked: c_int, group: c_int);
         pub fn f3dm_writer_color(w: *mut Writer, has: c_int, rgb: *const u8);
         pub fn f3dm_writer_polycurve(
             w: *mut Writer,
@@ -236,6 +256,7 @@ pub enum ObjectKind {
     Surface,
     SubD,
     Annotation,
+    TextDot,
 }
 
 impl ObjectKind {
@@ -255,6 +276,7 @@ impl ObjectKind {
             11 => Surface,
             12 => SubD,
             13 => Annotation,
+            14 => TextDot,
             _ => Other,
         }
     }

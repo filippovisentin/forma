@@ -31,10 +31,7 @@ pub(crate) const ALIGN: [(&str, &str); 7] = [
 ];
 
 /// A Rectangular array asks for its numbers on the command line.
-pub(crate) const ARRAY_PREFILL: Act = Act::Prefill(
-    "Array ",
-    "Array <nx> <ny> <nz> <dx,dy,dz> — e.g. Array 4 2 1 600,400,0 copies the selection 4×2 times",
-);
+pub(crate) const ARRAY_PREFILL: Act = Act::Form(&crate::dialogs::ARRAY);
 
 impl FormaApp {
     pub(crate) fn ui_menu(&mut self, ui: &mut egui::Ui) {
@@ -88,10 +85,7 @@ impl FormaApp {
                     &mut act,
                     "Import…",
                     "",
-                    Act::Prefill(
-                        "Import ",
-                        "Import <file.3dm> — merge a Rhino file into this model",
-                    ),
+                    Act::Import,
                 );
                 ui.separator();
                 item(ui, &mut act, "Save", "Ctrl+S", Act::Save);
@@ -102,10 +96,7 @@ impl FormaApp {
                     &mut act,
                     "Export Selected…",
                     "",
-                    Act::Prefill(
-                        "Export ",
-                        "Export <file.3dm|.obj|.stl> — save only the selected objects",
-                    ),
+                    Act::Export,
                 );
                 ui.separator();
                 item(ui, &mut act, "Exit", "", Act::Exit);
@@ -147,10 +138,10 @@ impl FormaApp {
                     item(ui, &mut act, "Text and Dots", "", Act::Cmd("SelText"));
                     item(ui, &mut act, "Dimensions", "", Act::Cmd("SelDim"));
                     ui.separator();
-                    item(ui, &mut act, "By Layer…", "", Act::Prefill("SelLayer ", "SelLayer <layer> — select all objects on a layer"));
-                    item(ui, &mut act, "By Colour…", "", Act::Prefill("SelColor ", "SelColor <r,g,b | #rrggbb | name> — select objects shown in that colour"));
-                    item(ui, &mut act, "By Name…", "", Act::Prefill("SelName ", "SelName <name> — select objects by name (* wildcards)"));
-                    item(ui, &mut act, "Small Objects…", "", Act::Prefill("SelSmall ", "SelSmall <size> — select objects smaller than size"));
+                    item(ui, &mut act, "By Layer…", "", Act::Form(&crate::dialogs::SEL_LAYER));
+                    item(ui, &mut act, "By Colour…", "", Act::Form(&crate::dialogs::SEL_COLOR));
+                    item(ui, &mut act, "By Name…", "", Act::Form(&crate::dialogs::SEL_NAME));
+                    item(ui, &mut act, "Small Objects…", "", Act::Form(&crate::dialogs::SEL_SMALL));
                     item(ui, &mut act, "Duplicates", "", Act::Cmd("SelDup"));
                     tool(ui, &mut act, "Inside Boundary Curve", K::Seq(&q::SEL_BOUNDARY));
                 });
@@ -225,16 +216,16 @@ impl FormaApp {
                         Act::Panel(SidePanel::Properties),
                     );
                     tool(ui, &mut act, "Change Object to Current Layer", K::Seq(&q::CHANGE_TO_CURRENT));
-                    item(ui, &mut act, "Copy Objects to Layer…", "", Act::Prefill("CopyObjectsToLayer ", "CopyObjectsToLayer <layer> — copy the selection to a layer"));
+                    item(ui, &mut act, "Copy Objects to Layer…", "", Act::Form(&crate::dialogs::COPY_TO_LAYER));
                     ui.separator();
-                    item(ui, &mut act, "One Layer On…", "", Act::Prefill("OneLayerOn ", "OneLayerOn <layer> — show only this layer"));
-                    item(ui, &mut act, "One Layer Off…", "", Act::Prefill("OneLayerOff ", "OneLayerOff <layer> — hide one layer"));
+                    item(ui, &mut act, "One Layer On…", "", Act::Form(&crate::dialogs::ONE_LAYER_ON));
+                    item(ui, &mut act, "One Layer Off…", "", Act::Form(&crate::dialogs::ONE_LAYER_OFF));
                     item(ui, &mut act, "All Layers On", "", Act::Cmd("AllLayersOn"));
-                    item(ui, &mut act, "Rename Layer…", "", Act::Prefill("RenameLayer ", "RenameLayer <old name> <new name>"));
-                    item(ui, &mut act, "Delete Layer…", "", Act::Prefill("DeleteLayer ", "DeleteLayer <layer> — delete a layer and its objects"));
+                    item(ui, &mut act, "Rename Layer…", "", Act::Form(&crate::dialogs::RENAME_LAYER));
+                    item(ui, &mut act, "Delete Layer…", "", Act::Form(&crate::dialogs::DELETE_LAYER));
                     item(ui, &mut act, "Purge Empty Layers", "", Act::Cmd("Purge"));
                 });
-                item(ui, &mut act, "Object Name…", "", Act::Prefill("SetObjectName ", "SetObjectName <name> — name the selected objects"));
+                item(ui, &mut act, "Object Name…", "", Act::Form(&crate::dialogs::OBJECT_NAME));
                 tool(ui, &mut act, "Match Properties", K::MatchProperties);
                 item(
                     ui,
@@ -455,10 +446,7 @@ impl FormaApp {
                     &mut act,
                     "Annotation Style…",
                     "",
-                    Act::Prefill(
-                        "DimStyle ",
-                        "DimStyle [text height] [decimals] — style of new text and dimensions (Enter shows it)",
-                    ),
+                    Act::Form(&crate::dialogs::DIM_STYLE),
                 );
             });
             ui.menu_button("Transform", |ui| {
@@ -503,10 +491,7 @@ impl FormaApp {
                     &mut act,
                     "Box Edit…",
                     "",
-                    Act::Prefill(
-                        "BoxEdit ",
-                        "BoxEdit [x=<size>] [y=<size>] [z=<size>] [uniform] [center] [at=x,y,z] — exact size and position of the selection",
-                    ),
+                    Act::Form(&crate::dialogs::BOX_EDIT),
                 );
                 tool(
                     ui,

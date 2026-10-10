@@ -326,6 +326,7 @@ impl FormaApp {
         };
         header(ui);
         ui.separator();
+        let mut form: Option<(&'static crate::dialogs::Form, Vec<String>)> = None;
         egui::ScrollArea::vertical().show(ui, |ui| {
             for (i, layer) in layers.iter().enumerate() {
                 let depth = layer.name.matches("::").count();
@@ -396,6 +397,33 @@ impl FormaApp {
                             }
                             ui.close();
                         }
+                        ui.separator();
+                        if ui.button("Show Only This Layer").clicked() {
+                            cmd = Some(format!("OneLayerOn {}", layer.name));
+                            ui.close();
+                        }
+                        if ui.button("New Sub-layer").clicked() {
+                            let mut k = 1;
+                            while layers
+                                .iter()
+                                .any(|l| l.name == format!("{}::Layer {k:02}", layer.name))
+                            {
+                                k += 1;
+                            }
+                            cmd = Some(format!("Layer {}::Layer {k:02}", layer.name));
+                            ui.close();
+                        }
+                        if ui.button("Rename…").clicked() {
+                            form = Some((
+                                &crate::dialogs::RENAME_LAYER,
+                                vec![layer.name.clone(), layer.name.clone()],
+                            ));
+                            ui.close();
+                        }
+                        if ui.button("Delete…").clicked() {
+                            form = Some((&crate::dialogs::DELETE_LAYER, vec![layer.name.clone()]));
+                            ui.close();
+                        }
                     });
                     // Current check mark.
                     let (r, resp) =
@@ -440,6 +468,9 @@ impl FormaApp {
                 let _ = row;
             }
         });
+        if let Some((f, values)) = form {
+            self.open_form_with(f, values);
+        }
         if let Some(c) = cmd {
             if let Some(rest) = c.strip_prefix("SelNone; ") {
                 self.engine.ctx.selection.clear();
