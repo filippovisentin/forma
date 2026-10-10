@@ -638,6 +638,82 @@ pub fn sweep1_mesh(rail: &[Point3], profile: &[Point3]) -> Mesh {
     m.welded(1e-9)
 }
 
+/// Sweep along two rails (Rhino's Sweep2): the profile, which should run from
+/// near the start of `rail1` to near the start of `rail2`, is moved, turned and
+/// scaled at each station so its ends follow both rails. Both rails are
+/// resampled to the same number of stations.
+pub fn sweep2_mesh(rail1: &[Point3], rail2: &[Point3], profile: &[Point3]) -> Mesh {
+    let np = profile.len();
+    if rail1.len() < 2 || rail2.len() < 2 || np < 2 {
+        return Mesh::default();
+    }
+    let n = rail1.len().max(rail2.len()).clamp(16, 400);
+    let a = resample(rail1, n, false);
+    let mut b = resample(rail2, n, false);
+    // Rails pointing opposite ways: flip the second one.
+    if a[0].distance_to(b[0]) + a[n - 1].distance_to(b[n - 1])
+        > a[0].distance_to(b[n - 1]) + a[n - 1].distance_to(b[0])
+    {
+        b.reverse();
+    }
+    // The profile should start on rail 1.
+    let mut prof = profile.to_vec();
+    if prof[0].distance_to(a[0]) > prof[np - 1].distance_to(a[0]) {
+        prof.reverse();
+    }
+    let tangent = |r: &[Point3], i: usize| {
+        let (p, q) = if i + 1 < r.len() {
+            (r[i], r[i + 1])
+        } else {
+            (r[i - 1], r[i])
+        };
+        (q - p).normalized().unwrap_or(Vec3::Z)
+    };
+    // Frame at a station: x along the chord between the rails, z along the
+    // mean rail tangent, y = z × x.
+    let frame = |i: usize, a: &[Point3], b: &[Point3]| -> Option<(Point3, Vec3, Vec3, Vec3, f64)> {
+        let chord = b[i] - a[i];
+        let len = chord.length();
+        let x = chord.normalized()?;
+        let t = tangent(a, i) + tangent(b, i);
+        let z = (t - x * t.dot(x)).normalized()?;
+        Some((a[i], x, z.cross(x), z, len))
+    };
+    let Some((o0, x0, y0, z0, l0)) = frame(0, &a, &b) else {
+        return Mesh::default();
+    };
+    if l0 < 1e-12 {
+        return Mesh::default();
+    }
+    let local: Vec<(f64, f64, f64)> = prof
+        .iter()
+        .map(|p| {
+            let d = *p - o0;
+            (d.dot(x0) / l0, d.dot(y0) / l0, d.dot(z0) / l0)
+        })
+        .collect();
+    let mut m = Mesh::default();
+    for i in 0..n {
+        let Some((o, x, y, z, l)) = frame(i, &a, &b) else {
+            return Mesh::default();
+        };
+        m.positions.extend(
+            local
+                .iter()
+                .map(|(u, v, w)| o + x * (u * l) + y * (v * l) + z * (w * l)),
+        );
+    }
+    let id = |i: usize, j: usize| (i * np + j) as u32;
+    for i in 0..n - 1 {
+        for j in 0..np - 1 {
+            let (p, q, r, s) = (id(i, j), id(i, j + 1), id(i + 1, j + 1), id(i + 1, j));
+            m.triangles.push([p, q, r]);
+            m.triangles.push([p, r, s]);
+        }
+    }
+    m.welded(1e-9)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -654,6 +730,22 @@ mod tests {
             p(x0 + s, y0 + s, 0.0),
             p(x0, y0 + s, 0.0),
         ]
+    }
+
+    #[test]
+    fn sweep2_between_two_lines_follows_both() {
+        // Rails 10 apart at the start, 20 apart at the end; a semicircle-ish
+        // profile (a V) between them.
+        let r1 = vec![p(0.0, 0.0, 0.0), p(0.0, 100.0, 0.0)];
+        let r2 = vec![p(10.0, 0.0, 0.0), p(20.0, 100.0, 0.0)];
+        let prof = vec![p(0.0, 0.0, 0.0), p(5.0, 0.0, 5.0), p(10.0, 0.0, 0.0)];
+        let m = sweep2_mesh(&r1, &r2, &prof);
+        assert!(!m.triangles.is_empty());
+        let b = m.bounding_box().unwrap();
+        assert!((b.max.x - 20.0).abs() < 1e-6, "{b:?}");
+        // The profile scales with the rail distance: twice as tall at the end.
+        assert!((b.max.z - 10.0).abs() < 1e-6, "{b:?}");
+        assert!(b.min.z.abs() < 1e-9);
     }
 
     #[test]

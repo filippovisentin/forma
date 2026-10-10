@@ -1304,6 +1304,125 @@ impl Command for LineBisector {
     }
 }
 
+/// One smoothing pass over a list of points: each moves `k` of the way to the
+/// mean of its neighbours; the ends of an open list stay put.
+fn smooth_points(p: &[Point3], k: f64, closed: bool) -> Vec<Point3> {
+    let n = p.len();
+    (0..n)
+        .map(|i| {
+            let (prev, next) = match (i, closed) {
+                (0, false) => return p[0],
+                (i, false) if i == n - 1 => return p[i],
+                (0, true) => (p[n - 1], p[1 % n]),
+                (i, true) if i == n - 1 => (p[i - 1], p[0]),
+                (i, _) => (p[i - 1], p[i + 1]),
+            };
+            let mean = prev + (next - prev) * 0.5;
+            p[i] + (mean - p[i]) * k
+        })
+        .collect()
+}
+
+simple_command!(
+    Smooth,
+    "Smooth",
+    &[],
+    "Smooth [factor=0.5] [steps=1] — even out the control points of the selected curves and the vertices of meshes (curve ends and mesh borders stay)"
+);
+impl Command for Smooth {
+    impl_meta!(Smooth);
+    fn run(&self, ctx: &mut Context, args: &mut Args) -> CommandResult {
+        let k = args.optional_number().unwrap_or(0.5).clamp(0.0, 1.0);
+        let steps = args.optional_number().unwrap_or(1.0).clamp(1.0, 100.0) as usize;
+        let ids = ctx.selected("Smooth")?;
+        let tol = ctx.tolerance.absolute;
+        let mut t = ctx.doc.begin();
+        let mut n = 0;
+        for id in ids {
+            let g = t.doc().object(id).expect("selected").geometry.clone();
+            let out = match &g {
+                Geometry::Polyline(p) => {
+                    let closed = g.is_closed_curve();
+                    let mut q: Vec<Point3> = if closed {
+                        p[..p.len() - 1].to_vec()
+                    } else {
+                        p.clone()
+                    };
+                    for _ in 0..steps {
+                        q = smooth_points(&q, k, closed);
+                    }
+                    if closed {
+                        q.push(q[0]);
+                    }
+                    Geometry::Polyline(q)
+                }
+                Geometry::Nurbs(c) => {
+                    let closed = c.is_closed();
+                    let mut q: Vec<Point3> = if closed {
+                        c.points[..c.points.len() - 1].to_vec()
+                    } else {
+                        c.points.clone()
+                    };
+                    for _ in 0..steps {
+                        q = smooth_points(&q, k, closed);
+                    }
+                    if closed {
+                        q.push(q[0]);
+                    }
+                    Geometry::Nurbs(forma_geom::NurbsCurve {
+                        points: q,
+                        ..c.clone()
+                    })
+                }
+                Geometry::Mesh(m) => {
+                    let w = m.welded(tol);
+                    let border: std::collections::BTreeSet<u32> =
+                        w.boundary_edges().iter().flatten().copied().collect();
+                    let mut nb: Vec<std::collections::BTreeSet<u32>> =
+                        vec![Default::default(); w.positions.len()];
+                    for tri in &w.triangles {
+                        for e in 0..3 {
+                            let (a, b) = (tri[e], tri[(e + 1) % 3]);
+                            nb[a as usize].insert(b);
+                            nb[b as usize].insert(a);
+                        }
+                    }
+                    let mut pos = w.positions.clone();
+                    for _ in 0..steps {
+                        pos = (0..pos.len())
+                            .map(|i| {
+                                if border.contains(&(i as u32)) || nb[i].is_empty() {
+                                    return pos[i];
+                                }
+                                let sum = nb[i].iter().fold(Vec3::new(0.0, 0.0, 0.0), |s, j| {
+                                    s + pos[*j as usize].to_vec()
+                                });
+                                let mean = Point3::ORIGIN + sum * (1.0 / nb[i].len() as f64);
+                                pos[i] + (mean - pos[i]) * k
+                            })
+                            .collect();
+                    }
+                    Geometry::Mesh(Mesh {
+                        positions: pos,
+                        normals: Vec::new(),
+                        triangles: w.triangles,
+                    })
+                }
+                _ => continue,
+            };
+            t.replace(id, out);
+            n += 1;
+        }
+        if n == 0 {
+            return Err(CommandError::Invalid(
+                "Smooth: select polylines, NURBS curves or meshes".into(),
+            ));
+        }
+        t.commit();
+        Ok(format!("smoothed {n} object(s)"))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::Engine;
@@ -1525,6 +1644,22 @@ mod tests {
         );
         let h = 5.0 / 2f64.sqrt();
         assert!(lines[3].to.distance_to(p(h, h, 0.0)) < 1e-12);
+    }
+
+    #[test]
+    fn smooth_a_zigzag() {
+        let mut e = Engine::new();
+        e.run_line("Polyline 0,0 10,10 20,0 30,10 40,0").unwrap();
+        e.run_line("SelAll").unwrap();
+        e.run_line("Smooth 0.5 3").unwrap();
+        let Geometry::Polyline(p) = &e.doc().objects().next().unwrap().geometry else {
+            panic!()
+        };
+        assert!(p[0].distance_to(forma_geom::Point3::ORIGIN) < 1e-12);
+        assert!(p[2].y > 0.0 && p[1].y < 10.0 && p[1].y > 0.0, "{p:?}");
+        e.run_line("Box 0,0 10,10 10").unwrap();
+        e.run_line("SelLast").unwrap();
+        e.run_line("Smooth").unwrap();
     }
 
     #[test]

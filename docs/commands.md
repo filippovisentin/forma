@@ -12,7 +12,7 @@ is in `Help` and `forma-cli commands`.
 
 ## Summary
 
-279 Rhino commands: **179 ✓**, **54 partial**, **28 ✗**, **18 needs kernel**.
+279 Rhino commands: **180 ✓**, **55 partial**, **26 ✗**, **18 needs kernel**.
 
 ## Drawing: points and lines
 
@@ -68,7 +68,7 @@ is in `Help` and `forma-cli commands`.
 | Explode | ✓ | `Explode` curves → segments, meshes → faces |
 | Rebuild | ✓ | `Rebuild <points> [degree]` (curves; NURBS surfaces need the kernel) |
 | Fair | ✗ |  |
-| Smooth | ✗ |  |
+| Smooth | ✓ | `Smooth [factor] [steps]` curves and meshes |
 | SimplifyCrv | ✓ | `SimplifyCrv` |
 | Convert | ✓ | `Convert [tolerance]` → polylines |
 | CloseCrv | ✓ | `CloseCrv` |
@@ -110,7 +110,7 @@ is in `Help` and `forma-cli commands`.
 | Revolve | partial | `Revolve` — mesh |
 | RailRevolve | ✗ |  |
 | Sweep1 | partial | `Sweep1` — mesh, rotation-minimising frames |
-| Sweep2 | ✗ |  |
+| Sweep2 | partial | `Sweep2 #rail1 #rail2` — mesh, profile scaled between the rails |
 | NetworkSrf | needs kernel |  |
 | Patch | needs kernel |  |
 | ExtrudeCrv | partial | `Extrude` / `ExtrudeCrv` — closed curves give closed meshes |

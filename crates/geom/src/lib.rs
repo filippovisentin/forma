@@ -53,7 +53,7 @@ pub use solids::{
 };
 pub use surface::{
     cap_planar_holes, extrude_open_mesh, loft_mesh, newell_area, planar_mesh, point_in_polygon,
-    resample, revolve_mesh, sweep1_mesh, triangulate_with_holes,
+    resample, revolve_mesh, sweep1_mesh, sweep2_mesh, triangulate_with_holes,
 };
 pub use xform::Xform;
 

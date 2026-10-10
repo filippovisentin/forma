@@ -350,6 +350,7 @@ impl FormaApp {
                 ui.menu_button("Curve Edit Tools", |ui| {
                     tool(ui, &mut act, "Blend Curves", K::Seq(&q::BLEND_CRV));
                     tool(ui, &mut act, "Simplify", K::OnSel("SimplifyCrv"));
+                    tool(ui, &mut act, "Smooth", K::OnSel("Smooth"));
                     tool(ui, &mut act, "Join", K::Join);
                     tool(ui, &mut act, "Explode", K::Explode);
                     tool(ui, &mut act, "Trim", K::Trim);
@@ -391,6 +392,7 @@ impl FormaApp {
                 tool(ui, &mut act, "Loft", K::OnSel("Loft"));
                 tool(ui, &mut act, "Revolve", K::Revolve);
                 tool(ui, &mut act, "Sweep 1 Rail", K::Sweep1);
+                tool(ui, &mut act, "Sweep 2 Rails", K::Seq(&q::SWEEP2));
                 tool(ui, &mut act, "Pipe", K::Seq(&q::PIPE));
                 ui.separator();
                 tool(ui, &mut act, "Offset Surface (solids)", K::Seq(&q::OFFSET_SRF));

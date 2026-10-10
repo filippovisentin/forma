@@ -102,6 +102,8 @@ pub fn builtin() -> Vec<Box<dyn Command>> {
         Box::new(crate::workflow::LineVertical),
         Box::new(crate::workflow::LinePerpendicular),
         Box::new(crate::workflow::LineBisector),
+        Box::new(crate::surfaces::Sweep2),
+        Box::new(crate::workflow::Smooth),
         Box::new(crate::annotate::DimRotated),
         Box::new(crate::layers::LayerState),
         Box::new(crate::edit::IncrementalSave),

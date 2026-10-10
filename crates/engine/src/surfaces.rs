@@ -418,6 +418,54 @@ impl Command for Sweep1 {
     }
 }
 
+simple_command!(
+    Sweep2,
+    "Sweep2",
+    &[],
+    "Sweep2 #rail1 #rail2 — sweep the selected profile curves along two rails (the profile stretches to touch both)"
+);
+impl Command for Sweep2 {
+    impl_meta!(Sweep2);
+    fn run(&self, ctx: &mut Context, args: &mut Args) -> CommandResult {
+        let mut rail = |what: &'static str| -> Result<(ObjectId, Vec<Point3>), CommandError> {
+            let tok = args.next_token().ok_or(CommandError::MissingInput(what))?;
+            let id = crate::edit::parse_ids(vec![tok])?[0];
+            let pts = ctx
+                .doc
+                .object(id)
+                .filter(|o| o.geometry.is_curve())
+                .ok_or_else(|| CommandError::Invalid(format!("#{} is not a curve", id.0)))?
+                .geometry
+                .curve_points();
+            Ok((id, pts))
+        };
+        let (a, ra) = rail("first rail #id")?;
+        let (b, rb) = rail("second rail #id")?;
+        let profiles: Vec<Object> = selected_curves(ctx, "Sweep2")?
+            .into_iter()
+            .filter(|o| o.id != a && o.id != b)
+            .collect();
+        if profiles.is_empty() {
+            return Err(CommandError::Invalid(
+                "Sweep2: select profile curves".into(),
+            ));
+        }
+        let mut out = Vec::new();
+        for p in profiles {
+            let m = forma_geom::sweep2_mesh(&ra, &rb, &p.geometry.curve_points());
+            if !m.triangles.is_empty() {
+                out.push((Geometry::Mesh(m), p));
+            }
+        }
+        if out.is_empty() {
+            return Err(CommandError::Invalid("Sweep2: degenerate result".into()));
+        }
+        let n = out.len();
+        add_selected(ctx, out);
+        Ok(format!("swept {n} profile(s) along two rails"))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::Engine;
@@ -429,6 +477,23 @@ mod tests {
             Geometry::Mesh(m) => m.clone(),
             g => panic!("{g:?}"),
         }
+    }
+
+    #[test]
+    fn sweep2_two_rails() {
+        let mut e = Engine::new();
+        e.run_line("Line 0,0 0,100").unwrap();
+        e.run_line("Line 10,0 20,100").unwrap();
+        e.run_line("Polyline 0,0,0 5,0,5 10,0,0").unwrap();
+        e.run_line("Select #3").unwrap();
+        e.run_line("Sweep2 #1 #2").unwrap();
+        let m = mesh(&e, 4);
+        let b = m.bounding_box().unwrap();
+        assert!(
+            (b.max.x - 20.0).abs() < 1e-6 && (b.max.z - 10.0).abs() < 1e-6,
+            "{b:?}"
+        );
+        assert!(e.run_line("Sweep2 #1").is_err());
     }
 
     #[test]

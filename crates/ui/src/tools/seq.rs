@@ -1834,8 +1834,18 @@ pub static LINE_BISECTOR: Seq = Seq {
     },
 };
 
+pub static SWEEP2: Seq = Seq {
+    name: "Sweep2",
+    tip: "Sweep2 — sweep the selected profiles along two rails",
+    sel: true,
+    steps: &[In::Object("First rail"), In::Object("Second rail")],
+    emit: |v, _| format!("Sweep2 #{} #{}", v[0].o(), v[1].o()),
+    preview: none,
+};
+
 /// Every sequence tool (for typed names, help and tests).
 pub static ALL: &[&Seq] = &[
+    &SWEEP2,
     &LINE_BOTH_SIDES,
     &LINE_VERTICAL,
     &LINE_PERPENDICULAR,
