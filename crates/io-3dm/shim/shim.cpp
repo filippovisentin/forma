@@ -218,7 +218,7 @@ int f3dm_object_name(const F3dmModel* m, int i, char* buf, int cap) {
   if (i < 0 || static_cast<size_t>(i) >= m->object_names.size()) return 0;
   const std::string& s = m->object_names[i];
   if (buf && cap > 0) {
-    const size_t n = std::min(s.size(), static_cast<size_t>(cap - 1));
+    const size_t n = (std::min)(s.size(), static_cast<size_t>(cap - 1));
     std::memcpy(buf, s.data(), n);
     buf[n] = 0;
   }
