@@ -9,11 +9,14 @@ use eframe::egui;
 use forma_render::DisplayMode;
 
 /// Standard views: (label, command).
-pub(crate) const SET_VIEWS: [(&str, &str); 4] = [
+pub(crate) const SET_VIEWS: [(&str, &str); 7] = [
     ("Top", "top"),
     ("Front", "front"),
     ("Right", "right"),
     ("Perspective", "perspective"),
+    ("Bottom", "bottom"),
+    ("Back", "back"),
+    ("Left", "left"),
 ];
 
 /// Align options: (label, command line).
@@ -100,7 +103,7 @@ impl FormaApp {
                     "",
                     Act::Prefill(
                         "Export ",
-                        "Export <file.3dm> — save only the selected objects",
+                        "Export <file.3dm|.obj|.stl> — save only the selected objects",
                     ),
                 );
                 ui.separator();
@@ -127,6 +130,7 @@ impl FormaApp {
                         "",
                         Act::Cmd("SelLast"),
                     );
+                    item(ui, &mut act, "Previous Selection", "", Act::Cmd("SelPrev"));
                     ui.separator();
                     item(ui, &mut act, "Curves", "", Act::Cmd("SelCrv"));
                     item(ui, &mut act, "Surfaces / Meshes", "", Act::Cmd("SelMesh"));
@@ -181,9 +185,11 @@ impl FormaApp {
                     item(ui, &mut act, "Hide", "Ctrl+H", Act::Tool(K::OnSel("Hide")));
                     item(ui, &mut act, "Show", "Ctrl+Alt+H", Act::Cmd("Show"));
                     item(ui, &mut act, "Isolate", "", Act::Tool(K::OnSel("Isolate")));
+                    item(ui, &mut act, "Show and Select Hidden", "", Act::Cmd("ShowSelected"));
                     item(ui, &mut act, "Swap Hidden and Visible", "", Act::Cmd("HideSwap"));
                     item(ui, &mut act, "Lock", "Ctrl+L", Act::Tool(K::OnSel("Lock")));
                     item(ui, &mut act, "Unlock", "Ctrl+Alt+L", Act::Cmd("Unlock"));
+                    item(ui, &mut act, "Unlock and Select Locked", "", Act::Cmd("UnlockSelected"));
                     item(ui, &mut act, "Swap Locked and Unlocked", "", Act::Cmd("LockSwap"));
                 });
                 ui.menu_button("Layers", |ui| {
@@ -226,6 +232,7 @@ impl FormaApp {
                     item(ui, &mut act, "Zoom Extents", "ZE", Act::Submit("ze"));
                     item(ui, &mut act, "Zoom Extents All", "ZEA", Act::Submit("zea"));
                     item(ui, &mut act, "Zoom Selected", "ZS", Act::Submit("zs"));
+                    item(ui, &mut act, "Zoom Window", "ZW", Act::Submit("zw"));
                 });
                 ui.menu_button("Set View", |ui| {
                     for (label, cmd) in SET_VIEWS {
@@ -265,6 +272,7 @@ impl FormaApp {
                 });
                 ui.menu_button("Line", |ui| {
                     tool(ui, &mut act, "Single Line", K::Line);
+                    tool(ui, &mut act, "Line Segments", K::Seq(&q::LINES));
                 });
                 tool(ui, &mut act, "Polyline", K::Polyline);
                 ui.menu_button("Free-Form", |ui| {
@@ -314,6 +322,7 @@ impl FormaApp {
                     tool(ui, &mut act, "Pull", K::Seq(&q::PULL));
                     tool(ui, &mut act, "Duplicate Edge", K::Seq(&q::DUPEDGE));
                     tool(ui, &mut act, "Duplicate Border", K::Seq(&q::DUPBORDER));
+                    tool(ui, &mut act, "Duplicate Face Border", K::Seq(&q::DUP_FACE_BORDER));
                     tool(ui, &mut act, "Intersection", K::OnSel("Intersect"));
                     tool(ui, &mut act, "Contour", K::Seq(&q::CONTOUR));
                     tool(ui, &mut act, "Section", K::Seq(&q::SECTION));
@@ -399,6 +408,7 @@ impl FormaApp {
                 ui.separator();
                 tool(ui, &mut act, "Duplicate Mesh Edges", K::Seq(&q::DUPEDGE));
                 tool(ui, &mut act, "Duplicate Mesh Border", K::Seq(&q::DUPBORDER));
+                tool(ui, &mut act, "Unify Normals", K::Seq(&q::UNIFY_MESH_NORMALS));
                 tool(ui, &mut act, "Contour", K::Seq(&q::CONTOUR));
                 tool(ui, &mut act, "Section", K::Seq(&q::SECTION));
             });
@@ -446,6 +456,7 @@ impl FormaApp {
                 tool(ui, &mut act, "Bend", K::Seq(&q::BEND));
                 tool(ui, &mut act, "Twist", K::Seq(&q::TWIST));
                 tool(ui, &mut act, "Taper", K::Seq(&q::TAPER));
+                tool(ui, &mut act, "Stretch", K::Seq(&q::STRETCH));
                 ui.separator();
                 ui.menu_button("Array", |ui| {
                     item(ui, &mut act, "Rectangular", "", ARRAY_PREFILL);
@@ -493,6 +504,7 @@ impl FormaApp {
             ui.menu_button("Analyze", |ui| {
                 tool(ui, &mut act, "Point (Evaluate)", K::Seq(&q::EVALUATE_PT));
                 tool(ui, &mut act, "Distance", K::Distance);
+                tool(ui, &mut act, "Closest Point", K::Seq(&q::CLOSEST_PT));
                 tool(ui, &mut act, "Angle", K::Seq(&q::ANGLE));
                 tool(ui, &mut act, "Radius", K::Seq(&q::RADIUS));
                 tool(ui, &mut act, "Length", K::OnSel("Length"));

@@ -236,7 +236,8 @@ impl FormaApp {
         let tool_wants_points = self.tool.as_ref().is_some_and(|t| !t.selecting);
 
         // Window / crossing selection.
-        if resp.drag_started_by(PointerButton::Primary) && !tool_wants_points {
+        if resp.drag_started_by(PointerButton::Primary) && (!tool_wants_points || self.zoom_window)
+        {
             if let Some(p) = resp.interact_pointer_pos() {
                 self.drag = Some(DragSelect {
                     viewport: vi,
@@ -247,6 +248,11 @@ impl FormaApp {
         if resp.drag_stopped_by(PointerButton::Primary) {
             if let (Some(d), Some(end)) = (self.drag.take(), resp.interact_pointer_pos()) {
                 if d.viewport == vi && d.start.distance(end) > 3.0 {
+                    if self.zoom_window {
+                        self.zoom_window = false;
+                        self.viewports[vi].zoom_window(Rect::from_two_pos(d.start, end));
+                        return;
+                    }
                     self.window_select(vi, d.start, end, mods);
                 }
             }

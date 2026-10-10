@@ -4,7 +4,7 @@ Which of Rhino's commonly used commands Forma has. Rhino is the behavioural
 reference only: names are listed to compare, nothing is copied from its
 documentation. Statuses: **✓** works like the Rhino command for everyday use;
 **partial** exists with the limits noted; **✗** not yet, possible without a
-solid kernel; **needs kernel** waits for OpenCascade (milestone M4).
+solid kernel; **needs kernel** needs NURBS surfaces from OpenCascade (milestone M4; booleans, fillets and shells already use it on closed meshes).
 
 Surfaces and solids are display meshes until the kernel lands, so surface
 commands that produce them are *partial* by definition. Forma command syntax
@@ -12,7 +12,7 @@ is in `Help` and `forma-cli commands`.
 
 ## Summary
 
-279 Rhino commands: **152 ✓**, **42 partial**, **58 ✗**, **27 needs kernel**.
+279 Rhino commands: **162 ✓**, **52 partial**, **47 ✗**, **18 needs kernel**.
 
 ## Drawing: points and lines
 
@@ -21,7 +21,7 @@ is in `Help` and `forma-cli commands`.
 | Point | ✓ | `Point` (alias Pt) |
 | Points | ✓ | `Points` — several points in one go |
 | Line | partial | `Line` single segment; Bisector / Perpendicular / Tangent / FromMidpoint options not yet |
-| Lines | ✗ | use `Polyline` + `Explode` |
+| Lines | ✓ | `Lines p1 p2 …` separate segments |
 | Polyline | ✓ | `Polyline` (PL), Close / Undo options |
 | Curve | ✓ | `Curve` — degree-3 control-point curve |
 | InterpCrv | ✓ | `InterpCrv` — curve through points |
@@ -90,7 +90,7 @@ is in `Help` and `forma-cli commands`.
 | Pull | partial | `Pull` onto meshes (closest point); polyline result |
 | DupEdge | partial | `DupEdge` on meshes (visible edges) |
 | DupBorder | partial | `DupBorder` on meshes |
-| DupFaceBorder | ✗ |  |
+| DupFaceBorder | partial | `DupFaceBorder #id <point>` flat faces of meshes |
 | Intersect | partial | `Intersect` curve–curve points only |
 | ExtractIsocurve | needs kernel |  |
 | ExtractPt | ✓ | `ExtractPt` |
@@ -119,7 +119,7 @@ is in `Help` and `forma-cli commands`.
 | ExtrudeCrvToPoint | partial | `ExtrudeCrvToPoint <apex>` — mesh, closed planar curves capped |
 | ExtrudeSrf | partial | `ExtrudeSrf` — mesh |
 | Pipe | partial | `Pipe <radius> [open]` — mesh |
-| OffsetSrf | needs kernel |  |
+| OffsetSrf | partial | `OffsetSrf <distance>` on closed meshes (OpenCascade), mesh result |
 | FilletSrf | needs kernel |  |
 | BlendSrf | needs kernel |  |
 | MatchSrf | needs kernel |  |
@@ -147,13 +147,13 @@ is in `Help` and `forma-cli commands`.
 | Cap | ✓ | `Cap` planar holes |
 | MoveFace | partial | `MoveFace` flat faces of mesh solids |
 | PushPull | partial | `PushPull` flat faces of mesh solids |
-| BooleanUnion | needs kernel | OCCT integration in progress |
-| BooleanDifference | needs kernel |  |
-| BooleanIntersection | needs kernel |  |
-| BooleanSplit | needs kernel |  |
-| FilletEdge | needs kernel |  |
-| ChamferEdge | needs kernel |  |
-| Shell | needs kernel |  |
+| BooleanUnion | partial | `BooleanUnion` on closed meshes (OpenCascade), mesh result |
+| BooleanDifference | partial | `BooleanDifference #a #b …` closed meshes, mesh result |
+| BooleanIntersection | partial | closed meshes, mesh result |
+| BooleanSplit | partial | closed meshes, mesh result |
+| FilletEdge | partial | `FilletEdge #id <radius> <points near edges>` closed meshes |
+| ChamferEdge | partial | `ChamferEdge #id <distance> <points near edges>` closed meshes |
+| Shell | partial | `Shell #id <thickness> <points on removed faces>` closed meshes |
 | MergeAllFaces | needs kernel |  |
 | CreateSolid | needs kernel |  |
 | Wirecut | needs kernel |  |
@@ -168,11 +168,11 @@ is in `Help` and `forma-cli commands`.
 | Unweld | ✓ | `Unweld [angle]` |
 | ExplodeMesh | ✓ | `Explode` |
 | Join (meshes) | ✓ | `Join` |
-| MeshBooleanUnion / Difference | needs kernel |  |
+| MeshBooleanUnion / Difference | ✓ | the Boolean commands work on closed meshes |
 | ReduceMesh | ✗ |  |
 | QuadRemesh | ✗ |  |
 | FillMeshHoles | partial | `Cap` fills planar holes only |
-| UnifyMeshNormals | ✗ |  |
+| UnifyMeshNormals | ✓ | `UnifyMeshNormals` |
 | MeshRepair | ✗ |  |
 
 ## Transform
@@ -205,7 +205,7 @@ is in `Help` and `forma-cli commands`.
 | Taper | partial | `Taper`: meshes are subdivided |
 | Flow | ✗ |  |
 | Splop | ✗ |  |
-| Stretch | ✗ |  |
+| Stretch | ✓ | `Stretch <corner> <corner> <from> <to>` (window on the CPlane, through all heights) |
 | Cage / CageEdit | ✗ |  |
 | BoxEdit | partial | `BoxEdit x= y= z= [uniform] [center] [at=]` on the command line, no panel |
 | SetPt | ✓ | `SetPt <point> [x] [y] [z]` |
@@ -238,7 +238,7 @@ is in `Help` and `forma-cli commands`.
 | SelNone | ✓ |  |
 | Invert | ✓ |  |
 | SelLast | ✓ |  |
-| SelPrev | ✗ |  |
+| SelPrev | ✓ | `SelPrev` |
 | SelCrv | ✓ |  |
 | SelPt | ✓ |  |
 | SelMesh | ✓ |  |
@@ -266,13 +266,13 @@ is in `Help` and `forma-cli commands`.
 |---|---|---|
 | Hide | ✓ |  |
 | Show | ✓ |  |
-| ShowSelected | ✗ |  |
+| ShowSelected | ✓ | `ShowSelected [#id …]` shows and selects hidden objects |
 | HideSwap | ✓ |  |
 | Isolate | ✓ |  |
 | Unisolate | ✓ | alias of `Show` (shows every hidden object) |
 | Lock | ✓ |  |
 | Unlock | ✓ |  |
-| UnlockSelected | ✗ |  |
+| UnlockSelected | ✓ | `UnlockSelected [#id …]` |
 | LockSwap | ✓ |  |
 
 ## Layers
@@ -312,9 +312,9 @@ is in `Help` and `forma-cli commands`.
 | ShowEdges | ✗ |  |
 | Zebra | needs kernel |  |
 | DraftAngleAnalysis | ✗ |  |
-| ClosestPt | ✗ |  |
+| ClosestPt | ✓ | `ClosestPt <point>` adds points on the selected objects |
 | CrvDeviation | ✗ |  |
-| List / Check | ✗ |  |
+| List / Check | partial | `List` (= `What`); no validity check |
 
 ## Dimensions and annotation
 
@@ -342,10 +342,10 @@ is in `Help` and `forma-cli commands`.
 |---|---|---|
 | Zoom Extents (ZE / ZEA) | ✓ |  |
 | Zoom Selected (ZS) | ✓ |  |
-| Zoom Window | ✗ |  |
+| Zoom Window | ✓ | `ZW`, then drag a rectangle |
 | Pan / Rotate / Zoom (mouse) | ✓ |  |
 | SetView Top / Front / Right / Perspective | ✓ |  |
-| SetView Bottom / Left / Back | ✗ |  |
+| SetView Bottom / Left / Back | ✓ | `Bottom`, `Left`, `Back` |
 | 4 viewports, MaxViewport | ✓ |  |
 | NamedView | ✗ |  |
 | CPlane (custom) | ✗ | standard per-view CPlanes only |
@@ -366,7 +366,7 @@ is in `Help` and `forma-cli commands`.
 | Open | ✓ | .3dm (display geometry) |
 | Save / SaveAs | ✓ | .3dm: curves exact, surfaces / solids as meshes, annotations simplified |
 | Import | ✓ | .3dm |
-| Export (selected) | partial | .3dm only; OBJ / STL / glTF to come (M5) |
+| Export (selected) | partial | .3dm, .obj, .stl; glTF to come |
 | Recent files | ✓ |  |
 | Units / DocumentProperties | partial | units from `New`; no dialog |
 | IncrementalSave | ✗ |  |

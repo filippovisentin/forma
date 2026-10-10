@@ -146,7 +146,7 @@ impl Command for Volume {
 simple_command!(
     What,
     "What",
-    &[],
+    &["List"],
     "What — describe the selected objects (type, layer, attributes, bounding box)"
 );
 impl Command for What {

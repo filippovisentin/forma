@@ -27,6 +27,8 @@ pub enum In {
     Object(&'static str),
     /// Points until Enter, at least this many.
     Points(&'static str, usize),
+    /// One point clicked on the surface of a mesh or solid.
+    SurfacePoint(&'static str),
     /// Points clicked on the surface of a solid (near its edges or on its
     /// faces) until Enter, at least this many.
     SurfacePoints(&'static str, usize),
@@ -1429,8 +1431,98 @@ pub static OFFSET_SRF: Seq = Seq {
     preview: none,
 };
 
+pub static LINES: Seq = Seq {
+    name: "Lines",
+    tip: "Lines — chain of separate line segments",
+    sel: false,
+    steps: &[In::Points("Next point (Enter when done)", 2)],
+    emit: |v, _| format!("Lines {}", pts_list(&v[0])),
+    preview: |v| {
+        let mut pts = match v.vals.first() {
+            Some(Val::Ps(p)) => p.clone(),
+            _ => Vec::new(),
+        };
+        if !pts.is_empty() {
+            pts.push(v.cur);
+        }
+        poly(&pts)
+    },
+};
+
+pub static STRETCH: Seq = Seq {
+    name: "Stretch",
+    tip: "Stretch — move the points inside a window (selection, or everything visible)",
+    sel: false,
+    steps: &[
+        In::Point("First corner of the stretch window"),
+        In::Point("Opposite corner"),
+        In::Point("Point to stretch from"),
+        In::Point("Point to stretch to"),
+    ],
+    emit: |v, _| {
+        format!(
+            "Stretch {} {} {} {}",
+            fmt_p(v[0].p()),
+            fmt_p(v[1].p()),
+            fmt_p(v[2].p()),
+            fmt_p(v[3].p())
+        )
+    },
+    preview: |v| {
+        let rect = |a: Point3, b: Point3, pl: &Plane| {
+            let (u, w) = (pl.x, pl.y);
+            let d = b - a;
+            let du = u * d.dot(u);
+            let dw = w * d.dot(w);
+            quad([a, a + du, a + du + dw, a + dw])
+        };
+        match v.vals.len() {
+            0 => Vec::new(),
+            1 => rect(v.p(0), v.cur, v.plane),
+            2 => rect(v.p(0), v.p(1), v.plane),
+            _ => {
+                let mut out = rect(v.p(0), v.p(1), v.plane);
+                out.push([v.p(2), v.cur]);
+                out
+            }
+        }
+    },
+};
+
+pub static CLOSEST_PT: Seq = Seq {
+    name: "ClosestPt",
+    tip: "ClosestPt — point on the selected objects nearest to a picked point",
+    sel: true,
+    steps: &[In::Point("Point to measure from")],
+    emit: |v, _| format!("ClosestPt {}", fmt_p(v[0].p())),
+    preview: none,
+};
+
+pub static DUP_FACE_BORDER: Seq = Seq {
+    name: "DupFaceBorder",
+    tip: "DupFaceBorder — copy the outline of a flat face of a solid",
+    sel: false,
+    steps: &[
+        In::Object("Solid or mesh"),
+        In::SurfacePoint("Click the face"),
+    ],
+    emit: |v, _| format!("DupFaceBorder #{} {}", v[0].o(), fmt_p(v[1].p())),
+    preview: none,
+};
+
+sel_only!(
+    UNIFY_MESH_NORMALS,
+    "UnifyMeshNormals",
+    "UnifyMeshNormals — make all faces of the selected meshes point the same way"
+);
+
 /// Every sequence tool (for typed names, help and tests).
 pub static ALL: &[&Seq] = &[
+    &LINES,
+    &STRETCH,
+    &CLOSEST_PT,
+    &DUP_FACE_BORDER,
+    &UNIFY_MESH_NORMALS,
     &BOOLEAN_UNION,
     &BOOLEAN_DIFFERENCE,
     &BOOLEAN_INTERSECTION,

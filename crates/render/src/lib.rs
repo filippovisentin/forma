@@ -537,8 +537,8 @@ impl Renderer {
 /// Grid plane matching a standard view (Rhino's CPlanes).
 pub fn grid_plane_for(view: StandardView) -> GridPlane {
     match view {
-        StandardView::Front => GridPlane::XZ,
-        StandardView::Right => GridPlane::YZ,
+        StandardView::Front | StandardView::Back => GridPlane::XZ,
+        StandardView::Right | StandardView::Left => GridPlane::YZ,
         _ => GridPlane::XY,
     }
 }

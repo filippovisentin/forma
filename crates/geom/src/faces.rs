@@ -234,6 +234,107 @@ fn closest_on_triangle(p: Point3, a: Point3, b: Point3, c: Point3) -> Point3 {
     a + ab * (vb * denom) + ac * (vc * denom)
 }
 
+impl Mesh {
+    /// Copy whose triangles all wind the same way as their neighbours (per
+    /// connected piece), closed pieces facing outwards, and the number of
+    /// triangles that were flipped. Normals are dropped when anything changed.
+    pub fn unified(&self, tol: f64) -> (Mesh, usize) {
+        let n = self.triangles.len();
+        let keys: Vec<[Key; 3]> = self
+            .triangles
+            .iter()
+            .map(|t| t.map(|i| key(self.positions[i as usize], tol)))
+            .collect();
+        // Undirected edge -> triangles using it.
+        let mut by_edge: HashMap<EdgeKey, Vec<usize>> = HashMap::new();
+        for (t, k) in keys.iter().enumerate() {
+            for e in 0..3 {
+                let (a, b) = (k[e], k[(e + 1) % 3]);
+                by_edge
+                    .entry(if a < b { (a, b) } else { (b, a) })
+                    .or_default()
+                    .push(t);
+            }
+        }
+        // Does triangle `t` (with flip state `f`) run along a -> b?
+        let runs = |t: usize, f: bool, a: Key, b: Key| {
+            let k = keys[t];
+            (0..3).any(|e| {
+                let (x, y) = (k[e], k[(e + 1) % 3]);
+                if f {
+                    (y, x) == (a, b)
+                } else {
+                    (x, y) == (a, b)
+                }
+            })
+        };
+        let mut flip = vec![false; n];
+        let mut seen = vec![false; n];
+        let mut out = self.clone();
+        for start in 0..n {
+            if seen[start] {
+                continue;
+            }
+            seen[start] = true;
+            let mut piece = vec![start];
+            let mut stack = vec![start];
+            let mut open = false;
+            while let Some(t) = stack.pop() {
+                let k = keys[t];
+                for e in 0..3 {
+                    let (mut a, mut b) = (k[e], k[(e + 1) % 3]);
+                    if flip[t] {
+                        std::mem::swap(&mut a, &mut b);
+                    }
+                    let ek = if a < b { (a, b) } else { (b, a) };
+                    let users = &by_edge[&ek];
+                    if users.len() == 1 {
+                        open = true;
+                    }
+                    for &u in users {
+                        if u == t || seen[u] {
+                            continue;
+                        }
+                        seen[u] = true;
+                        // A consistent neighbour runs the shared edge the other way.
+                        flip[u] = runs(u, false, a, b);
+                        piece.push(u);
+                        stack.push(u);
+                    }
+                }
+            }
+            if !open {
+                let vol: f64 = piece
+                    .iter()
+                    .map(|&t| {
+                        let [a, mut b, mut c] =
+                            self.triangles[t].map(|i| self.positions[i as usize].to_vec());
+                        if flip[t] {
+                            std::mem::swap(&mut b, &mut c);
+                        }
+                        a.dot(b.cross(c))
+                    })
+                    .sum();
+                if vol < 0.0 {
+                    for &t in &piece {
+                        flip[t] = !flip[t];
+                    }
+                }
+            }
+        }
+        let count = flip.iter().filter(|f| **f).count();
+        if count > 0 {
+            for (t, f) in flip.iter().enumerate() {
+                if *f {
+                    out.triangles[t].swap(1, 2);
+                }
+            }
+            out.normals.clear();
+        }
+        (out, count)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::{box_mesh, cylinder_mesh, Plane, Point3, Vec3};

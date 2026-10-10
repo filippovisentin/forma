@@ -192,7 +192,11 @@ impl Tool {
         }
         if let Some((s, step)) = self.seq_step() {
             let p = match step {
-                In::Point(p) | In::Dist(p, _) | In::Height(p, _) | In::Text(p) => p.to_string(),
+                In::Point(p)
+                | In::SurfacePoint(p)
+                | In::Dist(p, _)
+                | In::Height(p, _)
+                | In::Text(p) => p.to_string(),
                 In::Object(p) | In::Choice(p, _) => p.to_string(),
                 In::Num(p, Some(d)) => format!("{p} <{}>", round(d)),
                 In::Num(p, None) => p.to_string(),
@@ -290,7 +294,7 @@ impl Tool {
         if let Some((_, step)) = self.seq_step() {
             return match step {
                 In::Point(_) | In::Points(..) => Want::Point,
-                In::SurfacePoints(..) => Want::SurfacePoint,
+                In::SurfacePoints(..) | In::SurfacePoint(_) => Want::SurfacePoint,
                 In::Dist(..) => Want::PointOrNumber,
                 In::Height(_, from) => Want::Height {
                     from: self.vals.get(from).map_or(self.anchor, Val::p),
@@ -366,7 +370,7 @@ impl Tool {
         }
         if let Some((_, step)) = self.seq_step() {
             return match step {
-                In::Point(_) => self.seq_push(Val::P(p)),
+                In::Point(_) | In::SurfacePoint(_) => self.seq_push(Val::P(p)),
                 In::Points(..) | In::SurfacePoints(..) => {
                     if self.multi.last().is_none_or(|q| q.distance_to(p) > 1e-9) {
                         self.multi.push(p);

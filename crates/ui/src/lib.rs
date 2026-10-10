@@ -213,6 +213,8 @@ struct FormaApp {
     log: Vec<(LogKind, String)>,
     hover: Option<Hover>,
     drag: Option<DragSelect>,
+    /// The next window drag zooms instead of selecting (`ZW`).
+    zoom_window: bool,
     title: String,
     /// Saved at least once by Forma (otherwise Save asks for a name, to avoid
     /// overwriting an original Rhino file with display meshes).

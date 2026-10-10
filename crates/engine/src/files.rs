@@ -2,7 +2,7 @@
 //! (Import, Export).
 
 use crate::{Args, ClipboardItem, Command, CommandError, CommandResult, Context};
-use forma_doc::{Document, LayerId, ObjectId};
+use forma_doc::{Document, Geometry, LayerId, ObjectId};
 use std::collections::HashMap;
 
 fn path_arg(args: &mut Args) -> Result<String, CommandError> {
@@ -150,13 +150,23 @@ simple_command!(
     Export,
     "Export",
     &["ExportSelected"],
-    "Export <file.3dm> — save only the selected objects (with their layers) as a Rhino file"
+    "Export <file.3dm|.obj|.stl> — save only the selected objects: a Rhino file (with their layers), Wavefront OBJ (meshes by layer, curves as lines) or binary STL (meshes)"
 );
 impl Command for Export {
     impl_meta!(Export);
     fn run(&self, ctx: &mut Context, args: &mut Args) -> CommandResult {
         let path = path_arg(args)?;
         let ids = ctx.selected("Export")?;
+        let ext = std::path::Path::new(&path)
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(str::to_lowercase)
+            .unwrap_or_default();
+        match ext.as_str() {
+            "obj" => return export_obj(ctx, &ids, &path),
+            "stl" => return export_stl(ctx, &ids, &path),
+            _ => {}
+        }
         let mut out = Document::new();
         out.units = ctx.doc.units;
         out.absolute_tolerance = ctx.doc.absolute_tolerance;
@@ -188,9 +198,137 @@ impl Command for Export {
     }
 }
 
+fn io_err(e: std::io::Error) -> CommandError {
+    CommandError::Invalid(e.to_string())
+}
+
+/// Wavefront OBJ: one group per object (named after its layer), meshes as faces,
+/// curves as polylines.
+fn export_obj(ctx: &Context, ids: &[ObjectId], path: &str) -> CommandResult {
+    use std::fmt::Write as _;
+    let mut s = format!("# Forma export, units: {}\n", ctx.doc.units.abbreviation());
+    let mut base = 1usize;
+    let (mut meshes, mut curves) = (0, 0);
+    for id in ids {
+        let o = ctx.doc.object(*id).expect("selected");
+        let layer = ctx
+            .doc
+            .layer(o.layer)
+            .name
+            .replace(char::is_whitespace, "_");
+        match &o.geometry {
+            Geometry::Mesh(m) => {
+                let _ = writeln!(s, "g {layer}_{}", id.0);
+                for p in &m.positions {
+                    let _ = writeln!(s, "v {} {} {}", p.x, p.y, p.z);
+                }
+                for t in &m.triangles {
+                    let [a, b, c] = t.map(|i| i as usize + base);
+                    let _ = writeln!(s, "f {a} {b} {c}");
+                }
+                base += m.positions.len();
+                meshes += 1;
+            }
+            g if g.is_curve() => {
+                let pts = g.curve_points();
+                if pts.len() < 2 {
+                    continue;
+                }
+                let _ = writeln!(s, "g {layer}_{}", id.0);
+                for p in &pts {
+                    let _ = writeln!(s, "v {} {} {}", p.x, p.y, p.z);
+                }
+                s.push('l');
+                for i in 0..pts.len() {
+                    let _ = write!(s, " {}", base + i);
+                }
+                s.push('\n');
+                base += pts.len();
+                curves += 1;
+            }
+            _ => {}
+        }
+    }
+    if meshes + curves == 0 {
+        return Err(CommandError::Invalid(
+            "Export: nothing to write as OBJ".into(),
+        ));
+    }
+    std::fs::write(path, s).map_err(io_err)?;
+    Ok(format!(
+        "exported {meshes} mesh(es) and {curves} curve(s) to {path}"
+    ))
+}
+
+/// Binary STL of the selected meshes.
+fn export_stl(ctx: &Context, ids: &[ObjectId], path: &str) -> CommandResult {
+    let tris: Vec<[forma_geom::Point3; 3]> = ids
+        .iter()
+        .filter_map(|id| match &ctx.doc.object(*id)?.geometry {
+            Geometry::Mesh(m) => Some(m),
+            _ => None,
+        })
+        .flat_map(|m| {
+            m.triangles
+                .iter()
+                .map(|t| t.map(|i| m.positions[i as usize]))
+        })
+        .collect();
+    if tris.is_empty() {
+        return Err(CommandError::Invalid(
+            "Export: STL needs meshes or solids".into(),
+        ));
+    }
+    let mut b: Vec<u8> = Vec::with_capacity(84 + tris.len() * 50);
+    let mut header = [b' '; 80];
+    let tag = b"Forma STL";
+    header[..tag.len()].copy_from_slice(tag);
+    b.extend_from_slice(&header);
+    b.extend_from_slice(&u32::try_from(tris.len()).unwrap_or(u32::MAX).to_le_bytes());
+    #[allow(clippy::cast_possible_truncation)]
+    let f = |v: f64| (v as f32).to_le_bytes();
+    for [p, q, r] in &tris {
+        let n = (*q - *p)
+            .cross(*r - *p)
+            .normalized()
+            .unwrap_or(forma_geom::Vec3::Z);
+        for v in [n.x, n.y, n.z] {
+            b.extend_from_slice(&f(v));
+        }
+        for pt in [p, q, r] {
+            for v in [pt.x, pt.y, pt.z] {
+                b.extend_from_slice(&f(v));
+            }
+        }
+        b.extend_from_slice(&[0, 0]);
+    }
+    std::fs::write(path, b).map_err(io_err)?;
+    Ok(format!("exported {} triangle(s) to {path}", tris.len()))
+}
+
 #[cfg(test)]
 mod tests {
     use crate::Engine;
+
+    #[test]
+    fn export_obj_and_stl() {
+        let dir = std::env::temp_dir().join(format!("forma-export-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut e = Engine::new();
+        e.run_line("Box 0,0 10,10 10").unwrap();
+        e.run_line("Line 0,0 5,5").unwrap();
+        e.run_line("SelAll").unwrap();
+        let obj = dir.join("a.obj");
+        let out = e.run_line(&format!("Export {}", obj.display())).unwrap();
+        assert!(out.contains("1 mesh(es) and 1 curve(s)"), "{out}");
+        let text = std::fs::read_to_string(&obj).unwrap();
+        assert_eq!(text.lines().filter(|l| l.starts_with("f ")).count(), 12);
+        assert!(text.lines().any(|l| l.starts_with("l ")));
+        let stl = dir.join("a.stl");
+        e.run_line(&format!("Export {}", stl.display())).unwrap();
+        assert_eq!(std::fs::metadata(&stl).unwrap().len(), 84 + 12 * 50);
+        std::fs::remove_dir_all(&dir).ok();
+    }
 
     #[test]
     fn copy_cut_paste() {

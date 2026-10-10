@@ -9,7 +9,12 @@ use forma_geom::{Point3, Vec3};
 use forma_render::{DisplayMode, StandardView};
 
 /// Words handled by the UI itself (views, display modes, toggles).
-const UI_WORDS: [&str; 23] = [
+const UI_WORDS: [&str; 28] = [
+    "zw",
+    "zoomwindow",
+    "bottom",
+    "back",
+    "left",
     "ze",
     "zea",
     "zoomextents",
@@ -486,6 +491,9 @@ impl FormaApp {
             "top" => self.set_active_view(StandardView::Top),
             "front" => self.set_active_view(StandardView::Front),
             "right" => self.set_active_view(StandardView::Right),
+            "bottom" => self.set_active_view(StandardView::Bottom),
+            "back" => self.set_active_view(StandardView::Back),
+            "left" => self.set_active_view(StandardView::Left),
             "perspective" | "persp" => self.set_active_view(StandardView::Perspective),
             "help" | "?" => {
                 self.show_help();
@@ -497,6 +505,10 @@ impl FormaApp {
             "osnap" => self.snap.disabled = !self.snap.disabled,
             "gumball" => self.gumball_on = !self.gumball_on,
             "zs" | "zoomselected" => self.zoom_selected(),
+            "zw" | "zoomwindow" => {
+                self.zoom_window = true;
+                self.log(LogKind::Normal, "Drag a window to zoom into");
+            }
             "wireframe" | "setdisplaymode-wireframe" => self.set_mode(DisplayMode::Wireframe),
             "shaded" => self.set_mode(DisplayMode::Shaded),
             "maxviewport" | "maximize" => self.toggle_maximize(),

@@ -55,6 +55,9 @@ impl Viewport {
             StandardView::Top => "Top",
             StandardView::Front => "Front",
             StandardView::Right => "Right",
+            StandardView::Bottom => "Bottom",
+            StandardView::Back => "Back",
+            StandardView::Left => "Left",
         }
     }
 
@@ -63,7 +66,27 @@ impl Viewport {
         match self.kind {
             StandardView::Front => Plane::FRONT,
             StandardView::Right => Plane::RIGHT,
-            _ => Plane::TOP,
+            // Opposite views: same planes as Top / Front / Right, facing the
+            // other way (heights grow towards the viewer, like Rhino).
+            StandardView::Bottom => Plane {
+                origin: Point3::ORIGIN,
+                x: Vec3::X,
+                y: Vec3::new(0.0, -1.0, 0.0),
+                z: Vec3::new(0.0, 0.0, -1.0),
+            },
+            StandardView::Back => Plane {
+                origin: Point3::ORIGIN,
+                x: Vec3::new(-1.0, 0.0, 0.0),
+                y: Vec3::Z,
+                z: Vec3::Y,
+            },
+            StandardView::Left => Plane {
+                origin: Point3::ORIGIN,
+                x: Vec3::new(0.0, -1.0, 0.0),
+                y: Vec3::Z,
+                z: Vec3::new(-1.0, 0.0, 0.0),
+            },
+            StandardView::Top | StandardView::Perspective => Plane::TOP,
         }
     }
 
@@ -79,6 +102,27 @@ impl Viewport {
         let x = (pos.x - self.rect.left()) / self.rect.width().max(1.0);
         let y = (pos.y - self.rect.top()) / self.rect.height().max(1.0);
         (x as f64 * 2.0 - 1.0, 1.0 - y as f64 * 2.0)
+    }
+
+    /// Zoom so the screen rectangle `r` fills the view (Rhino's Zoom Window).
+    pub fn zoom_window(&mut self, r: Rect) {
+        if r.width() < 2.0 || r.height() < 2.0 || !self.rect.is_positive() {
+            return;
+        }
+        let (x, y) = self.ndc(r.center());
+        let (o, d) = self.camera.ray(x, y, self.aspect());
+        // Where the ray through the window centre meets the target plane.
+        let n = self.camera.back();
+        let denom = d.dot(n);
+        let centre = if denom.abs() > 1e-12 {
+            o + d * ((self.camera.target - o).dot(n) / denom)
+        } else {
+            self.camera.target
+        };
+        let k = f64::from((r.width() / self.rect.width()).max(r.height() / self.rect.height()));
+        self.camera.target = centre;
+        self.camera.zoom(k.clamp(1e-6, 1.0));
+        self.dirty = true;
     }
 
     /// World ray through a screen position.

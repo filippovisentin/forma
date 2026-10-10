@@ -93,6 +93,7 @@ impl FormaApp {
             log: Vec::new(),
             hover: None,
             drag: None,
+            zoom_window: false,
             title: String::new(),
             saved_by_forma: false,
             saved_version: 0,
@@ -224,6 +225,16 @@ impl FormaApp {
             changed = true;
         }
         if self.engine.ctx.selection != self.seen_selection {
+            // Remember what the user had selected before deselecting (SelPrev).
+            if self.engine.ctx.selection.is_empty()
+                && !self.seen_selection.is_empty()
+                && !self.seen_selection.contains(&ObjectId(u64::MAX))
+            {
+                self.engine
+                    .ctx
+                    .prev_selection
+                    .clone_from(&self.seen_selection);
+            }
             if let Some((rs, renderer)) = frame.wgpu_render_state().zip(self.renderer.as_mut()) {
                 let _t = perf::span("sync: highlight");
                 let hl = self.cache.highlight(doc, &self.engine.ctx.selection);

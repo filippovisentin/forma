@@ -9,6 +9,9 @@ pub enum StandardView {
     Top,
     Front,
     Right,
+    Bottom,
+    Back,
+    Left,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -40,6 +43,9 @@ impl Camera {
             StandardView::Top => ((-90f64).to_radians(), 89.999f64.to_radians(), true),
             StandardView::Front => ((-90f64).to_radians(), 0.0, true),
             StandardView::Right => (0.0, 0.0, true),
+            StandardView::Bottom => ((-90f64).to_radians(), (-89.999f64).to_radians(), true),
+            StandardView::Back => (90f64.to_radians(), 0.0, true),
+            StandardView::Left => (180f64.to_radians(), 0.0, true),
         };
         Camera {
             target: DVec3::ZERO,

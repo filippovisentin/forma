@@ -49,6 +49,7 @@ mod solid;
 mod solids2;
 mod surfaces;
 mod transform;
+mod workflow;
 
 pub use args::{parse_point, Args};
 
@@ -94,6 +95,9 @@ pub struct Context {
     pub last_created: Vec<ObjectId>,
     /// Internal clipboard filled by CopyToClipboard / Cut, used by Paste.
     pub clipboard: Vec<ClipboardItem>,
+    /// The selection before the last command that started with one, or before
+    /// the UI cleared it (for SelPrev).
+    pub prev_selection: BTreeSet<ObjectId>,
 }
 
 /// One object on the internal clipboard: geometry plus the attributes that survive
@@ -154,6 +158,7 @@ impl Engine {
                 last_point: None,
                 selection: BTreeSet::new(),
                 last_created: Vec::new(),
+                prev_selection: BTreeSet::new(),
                 clipboard: Vec::new(),
             },
             commands: Vec::new(),
@@ -219,6 +224,9 @@ impl Engine {
             .get(&name.to_lowercase())
             .ok_or_else(|| CommandError::UnknownCommand(name.to_string()))?;
         let mut args = Args::new(tokens);
+        if !self.ctx.selection.is_empty() && self.commands[idx].name() != "SelPrev" {
+            self.ctx.prev_selection.clone_from(&self.ctx.selection);
+        }
         let before: BTreeSet<ObjectId> = self.ctx.doc.objects().map(|o| o.id).collect();
         let result = self.commands[idx].run(&mut self.ctx, &mut args);
         // Drop selected ids that no longer exist (deleted, undone…) or that cannot
