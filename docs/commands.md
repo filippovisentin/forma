@@ -12,7 +12,7 @@ is in `Help` and `forma-cli commands`.
 
 ## Summary
 
-279 Rhino commands: **176 ✓**, **57 partial**, **28 ✗**, **18 needs kernel**.
+279 Rhino commands: **179 ✓**, **54 partial**, **28 ✗**, **18 needs kernel**.
 
 ## Drawing: points and lines
 
@@ -20,7 +20,7 @@ is in `Help` and `forma-cli commands`.
 |---|---|---|
 | Point | ✓ | `Point` (alias Pt) |
 | Points | ✓ | `Points` — several points in one go |
-| Line | partial | `Line` single segment; Bisector / Perpendicular / Tangent / FromMidpoint options not yet |
+| Line | ✓ | `Line`, `LineBothSides`, `LineVertical`, `LinePerpendicular`, `LineBisector` (Curve → Line) |
 | Lines | ✓ | `Lines p1 p2 …` separate segments |
 | Polyline | ✓ | `Polyline` (PL), Close / Undo options |
 | Curve | ✓ | `Curve` — degree-3 control-point curve |
@@ -207,7 +207,7 @@ is in `Help` and `forma-cli commands`.
 | Splop | ✗ |  |
 | Stretch | ✓ | `Stretch <corner> <corner> <from> <to>` (window on the CPlane, through all heights) |
 | Cage / CageEdit | ✗ |  |
-| BoxEdit | partial | `BoxEdit x= y= z= [uniform] [center] [at=]` on the command line, no panel |
+| BoxEdit | ✓ | `BoxEdit x= y= z= [uniform] [center] [at=]`; Transform → Box Edit… dialog |
 | SetPt | ✓ | `SetPt <point> [x] [y] [z]` |
 | Gumball | ✓ | move / rotate / extrude handles; scale handles not yet |
 | Flip | ✓ | `Flip` |
@@ -329,7 +329,7 @@ is in `Help` and `forma-cli commands`.
 | DimOrdinate | ✗ |  |
 | DimCurveLength | ✗ |  |
 | Leader | ✓ | `Leader <p1> <p2> … <text>` |
-| Text | partial | `Text <origin> <height|*> [normal] <text>`: one line, UI font; saved to .3dm as a text dot |
+| Text | partial | `Text <origin> <height|*> [normal] <text>`: one line, UI font; saved to .3dm as a Rhino text |
 | TextDot | ✓ | `Dot` (alias TextDot) |
 | Hatch | partial | `Hatch <spacing> [angle]`: grouped lines, no hatch object / patterns |
 | AnnotationStyles / DimStyle | partial | `DimStyle [height] [decimals]` per document |
@@ -366,9 +366,9 @@ is in `Help` and `forma-cli commands`.
 | Open | ✓ | .3dm (display geometry) |
 | Save / SaveAs | ✓ | .3dm: curves exact, surfaces / solids as meshes, annotations simplified |
 | Import | ✓ | .3dm |
-| Export (selected) | partial | .3dm, .obj, .stl; glTF to come |
+| Export (selected) | partial | .3dm, .obj (+ .mtl layer colours, Y up), .stl (mm); glTF to come |
 | Recent files | ✓ |  |
-| Units / DocumentProperties | partial | units from `New`; no dialog |
+| Units / DocumentProperties | ✓ | `Units <unit> [scale|keep]`; File → Units… |
 | IncrementalSave | ✓ | `IncrementalSave` → model_001.3dm, model_002.3dm… |
 | Worksession | ✗ |  |
 | Exit | ✓ |  |

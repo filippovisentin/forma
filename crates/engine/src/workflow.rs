@@ -1203,6 +1203,107 @@ impl Command for ReduceMesh {
     }
 }
 
+fn add_line(ctx: &mut Context, a: Point3, b: Point3) -> CommandResult {
+    if a.distance_to(b) <= ctx.tolerance.absolute {
+        return Err(CommandError::Invalid("the line has no length".into()));
+    }
+    let mut t = ctx.doc.begin();
+    let id = t.add(Geometry::Line(LineCurve::new(a, b)));
+    t.commit();
+    ctx.last_point = Some(b);
+    Ok(format!("added #{}", id.0))
+}
+
+simple_command!(
+    LineBothSides,
+    "LineBothSides",
+    &["LineFromMidpoint"],
+    "LineBothSides <middle> <end> — line centred on the first point"
+);
+impl Command for LineBothSides {
+    impl_meta!(LineBothSides);
+    fn run(&self, ctx: &mut Context, args: &mut Args) -> CommandResult {
+        let m = args.point("middle of line", ctx.last_point)?;
+        let e = args.point("end of line", Some(m))?;
+        add_line(ctx, m - (e - m), e)
+    }
+}
+
+simple_command!(
+    LineVertical,
+    "LineVertical",
+    &[],
+    "LineVertical <start> <length> [normal] — line perpendicular to the construction plane (negative goes down)"
+);
+impl Command for LineVertical {
+    impl_meta!(LineVertical);
+    fn run(&self, ctx: &mut Context, args: &mut Args) -> CommandResult {
+        let s = args.point("start of line", ctx.last_point)?;
+        let len = args.number("length")?;
+        let n = args
+            .optional_vector()
+            .and_then(Vec3::normalized)
+            .unwrap_or(Vec3::Z);
+        add_line(ctx, s, s + n * len)
+    }
+}
+
+simple_command!(
+    LinePerpendicular,
+    "LinePerpendicular",
+    &["LinePerp"],
+    "LinePerpendicular #curve <point on curve> <end> [normal] — line leaving the curve at a right angle, as long as the end point reaches"
+);
+impl Command for LinePerpendicular {
+    impl_meta!(LinePerpendicular);
+    fn run(&self, ctx: &mut Context, args: &mut Args) -> CommandResult {
+        let id = object_arg(ctx, args, "curve")?;
+        let p = args.point("point on the curve", ctx.last_point)?;
+        let e = args.point("end of line", Some(p))?;
+        let g = &ctx.doc.object(id).expect("checked").geometry;
+        let c = g
+            .to_chain()
+            .ok_or_else(|| CommandError::Invalid(format!("#{} is not a curve", id.0)))?;
+        let n = args
+            .optional_vector()
+            .or_else(|| g.curve_normal())
+            .unwrap_or(Vec3::Z);
+        let (t, _) = c.closest(p);
+        let start = c.point_at(t);
+        let i = (t.floor().max(0.0) as usize).min(c.segs.len() - 1);
+        let tan = c.segs[i].tangent_at(t - i as f64);
+        let dir = n
+            .cross(tan)
+            .normalized()
+            .ok_or_else(|| CommandError::Invalid("the curve is along the normal".into()))?;
+        let len = (e - start).dot(dir);
+        add_line(ctx, start, start + dir * len)
+    }
+}
+
+simple_command!(
+    LineBisector,
+    "LineBisector",
+    &["Bisector"],
+    "LineBisector <vertex> <point on first side> <point on second side> <length> — line halving the angle"
+);
+impl Command for LineBisector {
+    impl_meta!(LineBisector);
+    fn run(&self, ctx: &mut Context, args: &mut Args) -> CommandResult {
+        let v = args.point("vertex of the angle", ctx.last_point)?;
+        let a = args.point("point on the first side", Some(v))?;
+        let b = args.point("point on the second side", Some(v))?;
+        let len = args.number("length")?;
+        let (Some(da), Some(db)) = ((a - v).normalized(), (b - v).normalized()) else {
+            return Err(CommandError::Invalid("the sides have no length".into()));
+        };
+        let d = (da + db)
+            .normalized()
+            .ok_or_else(|| CommandError::Invalid("the sides are opposite".into()))?;
+        add_line(ctx, v, v + d * len)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::Engine;
@@ -1394,6 +1495,36 @@ mod tests {
             m.triangles.len()
         );
         assert!(e.run_line("ReduceMesh 0").is_err());
+    }
+
+    #[test]
+    fn line_variants() {
+        let mut e = Engine::new();
+        e.run_line("LineBothSides 0,0 10,0").unwrap();
+        e.run_line("LineVertical 5,5 30").unwrap();
+        e.run_line("Circle 0,0 10").unwrap();
+        e.run_line("LinePerpendicular #3 10,0 25,3").unwrap();
+        e.run_line("LineBisector 0,0 10,0 0,10 5").unwrap();
+        let lines: Vec<forma_geom::LineCurve> = e
+            .doc()
+            .objects()
+            .filter_map(|o| match o.geometry {
+                Geometry::Line(l) => Some(l),
+                _ => None,
+            })
+            .collect();
+        let p = forma_geom::Point3::new;
+        assert!(lines[0].from.distance_to(p(-10.0, 0.0, 0.0)) < 1e-12);
+        assert!(lines[1].to.distance_to(p(5.0, 5.0, 30.0)) < 1e-12);
+        // Perpendicular to the circle at (10,0): radial, 15 long.
+        assert!(lines[2].from.distance_to(p(10.0, 0.0, 0.0)) < 1e-9);
+        assert!(
+            lines[2].to.distance_to(p(25.0, 0.0, 0.0)) < 1e-9,
+            "{:?}",
+            lines[2]
+        );
+        let h = 5.0 / 2f64.sqrt();
+        assert!(lines[3].to.distance_to(p(h, h, 0.0)) < 1e-12);
     }
 
     #[test]

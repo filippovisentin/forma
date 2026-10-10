@@ -299,6 +299,62 @@ impl Command for New {
 }
 
 simple_command!(
+    Units,
+    "Units",
+    &["DocumentProperties"],
+    "Units [mm|cm|m|in|ft] [scale|keep] — show or change the model units; scale (default) keeps real sizes, keep leaves the numbers as they are"
+);
+impl Command for Units {
+    impl_meta!(Units);
+    fn run(&self, ctx: &mut Context, args: &mut Args) -> CommandResult {
+        let old = ctx.doc.units;
+        let Some(tok) = args.next_token() else {
+            return Ok(format!(
+                "units {}, tolerance {}",
+                old.abbreviation(),
+                ctx.doc.absolute_tolerance
+            ));
+        };
+        let new = match tok.to_lowercase().as_str() {
+            "mm" | "millimeters" | "millimetres" => LengthUnit::Millimeters,
+            "cm" | "centimeters" | "centimetres" => LengthUnit::Centimeters,
+            "m" | "meters" | "metres" => LengthUnit::Meters,
+            "in" | "inches" => LengthUnit::Inches,
+            "ft" | "feet" => LengthUnit::Feet,
+            u => return Err(CommandError::BadInput(format!("unknown unit {u}"))),
+        };
+        let scale = match args.next_token().map(str::to_lowercase).as_deref() {
+            None | Some("scale" | "yes") => true,
+            Some("keep" | "no") => false,
+            Some(o) => return Err(CommandError::BadInput(o.to_string())),
+        };
+        if new == old {
+            return Ok(format!("units already {}", new.abbreviation()));
+        }
+        let k = old.in_mm() / new.in_mm();
+        if scale {
+            let x = forma_geom::Xform::scale(forma_geom::Point3::ORIGIN, k);
+            let all: Vec<ObjectId> = ctx.doc.objects().map(|o| o.id).collect();
+            let mut t = ctx.doc.begin();
+            for id in all {
+                let g = t.doc().object(id).expect("listed").geometry.transformed(&x);
+                t.replace(id, g);
+            }
+            t.commit();
+            ctx.doc.dim_style.text_height *= k;
+            ctx.doc.absolute_tolerance *= k;
+        }
+        ctx.doc.units = new;
+        Ok(format!(
+            "units {} → {}{}",
+            old.abbreviation(),
+            new.abbreviation(),
+            if scale { " (model scaled)" } else { "" }
+        ))
+    }
+}
+
+simple_command!(
     Save,
     "Save",
     &["SaveAs"],
@@ -369,6 +425,20 @@ impl Command for IncrementalSave {
 #[cfg(test)]
 mod tests {
     use crate::Engine;
+
+    #[test]
+    fn units_change_scales_the_model() {
+        let mut e = Engine::new();
+        e.run_line("New cm").unwrap();
+        e.run_line("Line 0,0 100,0").unwrap();
+        e.run_line("Units m").unwrap();
+        assert_eq!(e.doc().units.abbreviation(), "m");
+        assert!((e.doc().objects().next().unwrap().geometry.length().unwrap() - 1.0).abs() < 1e-12);
+        e.run_line("Units mm keep").unwrap();
+        assert!((e.doc().objects().next().unwrap().geometry.length().unwrap() - 1.0).abs() < 1e-12);
+        assert!(e.run_line("Units parsecs").is_err());
+        assert!(e.run_line("Units").unwrap().starts_with("units mm"));
+    }
 
     #[test]
     fn incremental_save_numbers_copies() {

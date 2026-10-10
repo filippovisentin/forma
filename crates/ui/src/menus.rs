@@ -94,6 +94,7 @@ impl FormaApp {
                 item(ui, &mut act, "Save As…", "Ctrl+Shift+S", Act::SaveAs);
                 item(ui, &mut act, "Incremental Save", "", Act::Cmd("IncrementalSave"));
                 item(ui, &mut act, "Capture View to Image…", "", Act::Cmd("ViewCaptureToFile"));
+                item(ui, &mut act, "Units…", "", Act::Form(&crate::dialogs::UNITS));
                 item(
                     ui,
                     &mut act,
@@ -306,6 +307,10 @@ impl FormaApp {
                 ui.menu_button("Line", |ui| {
                     tool(ui, &mut act, "Single Line", K::Line);
                     tool(ui, &mut act, "Line Segments", K::Seq(&q::LINES));
+                    tool(ui, &mut act, "From Midpoint", K::Seq(&q::LINE_BOTH_SIDES));
+                    tool(ui, &mut act, "Vertical to CPlane", K::Seq(&q::LINE_VERTICAL));
+                    tool(ui, &mut act, "Perpendicular from Curve", K::Seq(&q::LINE_PERPENDICULAR));
+                    tool(ui, &mut act, "Angle Bisector", K::Seq(&q::LINE_BISECTOR));
                 });
                 tool(ui, &mut act, "Polyline", K::Polyline);
                 ui.menu_button("Free-Form", |ui| {

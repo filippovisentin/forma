@@ -171,7 +171,7 @@ simple_command!(
     Export,
     "Export",
     &["ExportSelected"],
-    "Export <file.3dm|.obj|.stl> — save only the selected objects: a Rhino file (with their layers), Wavefront OBJ (meshes by layer, curves as lines) or binary STL (meshes)"
+    "Export <file.3dm|.obj|.stl> — save only the selected objects: a Rhino file (with their layers), Wavefront OBJ with layer-colour materials, Y up (for renderers), or binary STL in millimetres (for 3D printing)"
 );
 impl Command for Export {
     impl_meta!(Export);
@@ -227,8 +227,23 @@ fn io_err(e: std::io::Error) -> CommandError {
 /// curves as polylines.
 fn export_obj(ctx: &Context, ids: &[ObjectId], path: &str) -> CommandResult {
     use std::fmt::Write as _;
-    let mut s = format!("# Forma export, units: {}\n", ctx.doc.units.abbreviation());
+    // Y up, like Rhino's default "map Z to Y" and what Blender, D5 Render, SketchUp
+    // and most renderers expect: (x, y, z) → (x, z, −y).
+    let up = |x: f64, y: f64, z: f64| (x, z, -y);
+    let mtl_path = std::path::Path::new(path).with_extension("mtl");
+    let mtl_name = mtl_path
+        .file_name()
+        .map_or("materials.mtl".to_string(), |n| {
+            n.to_string_lossy().into_owned()
+        });
+    let mut s = format!(
+        "# Forma export, units: {}, Y up\nmtllib {mtl_name}\n",
+        ctx.doc.units.abbreviation()
+    );
+    // One material per layer and display colour, named after the layer.
+    let mut materials: Vec<(String, [u8; 3])> = Vec::new();
     let mut base = 1usize;
+    let mut nbase = 1usize;
     let (mut meshes, mut curves) = (0, 0);
     for id in ids {
         let o = ctx.doc.object(*id).expect("selected");
@@ -236,18 +251,52 @@ fn export_obj(ctx: &Context, ids: &[ObjectId], path: &str) -> CommandResult {
             .doc
             .layer(o.layer)
             .name
+            .replace("::", "-")
             .replace(char::is_whitespace, "_");
+        let color = ctx.doc.display_color(o);
+        let mat = match materials
+            .iter()
+            .find(|(n, c)| *c == color && n.starts_with(&layer))
+        {
+            Some((n, _)) => n.clone(),
+            None => {
+                let taken = materials.iter().any(|(n, _)| *n == layer);
+                let name = if taken {
+                    format!("{layer}_{:02x}{:02x}{:02x}", color[0], color[1], color[2])
+                } else {
+                    layer.clone()
+                };
+                materials.push((name.clone(), color));
+                name
+            }
+        };
         match &o.geometry {
             Geometry::Mesh(m) => {
-                let _ = writeln!(s, "g {layer}_{}", id.0);
+                let _ = writeln!(s, "o {layer}_{}\nusemtl {mat}", id.0);
                 for p in &m.positions {
-                    let _ = writeln!(s, "v {} {} {}", p.x, p.y, p.z);
+                    let (x, y, z) = up(p.x, p.y, p.z);
+                    let _ = writeln!(s, "v {x} {y} {z}");
+                }
+                let normals = m.normals.len() == m.positions.len();
+                if normals {
+                    for n in &m.normals {
+                        let (x, y, z) = up(n.x, n.y, n.z);
+                        let _ = writeln!(s, "vn {x} {y} {z}");
+                    }
                 }
                 for t in &m.triangles {
                     let [a, b, c] = t.map(|i| i as usize + base);
-                    let _ = writeln!(s, "f {a} {b} {c}");
+                    if normals {
+                        let [na, nb, nc] = t.map(|i| i as usize + nbase);
+                        let _ = writeln!(s, "f {a}//{na} {b}//{nb} {c}//{nc}");
+                    } else {
+                        let _ = writeln!(s, "f {a} {b} {c}");
+                    }
                 }
                 base += m.positions.len();
+                if normals {
+                    nbase += m.normals.len();
+                }
                 meshes += 1;
             }
             g if g.is_curve() => {
@@ -255,9 +304,10 @@ fn export_obj(ctx: &Context, ids: &[ObjectId], path: &str) -> CommandResult {
                 if pts.len() < 2 {
                     continue;
                 }
-                let _ = writeln!(s, "g {layer}_{}", id.0);
+                let _ = writeln!(s, "o {layer}_{}\nusemtl {mat}", id.0);
                 for p in &pts {
-                    let _ = writeln!(s, "v {} {} {}", p.x, p.y, p.z);
+                    let (x, y, z) = up(p.x, p.y, p.z);
+                    let _ = writeln!(s, "v {x} {y} {z}");
                 }
                 s.push('l');
                 for i in 0..pts.len() {
@@ -275,9 +325,22 @@ fn export_obj(ctx: &Context, ids: &[ObjectId], path: &str) -> CommandResult {
             "Export: nothing to write as OBJ".into(),
         ));
     }
+    let mut mtl = String::from("# Forma materials (layer colours)\n");
+    for (name, [r, g, b]) in &materials {
+        let f = |c: &u8| f64::from(*c) / 255.0;
+        let _ = writeln!(
+            mtl,
+            "newmtl {name}\nKa 0 0 0\nKd {:.4} {:.4} {:.4}\nKs 0 0 0\nd 1\nillum 1\n",
+            f(r),
+            f(g),
+            f(b)
+        );
+    }
     std::fs::write(path, s).map_err(io_err)?;
+    std::fs::write(&mtl_path, mtl).map_err(io_err)?;
     Ok(format!(
-        "exported {meshes} mesh(es) and {curves} curve(s) to {path}"
+        "exported {meshes} mesh(es) and {curves} curve(s) to {path} (+ {mtl_name}, {} material(s), Y up)",
+        materials.len()
     ))
 }
 
@@ -300,6 +363,8 @@ fn export_stl(ctx: &Context, ids: &[ObjectId], path: &str) -> CommandResult {
             "Export: STL needs meshes or solids".into(),
         ));
     }
+    // Slicers read STL in millimetres: convert from the document units.
+    let k = ctx.doc.units.in_mm();
     let mut b: Vec<u8> = Vec::with_capacity(84 + tris.len() * 50);
     let mut header = [b' '; 80];
     let tag = b"Forma STL";
@@ -318,13 +383,16 @@ fn export_stl(ctx: &Context, ids: &[ObjectId], path: &str) -> CommandResult {
         }
         for pt in [p, q, r] {
             for v in [pt.x, pt.y, pt.z] {
-                b.extend_from_slice(&f(v));
+                b.extend_from_slice(&f(v * k));
             }
         }
         b.extend_from_slice(&[0, 0]);
     }
     std::fs::write(path, b).map_err(io_err)?;
-    Ok(format!("exported {} triangle(s) to {path}", tris.len()))
+    Ok(format!(
+        "exported {} triangle(s) to {path} (millimetres)",
+        tris.len()
+    ))
 }
 
 #[cfg(test)]
@@ -429,6 +497,25 @@ mod tests {
     }
 
     #[test]
+    fn stl_is_written_in_millimetres() {
+        let dir = std::env::temp_dir().join(format!("forma-stlmm-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut e = Engine::new();
+        e.run_line("New cm").unwrap();
+        e.run_line("Box 0,0 2,2 3").unwrap();
+        e.run_line("SelAll").unwrap();
+        let stl = dir.join("pezzo.stl");
+        e.run_line(&format!("Export {}", stl.display())).unwrap();
+        let b = std::fs::read(&stl).unwrap();
+        let max_z = (0..12)
+            .flat_map(|t| (0..3).map(move |v| 84 + t * 50 + 12 + v * 12 + 8))
+            .map(|o| f32::from_le_bytes([b[o], b[o + 1], b[o + 2], b[o + 3]]))
+            .fold(f32::MIN, f32::max);
+        assert!((max_z - 30.0).abs() < 1e-4, "{max_z}");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
     fn export_obj_and_stl() {
         let dir = std::env::temp_dir().join(format!("forma-objstl-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -442,6 +529,16 @@ mod tests {
         let text = std::fs::read_to_string(&obj).unwrap();
         assert_eq!(text.lines().filter(|l| l.starts_with("f ")).count(), 12);
         assert!(text.lines().any(|l| l.starts_with("l ")));
+        assert!(text.contains("mtllib a.mtl") && text.contains("usemtl Default"));
+        // Y up: the box top (z = 10) is at y = 10 in the file.
+        assert!(text
+            .lines()
+            .any(|l| l.starts_with("v ") && l.split(' ').nth(2) == Some("10")));
+        let mtl = std::fs::read_to_string(dir.join("a.mtl")).unwrap();
+        assert!(
+            mtl.contains("newmtl Default") && mtl.contains("Kd "),
+            "{mtl}"
+        );
         let stl = dir.join("a.stl");
         e.run_line(&format!("Export {}", stl.display())).unwrap();
         assert_eq!(std::fs::metadata(&stl).unwrap().len(), 84 + 12 * 50);

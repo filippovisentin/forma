@@ -350,6 +350,17 @@ pub enum LengthUnit {
 }
 
 impl LengthUnit {
+    /// Millimetres in one unit.
+    pub fn in_mm(self) -> f64 {
+        match self {
+            LengthUnit::Millimeters => 1.0,
+            LengthUnit::Centimeters => 10.0,
+            LengthUnit::Meters => 1000.0,
+            LengthUnit::Inches => 25.4,
+            LengthUnit::Feet => 304.8,
+        }
+    }
+
     pub fn abbreviation(self) -> &'static str {
         match self {
             LengthUnit::Millimeters => "mm",

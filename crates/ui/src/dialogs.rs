@@ -229,6 +229,18 @@ pub(crate) static SAVE_LAYER_STATE: Form = Form {
     needs_selection: false,
 };
 
+pub(crate) static UNITS: Form = Form {
+    title: "Units",
+    help: "Model units (mm, cm, m, in, ft). With \"Scale the model\" sizes stay real (100 cm become 1 m).",
+    fields: &[Field::Text("Units"), Field::Check("Scale the model")],
+    init: |e| vec![e.doc().units.abbreviation().to_string(), "true".into()],
+    emit: |v| {
+        let keep = if v[1] == "true" { "scale" } else { "keep" };
+        Ok(format!("Units {} {keep}", need(&v[0], "units")?))
+    },
+    needs_selection: false,
+};
+
 pub(crate) static SEL_LAYER: Form = Form {
     title: "Select by layer",
     help: "Selects every visible object on the layer.",

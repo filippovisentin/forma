@@ -1757,8 +1757,89 @@ pub static REDUCE_MESH: Seq = Seq {
     preview: none,
 };
 
+pub static LINE_BOTH_SIDES: Seq = Seq {
+    name: "LineBothSides",
+    tip: "LineBothSides — line from its midpoint",
+    sel: false,
+    steps: &[In::Point("Middle of line"), In::Point("End of line")],
+    emit: |v, _| format!("LineBothSides {} {}", fmt_p(v[0].p()), fmt_p(v[1].p())),
+    preview: |v| match v.vals.len() {
+        1 => vec![[v.p(0) - (v.cur - v.p(0)), v.cur]],
+        _ => Vec::new(),
+    },
+};
+
+pub static LINE_VERTICAL: Seq = Seq {
+    name: "LineVertical",
+    tip: "LineVertical — line perpendicular to the construction plane",
+    sel: false,
+    steps: &[
+        In::Point("Start of line"),
+        In::Height("End of line (height)", 0),
+    ],
+    emit: |v, pl| {
+        format!(
+            "LineVertical {} {} {}",
+            fmt_p(v[0].p()),
+            round(v[1].n()),
+            n(pl)
+        )
+    },
+    preview: |v| match v.vals.len() {
+        1 => vec![[v.p(0), v.cur]],
+        _ => Vec::new(),
+    },
+};
+
+pub static LINE_PERPENDICULAR: Seq = Seq {
+    name: "LinePerpendicular",
+    tip: "LinePerpendicular — line at a right angle from a curve",
+    sel: false,
+    steps: &[In::CurveNear("Start on curve"), In::Point("End of line")],
+    emit: |v, pl| {
+        format!(
+            "LinePerpendicular #{} {} {} {}",
+            v[0].o(),
+            fmt_p(v[0].p()),
+            fmt_p(v[1].p()),
+            n(pl)
+        )
+    },
+    preview: band,
+};
+
+pub static LINE_BISECTOR: Seq = Seq {
+    name: "LineBisector",
+    tip: "LineBisector — line halving an angle",
+    sel: false,
+    steps: &[
+        In::Point("Vertex of the angle"),
+        In::Point("Point on the first side"),
+        In::Point("Point on the second side"),
+        In::Dist("Length", 0),
+    ],
+    emit: |v, _| {
+        format!(
+            "LineBisector {} {} {} {}",
+            fmt_p(v[0].p()),
+            fmt_p(v[1].p()),
+            fmt_p(v[2].p()),
+            round(v[3].n())
+        )
+    },
+    preview: |v| match v.vals.len() {
+        1 => vec![[v.p(0), v.cur]],
+        2 => vec![[v.p(0), v.p(1)], [v.p(0), v.cur]],
+        _ => vec![[v.p(0), v.p(1)], [v.p(0), v.p(2)]],
+    },
+};
+
 /// Every sequence tool (for typed names, help and tests).
 pub static ALL: &[&Seq] = &[
+    &LINE_BOTH_SIDES,
+    &LINE_VERTICAL,
+    &LINE_PERPENDICULAR,
+    &LINE_BISECTOR,
     &REDUCE_MESH,
     &DIM_ROTATED,
     &CLIPPING_PLANE,
