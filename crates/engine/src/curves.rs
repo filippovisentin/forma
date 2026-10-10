@@ -189,7 +189,7 @@ simple_command!(
     Fillet,
     "Fillet",
     &["F"],
-    "Fillet <radius> <pick line 1> <pick line 2> [normal] — round the corner between two lines"
+    "Fillet <radius> <pick curve 1> <pick curve 2> [normal] — round the corner between two curves (lines, arcs, polylines), trimming them"
 );
 impl Command for Fillet {
     impl_meta!(Fillet);
@@ -198,18 +198,18 @@ impl Command for Fillet {
         let p1 = args.point("first line", None)?;
         let p2 = args.point("second line", None)?;
         let n = args.optional_vector().unwrap_or(Vec3::Z);
-        let (id1, _) = nearest(ctx, p1)?;
-        let (id2, _) = nearest(ctx, p2)?;
+        let (id1, c1) = nearest(ctx, p1)?;
+        let (id2, c2) = nearest(ctx, p2)?;
         if id1 == id2 {
-            return Err(CommandError::Invalid("pick two different lines".into()));
+            return Err(CommandError::Invalid("pick two different curves".into()));
         }
         let line = |id: ObjectId| match &ctx.doc.object(id).expect("exists").geometry {
-            Geometry::Line(l) => Ok((l.from, l.to)),
-            _ => Err(CommandError::Invalid(
-                "Fillet works on lines; use FilletCorners for polylines".into(),
-            )),
+            Geometry::Line(l) => Some((l.from, l.to)),
+            _ => None,
         };
-        let (a, b) = (line(id1)?, line(id2)?);
+        let (Some(a), Some(b)) = (line(id1), line(id2)) else {
+            return fillet_curves(ctx, r, (id1, c1, p1), (id2, c2, p2), n);
+        };
         let o1 = ctx.doc.object(id1).expect("exists").clone();
         let plane = Plane::from_normal(a.0, n);
         let (la, lb, arc) = geom::fillet_lines(a, b, r, &plane).map_err(bad)?;
@@ -222,6 +222,62 @@ impl Command for Fillet {
         t.commit();
         Ok("filleted".into())
     }
+}
+
+/// Fillet between any two line / arc chains: the tangent circle on the side of
+/// the picks, both curves trimmed back to the tangent points.
+fn fillet_curves(
+    ctx: &mut Context,
+    r: f64,
+    (id1, c1, p1): (ObjectId, Chain, Point3),
+    (id2, c2, p2): (ObjectId, Chain, Point3),
+    n: Vec3,
+) -> CommandResult {
+    let tol = ctx.tolerance.absolute;
+    if r <= tol {
+        return Err(CommandError::Invalid(
+            "a radius of 0 needs two lines (use Trim / Extend for curves)".into(),
+        ));
+    }
+    let g1 = ctx.doc.object(id1).expect("exists").geometry.clone();
+    let plane = plane_of(&g1, p1, Some(n));
+    let circle = geom::circle_tangent_tangent(&c1, p1, &c2, p2, r, &plane, tol)
+        .ok_or_else(|| CommandError::Invalid("no fillet of that radius fits there".into()))?;
+    let center = circle.center();
+    // Keep each curve on the side of its pick, up to the tangent point.
+    let keep = |c: &Chain, pick: Point3| -> Result<(Chain, Point3), CommandError> {
+        let (s, _) = c.closest(center);
+        let tp = c.point_at(s);
+        let (sp, _) = c.closest(pick);
+        let n = c.segs.len() as f64;
+        let part = if sp < s {
+            c.sub(0.0, s, tol)
+        } else {
+            c.sub(s, n, tol)
+        };
+        if part.segs.is_empty() {
+            return Err(CommandError::Invalid(
+                "the fillet would remove a whole curve".into(),
+            ));
+        }
+        Ok((part, tp))
+    };
+    let (k1, t1) = keep(&c1, p1)?;
+    let (k2, t2) = keep(&c2, p2)?;
+    // The short way round between the two tangent points.
+    let mut arc = geom::CircleArc::from_center_start_end(center, t1, t2, plane.z)
+        .ok_or_else(|| CommandError::Invalid("degenerate fillet".into()))?;
+    if arc.sweep > std::f64::consts::PI {
+        arc = geom::CircleArc::from_center_start_end(center, t2, t1, plane.z)
+            .ok_or_else(|| CommandError::Invalid("degenerate fillet".into()))?;
+    }
+    let o1 = ctx.doc.object(id1).expect("exists").clone();
+    let mut t = ctx.doc.begin();
+    t.replace(id1, geometry(k1)?);
+    t.replace(id2, geometry(k2)?);
+    t.add_like(Geometry::Arc(arc), &o1);
+    t.commit();
+    Ok("filleted".into())
 }
 
 simple_command!(
@@ -547,6 +603,34 @@ mod tests {
     use crate::Engine;
     use forma_doc::Geometry;
     use forma_geom::Point3;
+
+    #[test]
+    fn fillet_line_and_circle_arc() {
+        // A line and a circle above it: fillet radius 20 on the right side.
+        let mut f = Engine::new();
+        f.run_line("Line -100,0 100,0").unwrap();
+        f.run_line("Circle 0,60 30").unwrap();
+        f.run_line("Fillet 20 60,0 25,45").unwrap();
+        assert_eq!(f.doc().len(), 3);
+        let arc = f.doc().objects().last().unwrap();
+        let Geometry::Arc(a) = &arc.geometry else {
+            panic!("{:?}", arc.geometry.kind())
+        };
+        assert!((a.radius - 20.0).abs() < 1e-6);
+        assert!(
+            a.center()
+                .distance_to(forma_geom::Point3::new(30.0, 20.0, 0.0))
+                < 1e-6,
+            "{:?}",
+            a.center()
+        );
+        // The line keeps its right part, starting where the fillet touches it.
+        let Geometry::Line(l) = &f.doc().objects().next().unwrap().geometry else {
+            panic!()
+        };
+        assert!((l.from.x - a.center().x).abs() < 1e-6 || (l.to.x - a.center().x).abs() < 1e-6);
+        assert!(l.from.x.max(l.to.x) > 99.0);
+    }
 
     #[test]
     fn split_with_cutters_and_with_each_other() {

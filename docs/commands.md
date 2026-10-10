@@ -12,7 +12,7 @@ is in `Help` and `forma-cli commands`.
 
 ## Summary
 
-279 Rhino commands: **174 ✓**, **58 partial**, **29 ✗**, **18 needs kernel**.
+279 Rhino commands: **175 ✓**, **57 partial**, **29 ✗**, **18 needs kernel**.
 
 ## Drawing: points and lines
 
@@ -56,7 +56,7 @@ is in `Help` and `forma-cli commands`.
 |---|---|---|
 | Offset | ✓ | `Offset` planar curves (arcs kept exact) |
 | OffsetCrvOnSrf | needs kernel |  |
-| Fillet | partial | `Fillet` between two lines / polyline segments; arcs and NURBS not yet |
+| Fillet | ✓ | `Fillet <radius> <pick> <pick>` between lines, arcs, polylines and polycurves (trims both); radius 0 for lines |
 | FilletCorners | ✓ | `FilletCorners` (FC) |
 | Chamfer | partial | `Chamfer` between two lines |
 | BlendCrv | partial | `BlendCrv` tangency or curvature (curvature exact at lines and arcs) |
