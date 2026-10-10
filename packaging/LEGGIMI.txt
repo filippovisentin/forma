@@ -116,3 +116,11 @@ Limiti di questa versione
     (nome-forma.3dm): le superfici importate vengono salvate come mesh.
 
 forma-cli.exe: versione a riga di comando (info, render in PNG, script).
+
+Documentazione, tutorial e aggiornamenti
+  https://github.com/filippovisentin/forma  (README, docs/QUICKSTART.it.md,
+  docs/INSTALL.it.md). Problemi e richieste: scheda "Issues" del progetto.
+
+Forma è un progetto indipendente, non affiliato a Robert McNeel & Associates.
+Rhino e Rhinoceros sono marchi registrati di Robert McNeel & Associates.
+Licenza MIT o Apache-2.0 (vedi LICENSE-MIT, LICENSE-APACHE, ATTRIBUTION.md).

@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Forma — 3D modeller for interior design</title>
+<meta name="description" content="Forma is a free, personal, Rhino-style 3D modeller for interior design, written in Rust and built with AI agents. Windows 10/11.">
+<meta property="og:title" content="Forma — 3D modeller for interior design">
+<meta property="og:description" content="A free, Rhino-style 3D modeller for interior design, written in Rust and built with AI agents.">
+<meta property="og:image" content="images/overview.jpg">
+<meta name="color-scheme" content="light">
+<style>
+  :root {
+    --bg: #f7f5f2;
+    --surface: #ffffff;
+    --ink: #1f1d1a;
+    --muted: #5f5a53;
+    --line: #e4dfd8;
+    --accent: #b34f2f;
+    --accent-ink: #ffffff;
+    --accent-soft: #f6e6df;
+    --note: #fff8e6;
+    --note-line: #ecd9a6;
+    --radius: 10px;
+    --max: 1080px;
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 16px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
+  a { color: var(--accent); }
+  img { max-width: 100%; height: auto; display: block; }
+  .wrap { max-width: var(--max); margin: 0 auto; padding: 0 16px; }
+
+  /* language switch: show only the active language */
+  html[lang="en"] [lang="it"], html[lang="it"] [lang="en"] { display: none !important; }
+
+  header.top { border-bottom: 1px solid var(--line); background: var(--surface); }
+  header.top .wrap { display: flex; align-items: center; gap: 20px; min-height: 60px; flex-wrap: wrap; }
+  .brand { font-weight: 700; font-size: 20px; letter-spacing: -0.01em; color: var(--ink); text-decoration: none; display: flex; align-items: center; gap: 10px; }
+  .brand svg { flex: none; }
+  nav.links { display: flex; gap: 18px; flex-wrap: wrap; margin-left: auto; font-size: 15px; }
+  nav.links a { color: var(--muted); text-decoration: none; }
+  nav.links a:hover { color: var(--ink); }
+  .lang { display: inline-flex; border: 1px solid var(--line); border-radius: 999px; overflow: hidden; }
+  .lang button { border: 0; background: transparent; padding: 4px 12px; font: inherit; font-size: 13px; color: var(--muted); cursor: pointer; }
+  .lang button[aria-pressed="true"] { background: var(--ink); color: #fff; }
+
+  .hero { padding: 56px 0 32px; }
+  .hero h1 { font-size: clamp(30px, 5vw, 46px); line-height: 1.12; letter-spacing: -0.02em; margin: 0 0 14px; max-width: 18em; }
+  .hero p.lead { font-size: 18px; color: var(--muted); max-width: 40em; margin: 0 0 26px; }
+  .cta { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+  .btn { display: inline-flex; align-items: center; gap: 10px; padding: 12px 20px; border-radius: var(--radius); font-weight: 600; text-decoration: none; border: 1px solid transparent; }
+  .btn.primary { background: var(--accent); color: var(--accent-ink); }
+  .btn.primary:hover { filter: brightness(1.06); }
+  .btn.ghost { border-color: var(--line); color: var(--ink); background: var(--surface); }
+  .btn.ghost:hover { border-color: #cfc7bd; }
+  .fine { color: var(--muted); font-size: 14px; margin-top: 12px; }
+  .shot { margin-top: 36px; border-radius: var(--radius); overflow: hidden; border: 1px solid var(--line); box-shadow: 0 10px 30px rgba(40, 30, 20, 0.08); background: var(--surface); }
+
+  section { padding: 44px 0; }
+  section h2 { font-size: 26px; letter-spacing: -0.01em; margin: 0 0 18px; }
+  .status { background: var(--note); border: 1px solid var(--note-line); border-radius: var(--radius); padding: 18px 20px; }
+  .status p { margin: 0; }
+  .status p + p { margin-top: 8px; }
+
+  .grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px 20px; }
+  .card h3 { margin: 0 0 6px; font-size: 17px; }
+  .card p { margin: 0; color: var(--muted); font-size: 15px; }
+  code { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 0.92em; background: var(--accent-soft); padding: 1px 5px; border-radius: 4px; color: var(--ink); }
+
+  .gallery { display: grid; gap: 18px; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+  figure { margin: 0; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+  figcaption { padding: 10px 14px; font-size: 14px; color: var(--muted); }
+
+  ol.steps { margin: 0; padding-left: 22px; }
+  ol.steps li { margin-bottom: 8px; }
+
+  @media (max-width: 600px) {
+    header.top .wrap { gap: 8px 16px; padding-top: 10px; padding-bottom: 10px; }
+    nav.links { order: 3; width: 100%; margin-left: 0; gap: 16px; }
+    .lang { margin-left: auto; }
+    .hero { padding-top: 36px; }
+  }
+
+  footer { border-top: 1px solid var(--line); padding: 28px 0 40px; color: var(--muted); font-size: 14px; }
+  footer p { margin: 0 0 8px; }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="#">
+      <svg width="26" height="26" viewBox="0 0 26 26" aria-hidden="true">
+        <path d="M4 20 L13 24 L22 20 L22 9 L13 5 L4 9 Z" fill="none" stroke="#1f1d1a" stroke-width="2" stroke-linejoin="round"/>
+        <path d="M4 9 L13 13 L22 9 M13 13 L13 24" fill="none" stroke="#b34f2f" stroke-width="2" stroke-linejoin="round"/>
+      </svg>
+      Forma
+    </a>
+    <nav class="links" aria-label="Sections">
+      <a href="#download"><span lang="en">Download</span><span lang="it">Download</span></a>
+      <a href="#features"><span lang="en">Features</span><span lang="it">Funzioni</span></a>
+      <a href="#start"><span lang="en">Get started</span><span lang="it">Iniziare</span></a>
+      <a href="https://github.com/filippovisentin/forma">GitHub</a>
+    </nav>
+    <div class="lang" role="group" aria-label="Language">
+      <button type="button" data-lang="en" aria-pressed="true">EN</button>
+      <button type="button" data-lang="it" aria-pressed="false">IT</button>
+    </div>
+  </div>
+</header>
+
+<main>
+  <div class="wrap">
+    <div class="hero" id="download">
+      <h1>
+        <span lang="en">A Rhino-style 3D modeller for interior design.</span>
+        <span lang="it">Un modellatore 3D in stile Rhino per l'interior design.</span>
+      </h1>
+      <p class="lead">
+        <span lang="en">Type <code>Box</code>, <code>Offset</code> or <code>Extrude</code>, snap to what you see, push and pull faces with the gumball, organise layers and colours, and save <code>.3dm</code> files. Free, open source, written in Rust and built with AI agents.</span>
+        <span lang="it">Scrivi <code>Box</code>, <code>Offset</code> o <code>Extrude</code>, aggancia gli oggetti con gli osnap, spingi e tira le facce col gumball, organizza layer e colori e salva in <code>.3dm</code>. Gratuito, open source, scritto in Rust e costruito con agenti AI.</span>
+      </p>
+      <div class="cta">
+        <a class="btn primary" href="https://github.com/filippovisentin/forma/releases/latest">
+          <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><path d="M9 2v10M4.5 7.5 9 12l4.5-4.5M3 15h12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <span lang="en">Download for Windows</span><span lang="it">Scarica per Windows</span>
+        </a>
+        <a class="btn ghost" href="https://github.com/filippovisentin/forma">
+          <span lang="en">Source code</span><span lang="it">Codice sorgente</span>
+        </a>
+      </div>
+      <p class="fine">
+        <span lang="en">Latest release · <strong>Forma-windows.zip</strong> · Windows 10/11, 64-bit · no installer · MIT or Apache-2.0.
+          Windows may show “Windows protected your PC”: click <em>More info → Run anyway</em> (the app is not code-signed).
+          <a href="https://github.com/filippovisentin/forma/blob/main/docs/INSTALL.md">Install guide</a> ·
+          <a href="https://github.com/filippovisentin/forma/releases">all releases</a></span>
+        <span lang="it">Ultima release · <strong>Forma-windows.zip</strong> · Windows 10/11 a 64 bit · nessuna installazione · MIT o Apache-2.0.
+          Windows può mostrare “PC protetto da Windows”: clic su <em>Ulteriori informazioni → Esegui comunque</em> (l'app non è firmata).
+          <a href="https://github.com/filippovisentin/forma/blob/main/docs/INSTALL.it.md">Guida all'installazione</a> ·
+          <a href="https://github.com/filippovisentin/forma/releases">tutte le release</a></span>
+      </p>
+      <div class="shot">
+        <img src="images/overview.jpg" width="1400" height="875"
+             alt="Forma with four viewports showing a small room: walls, floor, a table with four chairs, and the layers panel">
+      </div>
+    </div>
+  </div>
+
+  <section>
+    <div class="wrap">
+      <div class="status">
+        <p><strong><span lang="en">Honest status (v0.6.0)</span><span lang="it">Lo stato reale (v0.6.0)</span></strong></p>
+        <p>
+          <span lang="en">Forma works for drawing rooms, furniture blocks and curves, and for exchanging <code>.3dm</code> files. Solids and surfaces are display meshes for now: exact solids, booleans and edge fillets arrive with the OpenCascade kernel, which is in progress. It is a personal project with one main user, so expect rough edges and keep backups.</span>
+          <span lang="it">Forma funziona per disegnare stanze, blocchi d'arredo e curve, e per scambiare file <code>.3dm</code>. Per ora solidi e superfici sono mesh di visualizzazione: solidi esatti, booleane e raccordi degli spigoli arriveranno con il kernel OpenCascade, in lavorazione. È un progetto personale con un utente principale: aspettati qualche spigolo e tieni dei backup.</span>
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section id="features">
+    <div class="wrap">
+      <h2><span lang="en">What it does</span><span lang="it">Cosa fa</span></h2>
+      <div class="grid">
+        <div class="card">
+          <h3><span lang="en">Command line first</span><span lang="it">Prima la riga di comando</span></h3>
+          <p><span lang="en">About 90 commands with familiar names and short aliases, autocomplete, history and clickable options.</span><span lang="it">Circa 90 comandi con nomi familiari e alias brevi, autocompletamento, storico e opzioni cliccabili.</span></p>
+        </div>
+        <div class="card">
+          <h3><span lang="en">Precise drawing</span><span lang="it">Disegno preciso</span></h3>
+          <p><span lang="en">11 object snaps, grid snap, Ortho, SmartTrack, typed coordinates and live measurements in centimetres.</span><span lang="it">11 osnap, snap alla griglia, Ortho, SmartTrack, coordinate da tastiera e misure in tempo reale in centimetri.</span></p>
+        </div>
+        <div class="card">
+          <h3><span lang="en">Gumball and push / pull</span><span lang="it">Gumball e push / pull</span></h3>
+          <p><span lang="en">Move, rotate and extrude with the gumball; Ctrl+Shift+click a face to push or pull it.</span><span lang="it">Sposta, ruota ed estrudi col gumball; Ctrl+Maiusc+clic su una faccia per spingerla o tirarla.</span></p>
+        </div>
+        <div class="card">
+          <h3><span lang="en">Curve tools</span><span lang="it">Strumenti per le curve</span></h3>
+          <p><span lang="en">Offset, Trim, Split, Extend, Fillet, Chamfer, Join, NURBS curves, arrays.</span><span lang="it">Offset, Trim, Split, Extend, Fillet, Chamfer, Join, curve NURBS, serie.</span></p>
+        </div>
+        <div class="card">
+          <h3><span lang="en">Layers and colours</span><span lang="it">Layer e colori</span></h3>
+          <p><span lang="en">Nested layers with colour, visibility and lock; per-object colours; groups, hide, isolate.</span><span lang="it">Layer annidati con colore, visibilità e blocco; colori per oggetto; gruppi, nascondi, isola.</span></p>
+        </div>
+        <div class="card">
+          <h3><span lang="en"><code>.3dm</code> files</span><span lang="it">File <code>.3dm</code></span></h3>
+          <p><span lang="en">Open and save Rhino files through openNURBS. Curves are saved exactly; solids as meshes.</span><span lang="it">Apre e salva file Rhino tramite openNURBS. Le curve sono salvate esatte, i solidi come mesh.</span></p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <h2><span lang="en">Screenshots</span><span lang="it">Immagini</span></h2>
+      <div class="gallery">
+        <figure>
+          <img src="images/pushpull.jpg" width="1400" height="875" loading="lazy" alt="A wall face selected for push / pull, with the live label Pull 109.00 cm">
+          <figcaption><span lang="en">Push / pull a face, with the distance shown live.</span><span lang="it">Push / pull di una faccia, con la distanza in tempo reale.</span></figcaption>
+        </figure>
+        <figure>
+          <img src="images/gumball.jpg" width="1400" height="875" loading="lazy" alt="The table selected with the gumball and the Properties panel">
+          <figcaption><span lang="en">Gumball and Properties panel.</span><span lang="it">Gumball e pannello Properties.</span></figcaption>
+        </figure>
+        <figure>
+          <img src="images/curves.jpg" width="1400" height="875" loading="lazy" alt="Top view with an Offset preview of a rounded rectangle">
+          <figcaption><span lang="en">Offset in the Top view, with clickable options.</span><span lang="it">Offset nella vista Top, con opzioni cliccabili.</span></figcaption>
+        </figure>
+        <figure>
+          <img src="images/layers.jpg" width="902" height="372" loading="lazy" alt="Perspective view of the room next to the Layers panel with coloured layers">
+          <figcaption><span lang="en">Layers with colours, visibility and lock.</span><span lang="it">Layer con colori, visibilità e blocco.</span></figcaption>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <section id="start">
+    <div class="wrap">
+      <h2><span lang="en">Get started</span><span lang="it">Per iniziare</span></h2>
+      <div class="grid">
+        <div class="card">
+          <h3>1 · <span lang="en">Download</span><span lang="it">Scarica</span></h3>
+          <p><span lang="en">Get <strong>Forma-windows.zip</strong> from the latest release, extract it, double-click <code>forma.exe</code>.</span><span lang="it">Scarica <strong>Forma-windows.zip</strong> dall'ultima release, estrailo e fai doppio clic su <code>forma.exe</code>.</span></p>
+        </div>
+        <div class="card">
+          <h3>2 · <span lang="en">Model a room</span><span lang="it">Modella una stanza</span></h3>
+          <p><span lang="en">Follow the <a href="https://github.com/filippovisentin/forma/blob/main/docs/QUICKSTART.md">10-minute tutorial</a>: walls, floor, push / pull, gumball, layers.</span><span lang="it">Segui il <a href="https://github.com/filippovisentin/forma/blob/main/docs/QUICKSTART.it.md">tutorial di 10 minuti</a>: muri, pavimento, push / pull, gumball, layer.</span></p>
+        </div>
+        <div class="card">
+          <h3>3 · <span lang="en">Save as .3dm</span><span lang="it">Salva in .3dm</span></h3>
+          <p><span lang="en">Ctrl+S writes a standard <code>.3dm</code> file with your layers, colours and units in centimetres.</span><span lang="it">Ctrl+S scrive un file <code>.3dm</code> standard con layer, colori e unità in centimetri.</span></p>
+        </div>
+      </div>
+      <p class="fine">
+        <span lang="en">More: <a href="https://github.com/filippovisentin/forma#readme">README</a> ·
+          <a href="https://github.com/filippovisentin/forma/blob/main/CHANGELOG.md">changelog</a> ·
+          <a href="https://github.com/filippovisentin/forma/blob/main/ROADMAP.md">roadmap</a> ·
+          <a href="https://github.com/filippovisentin/forma/issues">report a problem</a></span>
+        <span lang="it">Altro: <a href="https://github.com/filippovisentin/forma#in-italiano">README in italiano</a> ·
+          <a href="https://github.com/filippovisentin/forma/blob/main/CHANGELOG.md">changelog</a> ·
+          <a href="https://github.com/filippovisentin/forma/blob/main/ROADMAP.md">roadmap</a> ·
+          <a href="https://github.com/filippovisentin/forma/issues">segnala un problema</a></span>
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <h2><span lang="en">How it is made</span><span lang="it">Come è fatto</span></h2>
+      <p>
+        <span lang="en">Forma is a personal project by Filippo Antonio Visentin, an interior design student at the Politecnico di Milano. Almost all of the code is written by AI coding agents, with Filippo as architect, reviewer and user. The agents work under written rules (<a href="https://github.com/filippovisentin/forma/blob/main/CLAUDE.md">CLAUDE.md</a>): every action is a command, every command has tests, and nothing ships until the CI gate is green on Linux and Windows.</span>
+        <span lang="it">Forma è un progetto personale di Filippo Antonio Visentin, studente di Interior Design al Politecnico di Milano. Quasi tutto il codice è scritto da agenti AI, con Filippo come architetto, revisore e utente. Gli agenti seguono regole scritte (<a href="https://github.com/filippovisentin/forma/blob/main/CLAUDE.md">CLAUDE.md</a>): ogni azione è un comando, ogni comando ha i suoi test e nulla esce finché i controlli automatici non sono verdi su Linux e Windows.</span>
+      </p>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <p>
+      <span lang="en">Forma is an independent project and is not affiliated with, endorsed by or sponsored by Robert McNeel &amp; Associates. Rhino and Rhinoceros are registered trademarks of Robert McNeel &amp; Associates. <code>.3dm</code> support uses openNURBS under its own licence.</span>
+      <span lang="it">Forma è un progetto indipendente, non affiliato, approvato o sponsorizzato da Robert McNeel &amp; Associates. Rhino e Rhinoceros sono marchi registrati di Robert McNeel &amp; Associates. Il supporto <code>.3dm</code> usa openNURBS secondo la sua licenza.</span>
+    </p>
+    <p>© 2026 Filippo Antonio Visentin · MIT / Apache-2.0 ·
+      <span lang="en">provided “as is”, without warranty.</span><span lang="it">fornito “così com'è”, senza garanzie.</span></p>
+  </div>
+</footer>
+
+<script>
+  (function () {
+    var root = document.documentElement;
+    var buttons = document.querySelectorAll('.lang button');
+    function setLang(lang) {
+      root.lang = lang;
+      for (var i = 0; i < buttons.length; i++) {
+        buttons[i].setAttribute('aria-pressed', String(buttons[i].getAttribute('data-lang') === lang));
+      }
+      try { localStorage.setItem('forma-lang', lang); } catch (e) {}
+    }
+    var saved = null;
+    try { saved = localStorage.getItem('forma-lang'); } catch (e) {}
+    var hash = (location.hash || '').toLowerCase();
+    var initial = hash === '#it' ? 'it' : hash === '#en' ? 'en'
+      : saved || ((navigator.language || '').toLowerCase().indexOf('it') === 0 ? 'it' : 'en');
+    setLang(initial);
+    for (var i = 0; i < buttons.length; i++) {
+      buttons[i].addEventListener('click', function () { setLang(this.getAttribute('data-lang')); });
+    }
+  })();
+</script>
+</body>
+</html>

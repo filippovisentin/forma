@@ -1,0 +1,47 @@
+# Sample room used for the screenshots in docs/images (units: cm).
+# Run:  forma-cli run --file soggiorno.txt   then open soggiorno.3dm in Forma or Rhino.
+New cm
+Layer Pavimento
+LayerColor 196,178,150 Pavimento
+Box -15,0,-10 600,415,-10 10
+Layer Muri
+LayerColor 200,80,60 Muri
+Box 0,400 220,415 280
+Box 380,400 600,415 280
+Box 220,400 380,415 90
+Box 220,400,230 380,415,230 50
+Box -15,0 0,60 280
+Box -15,150 0,415 280
+Box -15,60,210 0,150,210 70
+Layer Arredi
+LayerColor 150,105,70 Arredi
+Box 200,150,72 380,250,72 4
+Cylinder 215,165 3 72
+Cylinder 365,165 3 72
+Cylinder 215,235 3 72
+Cylinder 365,235 3 72
+Box 230,100,45 275,145,45 4
+Box 230,100,49 275,104,49 45
+Box 305,100,45 350,145,45 4
+Box 305,100,49 350,104,49 45
+Box 230,255,45 275,300,45 4
+Box 230,296,49 275,300,49 45
+Box 305,255,45 350,300,45 4
+Box 305,296,49 350,300,49 45
+Sphere 290,200,190 18
+Layer Curve
+LayerColor 40,40,40 Curve
+Rectangle 140,60 440,340
+SelLast
+FilletCorners 25
+SelNone
+Circle 520,320 30
+SelLast
+Extrude 60
+SelNone
+SelLast
+SetObjectColor 90,140,100
+SelNone
+InterpCrv 470,60 520,120 500,180 550,240
+Layer Muri
+Save soggiorno.3dm
