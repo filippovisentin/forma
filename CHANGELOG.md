@@ -7,7 +7,24 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-10-10
+
 ### Added
+- **Solid kernel (OpenCascade)** in the Windows build: `BooleanUnion`, `BooleanDifference`,
+  `BooleanIntersection`, `BooleanSplit`, `FilletEdge`, `ChamferEdge`, `Shell`, `OffsetSrf` on
+  closed meshes (Solid menu and toolbar). Object-first tools take a single preselected object.
+- **Control points** (F10 / F11, Edit → Control Points): click, window-select and drag curve
+  control points and mesh vertices with snaps, grid and Ortho (`MoveGrips`, undoable).
+- **Custom construction planes** (View → Set CPlane): `CPlane World`, origin, 3 points, on a
+  face of a solid; each view has its own, with its grid. Typed coordinates are CPlane coordinates.
+- **Blocks**: Rhino block instances now open in place, one named group per instance (block
+  definitions are no longer shown at their own position); `Block`, `Insert`, `ExplodeBlock`.
+- Rhino commands: `Lines`, `Stretch`, `SelPrev`, `ShowSelected`, `UnlockSelected`, `ClosestPt`,
+  `List`, `DupFaceBorder`, `UnifyMeshNormals`, `SelBoundary`, `EditText`, `IncrementalSave`,
+  views Bottom, Back, Left; Zoom Window (`ZW`).
+- `Export` writes `.obj` (meshes and curves) and binary `.stl` besides `.3dm`.
+- [docs/commands.md](docs/commands.md): 279 Rhino commands compared one by one.
+- Command line: commands with only optional arguments (`New [cm|mm|m]`) wait for Enter.
 - Command line: autocomplete list while typing, Up/Down history on an empty line, clickable
   command options (`Side to offset ( Distance=10 )`), a grey hint for the command that Enter
   or right click will repeat.
@@ -21,17 +38,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   Italian), contributing guide, issue templates, screenshots, a download page.
 
 ### Changed
+- Display modes reduced to Wireframe and Shaded.
+- A typed bare `Save` asks for a new name like Ctrl+S, so an original Rhino file is never
+  overwritten.
+- Window selection starts exactly where the mouse button went down.
 - Much faster interaction on large files: incremental snap / pick index with screen-space
   culling (hover on a 950-object file from 33–48 ms to about 5 ms per frame, click pick from
   16 ms to 0.2 ms), no continuous repaint while a tool is idle.
 - `forma-ui` split into modules (no behaviour change).
-
-### In progress
-- **Rhino command parity**: more of the commands used in day-to-day interior work, with the
-  same names, prompts and options.
-- **OpenCascade kernel** behind `forma-geom` (ADR 0001): exact solids, `BooleanUnion`,
-  `BooleanDifference`, `BooleanIntersection`, `FilletEdge`, starting with spike S3
-  (`.3dm` brep ↔ OpenCascade conversion).
 
 ## [0.6.0] — 2026-10-10
 

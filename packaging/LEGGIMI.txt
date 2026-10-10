@@ -1,4 +1,4 @@
-FORMA 0.6 — modellatore personale in stile Rhino 8
+FORMA 0.7 — modellatore personale in stile Rhino 8
 ==================================================
 
 Avvio

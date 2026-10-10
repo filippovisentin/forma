@@ -18,14 +18,14 @@ architect and reviewer.
 
 Forma **works**: you can draw a room in centimetres, extrude walls, push and pull faces,
 arrange furniture, colour things by layer, and save a `.3dm` file. But it is young
-(**v0.6.0**), and one thing matters before you rely on it:
+(**v0.7.0**), and one thing matters before you rely on it:
 
 > **Solids and surfaces are display meshes for now.** Box, Cylinder, Sphere, extrusions,
 > Loft, Revolve, Sweep1 and PlanarSrf produce triangle meshes, not exact NURBS solids.
-> Booleans (`BooleanUnion`, `BooleanDifference`, …) and `FilletEdge` are not available yet.
-> They arrive with the OpenCascade geometry kernel, which is being integrated now
-> ([ADR 0001](docs/adr/0001-geometry-kernel.md)). Curves are exact: lines, arcs, circles,
-> polylines, polycurves and NURBS curves.
+> Booleans (`BooleanUnion`, `BooleanDifference`, …), `FilletEdge`, `ChamferEdge` and `Shell`
+> work on closed meshes through the OpenCascade kernel in the Windows build
+> ([ADR 0001](docs/adr/0001-geometry-kernel.md)); exact NURBS surfaces come next.
+> Curves are exact: lines, arcs, circles, polylines, polycurves and NURBS curves.
 
 It is a personal project with one user (me). Expect rough edges, and keep backups of
 files you care about.
@@ -262,9 +262,10 @@ revisore e unico utente.
 
 **Stato.** Funziona: si disegna una stanza in centimetri, si estrudono i muri, si
 spingono e tirano le facce, si organizzano layer e colori e si salva in `.3dm`. È però
-giovane (v0.6.0): **solidi e superfici sono per ora mesh di visualizzazione**, non solidi
-NURBS esatti. Booleane e `FilletEdge` arriveranno con il kernel OpenCascade, in lavorazione.
-Le curve invece sono esatte.
+giovane (v0.7.0): **solidi e superfici sono per ora mesh di visualizzazione**, non solidi
+NURBS esatti. Booleane, `FilletEdge`, `ChamferEdge` e `Shell` funzionano già sulle mesh
+chiuse grazie al kernel OpenCascade (versione Windows); le superfici NURBS esatte arriveranno
+dopo. Le curve invece sono esatte.
 
 **Download.** Dalla [pagina dell'ultima release](https://github.com/filippovisentin/forma/releases/latest)
 scarica `Forma-windows.zip`, estrai la cartella e fai doppio clic su `forma.exe` (Windows
