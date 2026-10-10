@@ -28,6 +28,8 @@ pub struct Viewport {
     pub px: (u32, u32),
     pub dirty: bool,
     pub mode: DisplayMode,
+    /// Custom construction plane (CPlane command), replacing the standard one.
+    pub custom_cplane: Option<Plane>,
 }
 
 impl Viewport {
@@ -40,6 +42,7 @@ impl Viewport {
             rect: Rect::NOTHING,
             px: (1, 1),
             dirty: true,
+            custom_cplane: None,
             // Rhino-like: drafting views in wireframe, the perspective shaded.
             mode: if kind == StandardView::Perspective {
                 DisplayMode::Shaded
@@ -63,6 +66,9 @@ impl Viewport {
 
     /// Rhino's construction plane for this view.
     pub fn cplane(&self) -> Plane {
+        if let Some(p) = self.custom_cplane {
+            return p;
+        }
         match self.kind {
             StandardView::Front => Plane::FRONT,
             StandardView::Right => Plane::RIGHT,

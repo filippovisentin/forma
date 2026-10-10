@@ -12,7 +12,7 @@ is in `Help` and `forma-cli commands`.
 
 ## Summary
 
-279 Rhino commands: **167 ✓**, **54 partial**, **40 ✗**, **18 needs kernel**.
+279 Rhino commands: **168 ✓**, **54 partial**, **39 ✗**, **18 needs kernel**.
 
 ## Drawing: points and lines
 
@@ -348,7 +348,7 @@ is in `Help` and `forma-cli commands`.
 | SetView Bottom / Left / Back | ✓ | `Bottom`, `Left`, `Back` |
 | 4 viewports, MaxViewport | ✓ |  |
 | NamedView | ✗ |  |
-| CPlane (custom) | ✗ | standard per-view CPlanes only |
+| CPlane (custom) | ✓ | `CPlane World / <origin> / 3 points / Face #id <point>` per view, with its grid |
 | Grid | ✓ | F7 |
 | Wireframe / Shaded / Ghosted / X-Ray | ✓ |  |
 | Rendered / Arctic / Technical / Pen | ✗ |  |

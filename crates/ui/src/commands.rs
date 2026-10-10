@@ -60,6 +60,16 @@ impl FormaApp {
             return;
         }
         let first = line.split_whitespace().next().unwrap_or("").to_lowercase();
+        if first.starts_with("cplane") {
+            let rest = line.split_once(' ').map_or("", |(_, r)| r);
+            match first.as_str() {
+                "cplane" => self.cplane_command(line),
+                "cplaneorigin" => self.cplane_command(&format!("CPlane {rest}")),
+                "cplaneface" => self.cplane_command(&format!("CPlane Face {rest}")),
+                _ => self.log(LogKind::Error, format!("unknown command: {first}")),
+            }
+            return;
+        }
         if matches!(first.as_str(), "new" | "open") && self.guard(Guarded::Line(line.to_string())) {
             return;
         }
@@ -383,6 +393,13 @@ impl FormaApp {
             line.push_str(&toks.join(" "));
             return;
         }
+        if self.at_command_prompt() && toks[0].eq_ignore_ascii_case("cplane") {
+            self.pending = Some((
+                toks.join(" "),
+                "World, origin [x point] [y point], Face #id <point>, or Enter for 3 points",
+            ));
+            return;
+        }
         if self.at_command_prompt() {
             let first = toks[0];
             let is_tool = ToolKind::from_name(first).is_some()
@@ -686,6 +703,9 @@ impl FormaApp {
         vp.camera = forma_render::Camera::view(v);
         vp.camera.target = target;
         vp.kind = v;
+        if vp.custom_cplane.take().is_some() {
+            self.cplane_dirty = true;
+        }
         self.fit(Some(self.active));
     }
 

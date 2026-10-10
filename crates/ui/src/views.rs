@@ -40,7 +40,7 @@ impl FormaApp {
                 view,
                 px,
                 &vp.camera,
-                grid_plane_for(vp.kind),
+                forma_render::Grid::Custom(i, grid_plane_for(vp.kind)),
                 vp.mode,
             );
             let mut egui_renderer = rs.renderer.write();

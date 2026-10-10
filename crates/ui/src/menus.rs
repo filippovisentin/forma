@@ -256,6 +256,12 @@ impl FormaApp {
                         item(ui, &mut act, label, "", Act::Submit(cmd));
                     }
                 });
+                ui.menu_button("Set CPlane", |ui| {
+                    item(ui, &mut act, "World (standard)", "", Act::Submit("CPlane World"));
+                    tool(ui, &mut act, "Origin", K::Seq(&q::CPLANE_ORIGIN));
+                    tool(ui, &mut act, "3 Points", K::Seq(&q::CPLANE));
+                    tool(ui, &mut act, "On a Face", K::Seq(&q::CPLANE_FACE));
+                });
                 ui.menu_button("Display Mode", |ui| {
                     for m in DisplayMode::ALL {
                         item(ui, &mut act, m.name(), "", Act::Mode(m));

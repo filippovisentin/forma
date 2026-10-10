@@ -107,6 +107,7 @@ impl FormaApp {
             gumball_typed: None,
             face_sel: None,
             grips: crate::grips::Grips::default(),
+            cplane_dirty: false,
             face_drag: None,
             face_typed: false,
             face_hot: false,
@@ -194,6 +195,7 @@ impl FormaApp {
     /// Rebuild GPU buffers, snap data and selection facts when the document or
     /// the selection changed.
     fn sync(&mut self, frame: &eframe::Frame) {
+        self.sync_cplanes(frame);
         let doc = &self.engine.ctx.doc;
         let mut changed = false;
         let doc_changed = self.force_rebuild || doc.version() != self.seen_version;

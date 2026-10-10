@@ -241,7 +241,10 @@ mod sequence_tools {
     fn every_sequence_tool_is_an_engine_command_and_a_typed_name() {
         let e = Engine::new();
         for s in seq::ALL {
-            assert_eq!(e.resolve(s.name), Some(s.name), "{}", s.name);
+            // View commands handled by the UI itself (construction planes).
+            if !s.name.starts_with("CPlane") {
+                assert_eq!(e.resolve(s.name), Some(s.name), "{}", s.name);
+            }
             assert_eq!(ToolKind::from_name(s.name), Some(ToolKind::Seq(s)));
             assert!(s.tip.starts_with(s.name), "{}", s.tip);
             // Instant tools (no inputs) must act on a selection.

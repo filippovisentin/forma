@@ -9,7 +9,11 @@ pub struct Entry {
 }
 
 /// Commands that only exist in the UI (views, display modes, toggles).
-pub const UI_COMMANDS: [(&str, &str); 25] = [
+pub const UI_COMMANDS: [(&str, &str); 26] = [
+    (
+        "CPlane",
+        "Construction plane of the active view: World, origin, 3 points, Face",
+    ),
     (
         "PointsOn",
         "Show control points of the selected objects (F10)",

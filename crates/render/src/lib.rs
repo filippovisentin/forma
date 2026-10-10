@@ -9,12 +9,13 @@ mod scene;
 pub use camera::{Camera, StandardView};
 pub use glam;
 pub use scene::{
-    grid_lines, grid_spacing, model_center, GridPlane, LineVertex, MeshVertex, Scene, SceneCache,
-    EDGE_COLOR, HIGHLIGHT,
+    grid_lines, grid_lines_on_plane, grid_spacing, model_center, GridBounds, GridPlane, LineVertex,
+    MeshVertex, Scene, SceneCache, EDGE_COLOR, HIGHLIGHT,
 };
 pub use wgpu;
 
 use bytemuck::{Pod, Zeroable};
+use glam::DVec3;
 use wgpu::util::DeviceExt;
 
 /// Colour format of the rendered image (what PNGs are written from).
@@ -134,6 +135,10 @@ pub struct Renderer {
     scene: Buffers,
     highlight: Buffers,
     grids: [Buffers; 3],
+    /// Grids of custom construction planes, by slot (viewport): plane and lines.
+    custom_grids: std::collections::HashMap<usize, ((DVec3, DVec3, DVec3), Buffers)>,
+    grid_bounds: GridBounds,
+    min_grid_extent: f64,
     pub show_grid: bool,
 }
 
@@ -264,6 +269,9 @@ impl Renderer {
             scene: Buffers::default(),
             highlight: Buffers::default(),
             grids: Default::default(),
+            custom_grids: std::collections::HashMap::new(),
+            grid_bounds: GridBounds::default(),
+            min_grid_extent: 1.0,
             show_grid: true,
         }
     }
@@ -310,7 +318,47 @@ impl Renderer {
                 ..Default::default()
             };
         }
+        self.grid_bounds = GridBounds {
+            origin: scene.origin,
+            min: scene.min,
+            max: scene.max,
+        };
+        self.min_grid_extent = min_grid_extent;
+        let planes: Vec<(usize, (DVec3, DVec3, DVec3))> = self
+            .custom_grids
+            .iter()
+            .map(|(k, (p, _))| (*k, *p))
+            .collect();
+        for (slot, p) in planes {
+            self.set_custom_grid(device, slot, Some(p));
+        }
         spacing
+    }
+
+    /// Set (or clear) the custom construction-plane grid of a slot (a viewport):
+    /// plane origin and unit axes u, v in world coordinates.
+    pub fn set_custom_grid(
+        &mut self,
+        device: &wgpu::Device,
+        slot: usize,
+        plane: Option<(DVec3, DVec3, DVec3)>,
+    ) {
+        let Some(p) = plane else {
+            self.custom_grids.remove(&slot);
+            return;
+        };
+        let (lines, _) = grid_lines_on_plane(self.grid_bounds, p.0, p.1, p.2, self.min_grid_extent);
+        let b = Buffers {
+            lines: buffer(
+                device,
+                "custom grid",
+                bytemuck::cast_slice(&lines),
+                wgpu::BufferUsages::VERTEX,
+            ),
+            line_count: lines.len() as u32,
+            ..Default::default()
+        };
+        self.custom_grids.insert(slot, (p, b));
     }
 
     /// Upload the selection highlight (empty scene clears it).
@@ -386,9 +434,10 @@ impl Renderer {
         view: &'v mut View,
         size: (u32, u32),
         camera: &Camera,
-        grid: GridPlane,
+        grid: impl Into<Grid>,
         mode: DisplayMode,
     ) -> &'v wgpu::TextureView {
+        let grid = grid.into();
         let size = (size.0.max(1), size.1.max(1));
         Self::ensure_targets(view, device, size);
         let aspect = size.0 as f64 / size.1 as f64;
@@ -453,7 +502,13 @@ impl Renderer {
                     }
                 };
             if self.show_grid {
-                let b = &self.grids[grid.index()];
+                let b = match grid {
+                    Grid::Plane(g) => &self.grids[g.index()],
+                    Grid::Custom(slot, g) => self
+                        .custom_grids
+                        .get(&slot)
+                        .map_or(&self.grids[g.index()], |c| &c.1),
+                };
                 if let Some(l) = &b.lines {
                     pass.set_pipeline(&self.grid_pipeline);
                     pass.set_vertex_buffer(0, l.slice(..));
@@ -531,6 +586,20 @@ impl Renderer {
             out.extend_from_slice(&data[start..start + row as usize]);
         }
         Some(out)
+    }
+}
+
+/// Which grid a viewport draws: a standard plane, or the custom construction
+/// plane of a slot (falling back to the standard plane when none is set).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Grid {
+    Plane(GridPlane),
+    Custom(usize, GridPlane),
+}
+
+impl From<GridPlane> for Grid {
+    fn from(g: GridPlane) -> Grid {
+        Grid::Plane(g)
     }
 }
 

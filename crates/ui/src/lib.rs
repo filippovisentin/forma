@@ -13,6 +13,7 @@ mod app;
 mod cmdline;
 mod commands;
 mod complete;
+mod cplane;
 mod files;
 mod grips;
 mod gumball;
@@ -241,6 +242,8 @@ struct FormaApp {
     face_hot: bool,
     /// Control points shown with PointsOn, and the selected ones.
     grips: grips::Grips,
+    /// A viewport's custom construction plane changed: re-upload the grids.
+    cplane_dirty: bool,
     /// Tool values remembered between uses (Offset distance, Fillet radius…).
     offset_distance: f64,
     fillet_radius: f64,

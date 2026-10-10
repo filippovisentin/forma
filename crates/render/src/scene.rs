@@ -400,12 +400,6 @@ pub fn grid_lines(scene: &Scene, plane: GridPlane, min_extent: f64) -> (Vec<Line
             (size * 1.5).max(min_extent),
         )
     };
-    let spacing = grid_spacing(extent);
-    let half = (extent / spacing).ceil() as i64;
-    let cu = (center.dot(u) / spacing).round() as i64;
-    let cv = (center.dot(v) / spacing).round() as i64;
-    let minor = [0.300, 0.300, 0.300, 1.0];
-    let major = [0.205, 0.205, 0.205, 1.0];
     let red = [0.60, 0.04, 0.04, 1.0];
     let green = [0.04, 0.45, 0.04, 1.0];
     let blue = [0.08, 0.20, 0.70, 1.0];
@@ -415,8 +409,57 @@ pub fn grid_lines(scene: &Scene, plane: GridPlane, min_extent: f64) -> (Vec<Line
         GridPlane::XZ => (red, blue),
         GridPlane::YZ => (green, blue),
     };
+    grid_on(o, DVec3::ZERO, (u, v), center, extent, (u_axis, v_axis))
+}
+
+/// Grid on a custom construction plane (`origin`, unit axes `u`, `v`, world
+/// coordinates), centred on its origin, covering the scene; its own axes in red
+/// and green like Rhino's.
+pub fn grid_lines_on_plane(
+    bounds: GridBounds,
+    origin: DVec3,
+    u: DVec3,
+    v: DVec3,
+    min_extent: f64,
+) -> (Vec<LineVertex>, f64) {
+    let o = bounds.origin;
+    let far = [bounds.min + o, bounds.max + o]
+        .iter()
+        .map(|c| (*c - origin).length())
+        .fold(0.0f64, f64::max);
+    let extent = (far * 1.2).max(min_extent);
+    let red = [0.60, 0.04, 0.04, 1.0];
+    let green = [0.04, 0.45, 0.04, 1.0];
+    grid_on(o, origin, (u, v), origin, extent, (red, green))
+}
+
+/// What a grid needs to know about the scene: its offset and extents.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct GridBounds {
+    pub origin: DVec3,
+    pub min: DVec3,
+    pub max: DVec3,
+}
+
+/// Grid lines on the plane through `plane_origin` with axes `axes`, around
+/// `center`; the lines through the plane origin get the axis colours.
+fn grid_on(
+    o: DVec3,
+    plane_origin: DVec3,
+    axes: (DVec3, DVec3),
+    center: DVec3,
+    extent: f64,
+    (u_axis, v_axis): ([f32; 4], [f32; 4]),
+) -> (Vec<LineVertex>, f64) {
+    let (u, v) = axes;
+    let spacing = grid_spacing(extent);
+    let half = (extent / spacing).ceil() as i64;
+    let cu = ((center - plane_origin).dot(u) / spacing).round() as i64;
+    let cv = ((center - plane_origin).dot(v) / spacing).round() as i64;
+    let minor = [0.300, 0.300, 0.300, 1.0];
+    let major = [0.205, 0.205, 0.205, 1.0];
     let world = |a: f64, b: f64| -> [f32; 3] {
-        let p = u * a + v * b - o;
+        let p = plane_origin + u * a + v * b - o;
         [p.x as f32, p.y as f32, p.z as f32]
     };
     let (u0, u1) = ((cu - half) as f64 * spacing, (cu + half) as f64 * spacing);

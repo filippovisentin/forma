@@ -1565,8 +1565,56 @@ pub static SEL_BOUNDARY: Seq = Seq {
     preview: none,
 };
 
+pub static CPLANE: Seq = Seq {
+    name: "CPlane",
+    tip: "CPlane — construction plane through three points",
+    sel: false,
+    steps: &[
+        In::Point("CPlane origin"),
+        In::Point("X axis direction"),
+        In::Point("Point on the plane (Y side)"),
+    ],
+    emit: |v, _| {
+        format!(
+            "CPlane {} {} {}",
+            fmt_p(v[0].p()),
+            fmt_p(v[1].p()),
+            fmt_p(v[2].p())
+        )
+    },
+    preview: |v| match v.vals.len() {
+        1 => vec![[v.p(0), v.cur]],
+        2 => vec![[v.p(0), v.p(1)], [v.p(0), v.cur]],
+        _ => Vec::new(),
+    },
+};
+
+pub static CPLANE_ORIGIN: Seq = Seq {
+    name: "CPlaneOrigin",
+    tip: "CPlaneOrigin — move the construction plane",
+    sel: false,
+    steps: &[In::Point("New CPlane origin")],
+    emit: |v, _| format!("CPlane {}", fmt_p(v[0].p())),
+    preview: none,
+};
+
+pub static CPLANE_FACE: Seq = Seq {
+    name: "CPlaneFace",
+    tip: "CPlaneFace — construction plane on a flat face of a solid",
+    sel: false,
+    steps: &[
+        In::Object("Solid or mesh"),
+        In::SurfacePoint("Click the face"),
+    ],
+    emit: |v, _| format!("CPlane Face #{} {}", v[0].o(), fmt_p(v[1].p())),
+    preview: none,
+};
+
 /// Every sequence tool (for typed names, help and tests).
 pub static ALL: &[&Seq] = &[
+    &CPLANE,
+    &CPLANE_ORIGIN,
+    &CPLANE_FACE,
     &EDIT_TEXT,
     &SEL_BOUNDARY,
     &BLOCK,
