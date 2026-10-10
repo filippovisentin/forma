@@ -27,6 +27,9 @@ pub enum In {
     Object(&'static str),
     /// Points until Enter, at least this many.
     Points(&'static str, usize),
+    /// Points clicked on the surface of a solid (near its edges or on its
+    /// faces) until Enter, at least this many.
+    SurfacePoints(&'static str, usize),
     /// One of a few words, clickable in the prompt.
     Choice(&'static str, &'static [&'static str]),
 }
@@ -1313,8 +1316,129 @@ sel_only!(
     "ChangeToCurrentLayer — move objects to the current layer"
 );
 
+// ------------------------------------------------------------------ solid kernel
+
+fn pts_list(v: &Val) -> String {
+    match v {
+        Val::Ps(p) => p.iter().map(|q| fmt_p(*q)).collect::<Vec<_>>().join(" "),
+        other => fmt_p(other.p()),
+    }
+}
+
+sel_only!(
+    BOOLEAN_UNION,
+    "BooleanUnion",
+    "BooleanUnion — merge the selected solids into one"
+);
+sel_only!(
+    BOOLEAN_INTERSECTION,
+    "BooleanIntersection",
+    "BooleanIntersection — keep only the common part of the selected solids"
+);
+
+pub static BOOLEAN_DIFFERENCE: Seq = Seq {
+    name: "BooleanDifference",
+    tip: "BooleanDifference — subtract solids from a base solid",
+    sel: false,
+    steps: &[
+        In::Object("Select the solid to subtract from"),
+        In::Object("Select the solid to subtract with"),
+    ],
+    emit: |v, _| format!("BooleanDifference #{} #{}", v[0].o(), v[1].o()),
+    preview: none,
+};
+
+pub static BOOLEAN_SPLIT: Seq = Seq {
+    name: "BooleanSplit",
+    tip: "BooleanSplit — cut a solid in the parts inside and outside another",
+    sel: false,
+    steps: &[
+        In::Object("Select the solid to split"),
+        In::Object("Select the cutting solid"),
+    ],
+    emit: |v, _| format!("BooleanSplit #{} #{}", v[0].o(), v[1].o()),
+    preview: none,
+};
+
+pub static FILLET_EDGE: Seq = Seq {
+    name: "FilletEdge",
+    tip: "FilletEdge — round edges of a solid",
+    sel: false,
+    steps: &[
+        In::Object("Select the solid"),
+        In::Num("Fillet radius", Some(1.0)),
+        In::SurfacePoints("Click near the edges to fillet (Enter when done)", 1),
+    ],
+    emit: |v, _| {
+        format!(
+            "FilletEdge #{} {} {}",
+            v[0].o(),
+            round(v[1].n()),
+            pts_list(&v[2])
+        )
+    },
+    preview: none,
+};
+
+pub static CHAMFER_EDGE: Seq = Seq {
+    name: "ChamferEdge",
+    tip: "ChamferEdge — bevel edges of a solid",
+    sel: false,
+    steps: &[
+        In::Object("Select the solid"),
+        In::Num("Chamfer distance", Some(1.0)),
+        In::SurfacePoints("Click near the edges to chamfer (Enter when done)", 1),
+    ],
+    emit: |v, _| {
+        format!(
+            "ChamferEdge #{} {} {}",
+            v[0].o(),
+            round(v[1].n()),
+            pts_list(&v[2])
+        )
+    },
+    preview: none,
+};
+
+pub static SHELL: Seq = Seq {
+    name: "Shell",
+    tip: "Shell — hollow a solid, removing the clicked faces",
+    sel: false,
+    steps: &[
+        In::Object("Select the solid"),
+        In::Num("Wall thickness", Some(1.0)),
+        In::SurfacePoints("Click the faces to remove (Enter when done)", 1),
+    ],
+    emit: |v, _| {
+        format!(
+            "Shell #{} {} {}",
+            v[0].o(),
+            round(v[1].n()),
+            pts_list(&v[2])
+        )
+    },
+    preview: none,
+};
+
+pub static OFFSET_SRF: Seq = Seq {
+    name: "OffsetSrf",
+    tip: "OffsetSrf — grow or shrink the selected solids (negative = inwards)",
+    sel: true,
+    steps: &[In::Num("Offset distance (negative = inwards)", Some(1.0))],
+    emit: |v, _| format!("OffsetSrf {}", round(v[0].n())),
+    preview: none,
+};
+
 /// Every sequence tool (for typed names, help and tests).
 pub static ALL: &[&Seq] = &[
+    &BOOLEAN_UNION,
+    &BOOLEAN_DIFFERENCE,
+    &BOOLEAN_INTERSECTION,
+    &BOOLEAN_SPLIT,
+    &FILLET_EDGE,
+    &CHAMFER_EDGE,
+    &SHELL,
+    &OFFSET_SRF,
     &CIRCLE3PT,
     &CIRCLE2PT,
     &ARC3PT,

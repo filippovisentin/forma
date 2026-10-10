@@ -3,7 +3,7 @@
 //! does, and its alias / keyboard shortcut.
 
 use crate::icons::{self, Icon};
-use crate::menus::{ALIGN, ARRAY_PREFILL, KERNEL_TIP, SET_VIEWS};
+use crate::menus::{ALIGN, ARRAY_PREFILL, SET_VIEWS};
 use crate::tools::ToolKind;
 use crate::{theme, Act, FormaApp, SidePanel};
 use eframe::egui::{self, Color32, RichText, Stroke, StrokeKind};
@@ -334,8 +334,6 @@ impl FormaApp {
                 for (m, n) in [
                     (DisplayMode::Wireframe, "Wireframe"),
                     (DisplayMode::Shaded, "Shaded"),
-                    (DisplayMode::Ghosted, "Ghosted"),
-                    (DisplayMode::XRay, "XRay"),
                 ] {
                     v.push(named(
                         n,
@@ -468,14 +466,19 @@ impl FormaApp {
                 }
                 if self.tab == 8 {
                     ui.separator();
-                    for b in [
-                        "BooleanUnion",
-                        "BooleanDifference",
-                        "BooleanIntersection",
-                        "FilletEdge",
+                    use crate::tools::seq as q;
+                    for s in [
+                        &q::BOOLEAN_UNION,
+                        &q::BOOLEAN_DIFFERENCE,
+                        &q::BOOLEAN_INTERSECTION,
+                        &q::BOOLEAN_SPLIT,
+                        &q::FILLET_EDGE,
+                        &q::CHAMFER_EDGE,
+                        &q::SHELL,
                     ] {
-                        ui.add_enabled(false, egui::Button::new(b))
-                            .on_disabled_hover_text(KERNEL_TIP);
+                        if ui.button(s.name).on_hover_text(s.tip).clicked() {
+                            act = Some(Act::Tool(ToolKind::Seq(s)));
+                        }
                     }
                 }
                 if self.tab == 5 {

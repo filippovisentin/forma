@@ -105,24 +105,15 @@ fn buffer(
 pub enum DisplayMode {
     Wireframe,
     Shaded,
-    Ghosted,
-    XRay,
 }
 
 impl DisplayMode {
-    pub const ALL: [DisplayMode; 4] = [
-        DisplayMode::Wireframe,
-        DisplayMode::Shaded,
-        DisplayMode::Ghosted,
-        DisplayMode::XRay,
-    ];
+    pub const ALL: [DisplayMode; 2] = [DisplayMode::Wireframe, DisplayMode::Shaded];
 
     pub fn name(self) -> &'static str {
         match self {
             DisplayMode::Wireframe => "Wireframe",
             DisplayMode::Shaded => "Shaded",
-            DisplayMode::Ghosted => "Ghosted",
-            DisplayMode::XRay => "X-Ray",
         }
     }
 }
@@ -139,8 +130,6 @@ pub struct Renderer {
     mesh_pipeline: wgpu::RenderPipeline,
     line_pipeline: wgpu::RenderPipeline,
     grid_pipeline: wgpu::RenderPipeline,
-    ghost_pipeline: wgpu::RenderPipeline,
-    xray_line_pipeline: wgpu::RenderPipeline,
     bind_group_layout: wgpu::BindGroupLayout,
     scene: Buffers,
     highlight: Buffers,
@@ -266,41 +255,11 @@ impl Renderer {
             false,
             wgpu::CompareFunction::LessEqual,
         );
-        // Ghosted surfaces: translucent, still hiding what is behind them a little.
-        let ghost_pipeline = pipeline(
-            "forma ghost",
-            "vs_mesh",
-            "fs_mesh_ghost",
-            std::mem::size_of::<MeshVertex>(),
-            &mesh_attrs,
-            wgpu::PrimitiveTopology::TriangleList,
-            wgpu::DepthBiasState {
-                constant: 2,
-                slope_scale: 1.5,
-                clamp: 0.0,
-            },
-            true,
-            wgpu::CompareFunction::LessEqual,
-        );
-        // X-Ray: wires drawn through everything.
-        let xray_line_pipeline = pipeline(
-            "forma x-ray lines",
-            "vs_line",
-            "fs_line",
-            std::mem::size_of::<LineVertex>(),
-            &line_attrs,
-            wgpu::PrimitiveTopology::LineList,
-            Default::default(),
-            false,
-            wgpu::CompareFunction::Always,
-        );
 
         Renderer {
             mesh_pipeline,
             line_pipeline,
             grid_pipeline,
-            ghost_pipeline,
-            xray_line_pipeline,
             bind_group_layout: bgl,
             scene: Buffers::default(),
             highlight: Buffers::default(),
@@ -515,17 +474,6 @@ impl Renderer {
                     // Same geometry drawn again: equal depth passes LessEqual, so it lands on top.
                     draw_mesh(&mut pass, &self.highlight);
                     draw_lines(&mut pass, &self.highlight);
-                }
-                DisplayMode::Ghosted => {
-                    // Wires first, then translucent surfaces over them.
-                    draw_lines(&mut pass, &self.scene);
-                    draw_mesh_with(&mut pass, &self.scene, &self.ghost_pipeline);
-                    draw_lines_with(&mut pass, &self.highlight, &self.xray_line_pipeline);
-                }
-                DisplayMode::XRay => {
-                    draw_mesh_with(&mut pass, &self.scene, &self.ghost_pipeline);
-                    draw_lines_with(&mut pass, &self.scene, &self.xray_line_pipeline);
-                    draw_lines_with(&mut pass, &self.highlight, &self.xray_line_pipeline);
                 }
             }
         }

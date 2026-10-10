@@ -1,7 +1,7 @@
 name: ci
 on:
   push:
-    branches: [main]
+    branches: [main, kernel]
   pull_request:
 jobs:
   ci:
@@ -28,3 +28,105 @@ jobs:
             echo "::error title=xtask ci::${msg}"
             exit 1
           fi
+
+  # Same gate with the OpenCascade solid kernel (feature forma-geom/occt, ADR 0004).
+  # The first run builds OCCT from source (~1 h); its include/ and lib/ are cached in
+  # .occt/ and reused through FORMA_OCCT_DIR.
+  occt:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 300
+    env:
+      FORMA_OCCT_DIR: ${{ github.workspace }}/.occt
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Restore OCCT build
+        id: occt-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .occt
+          key: occt-7.8.1-static-${{ runner.os }}-v1
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: occt
+      - name: Build OCCT and the kernel shim
+        shell: bash
+        run: |
+          set -o pipefail
+          if ! cargo build -p forma-geom --features occt 2>&1 | tee build.log; then
+            msg=$(grep -E -A4 "error|Error|LNK[0-9]|fatal|failed" build.log | tail -60 | sed ':a;N;$!ba;s/%/%25/g;s/\r//g;s/\n/%0A/g')
+            echo "::error title=occt build::${msg}"
+            exit 1
+          fi
+          # The CMake build tree is only needed once; keep it out of the Rust cache.
+          rm -rf target/OCCT
+          du -sh .occt || true
+      - name: Save OCCT build
+        if: always() && steps.occt-cache.outputs.cache-hit != 'true' && hashFiles('.occt/include/Standard.hxx') != ''
+        uses: actions/cache/save@v4
+        with:
+          path: .occt
+          key: occt-7.8.1-static-${{ runner.os }}-v1
+      - name: cargo xtask ci --occt
+        shell: bash
+        run: |
+          set -o pipefail
+          if ! cargo xtask ci --occt 2>&1 | tee ci.log; then
+            msg=$(grep -E "error|LNK[0-9]|fatal|failed|panicked|undefined" ci.log | grep -v "warning C" | tail -40 | sed ':a;N;$!ba;s/%/%25/g;s/\r//g;s/\n/%0A/g')
+            echo "::error title=xtask ci --occt::${msg}"
+            exit 1
+          fi
+      # Windows: build the release package with the kernel and check that it runs
+      # standalone (OCCT is linked statically, no extra DLLs).
+      - name: Release build with the kernel (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          cargo build --release -p forma -p forma-cli --features forma/occt,forma-cli/occt
+          echo "::notice title=binary size::forma.exe $(stat -c %s target/release/forma.exe) bytes, forma-cli.exe $(stat -c %s target/release/forma-cli.exe) bytes"
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          mkdir -p dist/Forma
+          cp target/release/forma.exe target/release/forma-cli.exe dist/Forma/
+          cp packaging/LEGGIMI.txt LICENSE-MIT LICENSE-APACHE ATTRIBUTION.md dist/Forma/
+          cp -r packaging/licenses dist/Forma/
+          cd dist && 7z a -tzip Forma-windows-occt.zip Forma > /dev/null
+      - name: Smoke test of the unpacked zip (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/smoke" && cd "$RUNNER_TEMP/smoke"
+          7z x "$GITHUB_WORKSPACE/dist/Forma-windows-occt.zip" > /dev/null
+          run() {
+            set +e
+            out=$(./Forma/forma-cli.exe run --script "$1" --dump 2>&1)
+            code=$?
+            set -e
+            echo "$out"
+            flat=$(echo "$out" | tail -8 | sed ':a;N;$!ba;s/%/%25/g;s/\r//g;s/\n/%0A/g')
+            if [ $code -ne 0 ] || ! echo "$out" | grep -q "$2"; then
+              echo "::error title=smoke::$1%0Aexit $code%0A$flat"
+              return 1
+            fi
+            echo "::notice title=smoke ok::$1"
+          }
+          run "Box 0,0 10,10 10" "box"
+          run "Box 0,0 10,10 10; Box 5,5 15,15 10; BooleanUnion #1 #2" "1 solid"
+          run "Box 0,0 40,20 20; FilletEdge #1 3 20,0,20; Shell #1 1 20,10,20" "hollowed"
+      - name: Upload package (Windows)
+        if: always() && runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Forma-windows-occt
+          path: dist/Forma-windows-occt.zip
+          retention-days: 14

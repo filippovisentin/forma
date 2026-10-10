@@ -9,7 +9,7 @@ pub struct Entry {
 }
 
 /// Commands that only exist in the UI (views, display modes, toggles).
-pub const UI_COMMANDS: [(&str, &str); 20] = [
+pub const UI_COMMANDS: [(&str, &str); 18] = [
     ("ZE", "Zoom extents in the active view"),
     ("ZEA", "Zoom extents in all views"),
     ("ZS", "Zoom to the selected objects"),
@@ -21,8 +21,6 @@ pub const UI_COMMANDS: [(&str, &str); 20] = [
     ("Perspective", "Set the active view to Perspective"),
     ("Wireframe", "Display mode of the active view"),
     ("Shaded", "Display mode of the active view"),
-    ("Ghosted", "Display mode of the active view"),
-    ("XRay", "Display mode of the active view"),
     ("MaxViewport", "Maximize / restore the active view"),
     ("Help", "Commands, keys and mouse"),
     ("Ortho", "Toggle Ortho (F8)"),

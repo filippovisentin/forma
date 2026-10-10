@@ -41,6 +41,7 @@ mod draw;
 mod edit;
 mod files;
 mod import;
+mod kernel;
 mod layers;
 mod measure;
 mod select;

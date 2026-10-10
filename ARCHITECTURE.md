@@ -24,6 +24,8 @@ checks this on every CI run.
 - **Geometry kernel** — OpenCascade for all solid modelling (booleans, fillets, lofts,
   offsets), hidden inside `forma-geom` behind a cargo feature `occt`; plain curve math in
   Rust. truck failed 4/6 interior-design cases in spike S2. See ADR 0001.
+  Built by `occt-sys` (static OCCT 7.8.1) and called through a small C ABI shim in
+  `crates/geom/occt/shim.cpp`; `forma-geom` exposes only mesh-in / mesh-out functions. See ADR 0004.
 - **`.3dm` I/O** — openNURBS linked through a small C ABI shim, built with CMake from a
   git submodule. See ADR 0002.
 - **UI** — egui + wgpu via eframe, same stack as ArtCraft's Crafting Apps.

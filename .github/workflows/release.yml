@@ -17,21 +17,32 @@ permissions:
 jobs:
   windows:
     runs-on: windows-latest
+    timeout-minutes: 300
+    env:
+      # OpenCascade (solid kernel) include/ and lib/, cached by the ci workflow's occt
+      # job; built from source (~1 h) when the cache is missing. Linked statically.
+      FORMA_OCCT_DIR: ${{ github.workspace }}/.occt
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: true
       - uses: dtolnay/rust-toolchain@stable
+      - name: Restore OCCT build
+        uses: actions/cache/restore@v4
+        with:
+          path: .occt
+          key: occt-7.8.1-static-${{ runner.os }}-v1
       - uses: Swatinem/rust-cache@v2
       - name: Build
         shell: bash
         run: |
           set -o pipefail
-          if ! cargo build --release -p forma -p forma-cli 2>&1 | tee build.log; then
+          if ! cargo build --release -p forma -p forma-cli --features forma/occt,forma-cli/occt 2>&1 | tee build.log; then
             msg=$(grep -E "error|LNK[0-9]|fatal" build.log | tail -30 | sed ':a;N;$!ba;s/%/%25/g;s/\r//g;s/\n/%0A/g')
             echo "::error title=release build::${msg}"
             exit 1
           fi
+          rm -rf target/OCCT  # CMake build tree of a cache miss; .occt/ has what we link
       - name: Package
         shell: bash
         run: |
@@ -39,6 +50,7 @@ jobs:
           cp target/release/forma.exe target/release/forma-cli.exe dist/Forma/
           cp packaging/LEGGIMI.txt dist/Forma/
           cp LICENSE-MIT LICENSE-APACHE ATTRIBUTION.md dist/Forma/
+          cp -r packaging/licenses dist/Forma/
           cd dist && 7z a -tzip Forma-windows.zip Forma > /dev/null
       - name: Publish release
         uses: softprops/action-gh-release@v2
@@ -46,7 +58,9 @@ jobs:
           tag_name: ${{ github.ref_type == 'tag' && github.ref_name || inputs.version || format('build-{0}', github.run_number) }}
           target_commitish: ${{ github.sha }}
           name: ${{ format('Forma {0}', github.ref_type == 'tag' && github.ref_name || inputs.version || format('build {0}', github.run_number)) }}
-          prerelease: true
+          # Versioned releases become "Latest" (README download links use /releases/latest).
+          prerelease: ${{ !(github.ref_type == 'tag' || inputs.version != '') }}
+          make_latest: ${{ github.ref_type == 'tag' || inputs.version != '' }}
           files: |
             dist/Forma-windows.zip
             dist/Forma/forma.exe

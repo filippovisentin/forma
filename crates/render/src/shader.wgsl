@@ -55,12 +55,6 @@ fn fs_mesh(i: MeshOut) -> @location(0) vec4<f32> {
     return shade(i);
 }
 
-@fragment
-fn fs_mesh_ghost(i: MeshOut) -> @location(0) vec4<f32> {
-    let c = shade(i);
-    return vec4<f32>(c.rgb, c.a * 0.45);
-}
-
 struct LineIn {
     @location(0) pos: vec3<f32>,
     @location(1) color: vec4<f32>,

@@ -34,6 +34,16 @@ impl FormaApp {
         } else {
             None
         };
+        if want == Some(Want::SurfacePoint) {
+            let hit = pick::pick_face(self.engine.doc(), &self.index, vp, pos, origin);
+            return Hover {
+                viewport: vi,
+                point: hit.map_or_else(|| vp.cplane_point(pos, origin), |h| h.1),
+                snap: None,
+                pos,
+                tracks: Vec::new(),
+            };
+        }
         if want == Some(Want::Pick) {
             let doc = self.engine.doc();
             let on_curve = pick::pick_curve_point(doc, &self.index, vp, pos, origin);

@@ -9,7 +9,7 @@ use forma_geom::{Point3, Vec3};
 use forma_render::{DisplayMode, StandardView};
 
 /// Words handled by the UI itself (views, display modes, toggles).
-const UI_WORDS: [&str; 26] = [
+const UI_WORDS: [&str; 23] = [
     "ze",
     "zea",
     "zoomextents",
@@ -31,9 +31,6 @@ const UI_WORDS: [&str; 26] = [
     "wireframe",
     "setdisplaymode-wireframe",
     "shaded",
-    "ghosted",
-    "xray",
-    "x-ray",
     "maxviewport",
     "maximize",
 ];
@@ -484,8 +481,6 @@ impl FormaApp {
             "zs" | "zoomselected" => self.zoom_selected(),
             "wireframe" | "setdisplaymode-wireframe" => self.set_mode(DisplayMode::Wireframe),
             "shaded" => self.set_mode(DisplayMode::Shaded),
-            "ghosted" => self.set_mode(DisplayMode::Ghosted),
-            "xray" | "x-ray" => self.set_mode(DisplayMode::XRay),
             "maxviewport" | "maximize" => self.toggle_maximize(),
             _ => {
                 // A bare engine command that needs arguments waits for them.
@@ -599,7 +594,7 @@ impl FormaApp {
             Want::PointOrNumber if tok.parse::<f64>().is_ok() => {
                 t.feed_number(tok.parse().expect("checked"))
             }
-            Want::Point | Want::PointOrNumber => {
+            Want::Point | Want::PointOrNumber | Want::SurfacePoint => {
                 let plane = t.plane;
                 match parse_typed_point(tok, &plane, t.base(), toward) {
                     Some(p) => t.feed_point(p),

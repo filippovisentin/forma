@@ -33,10 +33,6 @@ pub(crate) const ARRAY_PREFILL: Act = Act::Prefill(
     "Array <nx> <ny> <nz> <dx,dy,dz> — e.g. Array 4 2 1 600,400,0 copies the selection 4×2 times",
 );
 
-/// Disabled menu entry for what needs the solid kernel.
-pub(crate) const KERNEL_TIP: &str =
-    "Needs the solid kernel (OpenCascade), planned for a next version";
-
 impl FormaApp {
     pub(crate) fn ui_menu(&mut self, ui: &mut egui::Ui) {
         let mut act: Option<Act> = None;
@@ -54,10 +50,6 @@ impl FormaApp {
                 *act = Some(Act::Tool(k));
                 ui.close();
             }
-        };
-        let kernel = |ui: &mut egui::Ui, label: &str| {
-            ui.add_enabled(false, egui::Button::new(label))
-                .on_disabled_hover_text(KERNEL_TIP);
         };
         use ToolKind as K;
         egui::MenuBar::new().ui(ui, |ui| {
@@ -349,7 +341,7 @@ impl FormaApp {
                 tool(ui, &mut act, "Sweep 1 Rail", K::Sweep1);
                 tool(ui, &mut act, "Pipe", K::Seq(&q::PIPE));
                 ui.separator();
-                kernel(ui, "Offset Surface");
+                tool(ui, &mut act, "Offset Surface (solids)", K::Seq(&q::OFFSET_SRF));
                 ui.label(
                     egui::RichText::new("Surfaces are meshes until the NURBS kernel lands")
                         .small()
@@ -386,11 +378,18 @@ impl FormaApp {
                 }
                 tool(ui, &mut act, "Cap Planar Holes", K::OnSel("Cap"));
                 ui.separator();
-                kernel(ui, "Union");
-                kernel(ui, "Difference");
-                kernel(ui, "Intersection");
-                kernel(ui, "Fillet Edge");
-                kernel(ui, "Shell");
+                ui.menu_button("Boolean", |ui| {
+                    tool(ui, &mut act, "Union", K::Seq(&q::BOOLEAN_UNION));
+                    tool(ui, &mut act, "Difference", K::Seq(&q::BOOLEAN_DIFFERENCE));
+                    tool(ui, &mut act, "Intersection", K::Seq(&q::BOOLEAN_INTERSECTION));
+                    tool(ui, &mut act, "Split", K::Seq(&q::BOOLEAN_SPLIT));
+                });
+                ui.menu_button("Edge Tools", |ui| {
+                    tool(ui, &mut act, "Fillet Edge", K::Seq(&q::FILLET_EDGE));
+                    tool(ui, &mut act, "Chamfer Edge", K::Seq(&q::CHAMFER_EDGE));
+                });
+                tool(ui, &mut act, "Shell", K::Seq(&q::SHELL));
+                tool(ui, &mut act, "Offset Solid", K::Seq(&q::OFFSET_SRF));
             });
             ui.menu_button("Mesh", |ui| {
                 tool(ui, &mut act, "Weld (smooth)", K::Seq(&q::WELD));

@@ -35,6 +35,8 @@ pub enum Want {
     Text,
     /// One of the words offered in the prompt.
     Choice,
+    /// A point on the surface of a solid under the cursor (edges, faces).
+    SurfacePoint,
 }
 
 pub enum Step {
@@ -194,10 +196,10 @@ impl Tool {
                 In::Object(p) | In::Choice(p, _) => p.to_string(),
                 In::Num(p, Some(d)) => format!("{p} <{}>", round(d)),
                 In::Num(p, None) => p.to_string(),
-                In::Points(p, min) if self.multi.len() < min => {
+                In::Points(p, min) | In::SurfacePoints(p, min) if self.multi.len() < min => {
                     p.split(" (").next().unwrap_or(p).to_string()
                 }
-                In::Points(p, _) => p.to_string(),
+                In::Points(p, _) | In::SurfacePoints(p, _) => p.to_string(),
             };
             return format!("{} — {p}", s.name);
         }
@@ -288,6 +290,7 @@ impl Tool {
         if let Some((_, step)) = self.seq_step() {
             return match step {
                 In::Point(_) | In::Points(..) => Want::Point,
+                In::SurfacePoints(..) => Want::SurfacePoint,
                 In::Dist(..) => Want::PointOrNumber,
                 In::Height(_, from) => Want::Height {
                     from: self.vals.get(from).map_or(self.anchor, Val::p),
@@ -364,7 +367,7 @@ impl Tool {
         if let Some((_, step)) = self.seq_step() {
             return match step {
                 In::Point(_) => self.seq_push(Val::P(p)),
-                In::Points(..) => {
+                In::Points(..) | In::SurfacePoints(..) => {
                     if self.multi.last().is_none_or(|q| q.distance_to(p) > 1e-9) {
                         self.multi.push(p);
                     }
@@ -715,7 +718,7 @@ impl Tool {
         if let Some((_, step)) = self.seq_step() {
             return match step {
                 In::Num(_, Some(d)) => self.seq_push(Val::N(d)),
-                In::Points(_, min) if self.multi.len() >= min => {
+                In::Points(_, min) | In::SurfacePoints(_, min) if self.multi.len() >= min => {
                     let pts = self.multi.clone();
                     self.seq_push(Val::Ps(pts))
                 }
@@ -743,7 +746,9 @@ impl Tool {
                 let found = words.iter().find(|c| c.eq_ignore_ascii_case(word))?;
                 return Some(self.seq_push(Val::W(found)));
             }
-            Some((_, In::Points(..))) if (w == "u" || w == "undo") && !self.multi.is_empty() => {
+            Some((_, In::Points(..) | In::SurfacePoints(..)))
+                if (w == "u" || w == "undo") && !self.multi.is_empty() =>
+            {
                 self.multi.pop();
                 return Some(Step::Continue);
             }
@@ -785,7 +790,7 @@ impl Tool {
                 v.extend(words.iter().map(|w| word(w)));
                 return v;
             }
-            Some((_, In::Points(..))) if !self.multi.is_empty() => {
+            Some((_, In::Points(..) | In::SurfacePoints(..))) if !self.multi.is_empty() => {
                 v.push(word("Undo"));
                 return v;
             }
