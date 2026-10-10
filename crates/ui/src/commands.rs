@@ -72,6 +72,14 @@ impl FormaApp {
             self.run_engine_as(&line, remember);
             return;
         }
+        if first == "clippingplane" || first == "section" {
+            if line.split_whitespace().count() == 1 {
+                self.start_tool(ToolKind::Seq(&crate::tools::seq::CLIPPING_PLANE));
+            } else {
+                self.clipping_plane(line);
+            }
+            return;
+        }
         if first == "namedview" {
             self.named_view(line);
             return;
@@ -423,6 +431,13 @@ impl FormaApp {
             ));
             return;
         }
+        if self.at_command_prompt() && toks[0].eq_ignore_ascii_case("clippingplane") {
+            self.pending = Some((
+                toks.join(" "),
+                "<point> <up|down|north|south|east|west>, Off, or Enter to pick",
+            ));
+            return;
+        }
         if self.at_command_prompt() {
             let first = toks[0];
             let is_tool = ToolKind::from_name(first).is_some()
@@ -730,6 +745,69 @@ impl FormaApp {
             self.cplane_dirty = true;
         }
         self.fit(Some(self.active));
+    }
+
+    /// `ClippingPlane <point> <direction>`: hide everything on the direction's
+    /// side of the plane through the point, in every view (a section cut);
+    /// `ClippingPlane Off` removes it. Directions: up, down, north, south,
+    /// east, west, or a vector x,y,z.
+    pub(crate) fn clipping_plane(&mut self, line: &str) {
+        self.log(LogKind::Command, format!("Command: {line}"));
+        let toks: Vec<&str> = line.split_whitespace().skip(1).collect();
+        let named = |t: &str| -> Option<forma_geom::Vec3> {
+            let v = |x, y, z| forma_geom::Vec3::new(x, y, z);
+            Some(match t.to_lowercase().as_str() {
+                "up" | "above" => v(0.0, 0.0, 1.0),
+                "down" | "below" => v(0.0, 0.0, -1.0),
+                "north" | "back" => v(0.0, 1.0, 0.0),
+                "south" | "front" => v(0.0, -1.0, 0.0),
+                "east" | "right" => v(1.0, 0.0, 0.0),
+                "west" | "left" => v(-1.0, 0.0, 0.0),
+                _ => return None,
+            })
+        };
+        let result = match toks.as_slice() {
+            [] => Err(
+                "ClippingPlane <point> <up|down|north|south|east|west|x,y,z>, or ClippingPlane Off"
+                    .to_string(),
+            ),
+            [o] if o.eq_ignore_ascii_case("off") => Ok(None),
+            [p, d] => forma_engine::parse_point(p, self.engine.ctx.last_point)
+                .map_err(|e| e.to_string())
+                .and_then(|p| {
+                    let n = named(d)
+                        .or_else(|| forma_engine::parse_point(d, None).ok().map(|q| q.to_vec()))
+                        .and_then(forma_geom::Vec3::normalized)
+                        .ok_or_else(|| format!("not a direction: {d}"))?;
+                    Ok(Some((p, n)))
+                }),
+            _ => Err("ClippingPlane <point> <direction>, or ClippingPlane Off".to_string()),
+        };
+        match result {
+            Ok(c) => {
+                self.clip = c;
+                if let Some(r) = self.renderer.as_mut() {
+                    r.clip = c.map(|(p, n)| {
+                        (
+                            forma_render::glam::DVec3::new(p.x, p.y, p.z),
+                            forma_render::glam::DVec3::new(n.x, n.y, n.z),
+                        )
+                    });
+                }
+                self.dirty_all();
+                self.log(
+                    LogKind::Normal,
+                    match c {
+                        Some((p, _)) => format!(
+                            "section cut at {} — ClippingPlane Off to remove it",
+                            crate::tools::fmt_p(p)
+                        ),
+                        None => "section cut removed".to_string(),
+                    },
+                );
+            }
+            Err(e) => self.log(LogKind::Error, e),
+        }
     }
 
     /// `NamedView Save <name>` / `NamedView <name>` (restore) / `NamedView Delete <name>`.

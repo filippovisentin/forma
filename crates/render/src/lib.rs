@@ -37,6 +37,7 @@ const BACKGROUND: wgpu::Color = wgpu::Color {
 struct Uniforms {
     view_proj: [[f32; 4]; 4],
     eye: [f32; 4],
+    clip: [f32; 4],
 }
 
 struct Targets {
@@ -140,6 +141,9 @@ pub struct Renderer {
     grid_bounds: GridBounds,
     min_grid_extent: f64,
     pub show_grid: bool,
+    /// Section cut: a point and a normal (world coordinates); everything on the
+    /// normal's side is hidden.
+    pub clip: Option<(DVec3, DVec3)>,
 }
 
 impl Renderer {
@@ -252,7 +256,7 @@ impl Renderer {
         let grid_pipeline = pipeline(
             "forma grid",
             "vs_line",
-            "fs_line",
+            "fs_grid",
             std::mem::size_of::<LineVertex>(),
             &line_attrs,
             wgpu::PrimitiveTopology::LineList,
@@ -273,6 +277,7 @@ impl Renderer {
             grid_bounds: GridBounds::default(),
             min_grid_extent: 1.0,
             show_grid: true,
+            clip: None,
         }
     }
 
@@ -448,9 +453,19 @@ impl Renderer {
             let e = camera.eye();
             [e.x as f32, e.y as f32, e.z as f32, 0.0]
         };
+        let clip = match self.clip {
+            Some((p, n)) => {
+                let n = n.normalize_or_zero();
+                // Scene coordinates are world minus the scene origin.
+                let d = -n.dot(p - self.grid_bounds.origin);
+                [n.x as f32, n.y as f32, n.z as f32, d as f32]
+            }
+            None => [0.0; 4],
+        };
         let u = Uniforms {
             view_proj: camera.view_proj(aspect).to_cols_array_2d(),
             eye,
+            clip,
         };
         queue.write_buffer(&view.uniforms, 0, bytemuck::bytes_of(&u));
 

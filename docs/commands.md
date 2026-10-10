@@ -12,7 +12,7 @@ is in `Help` and `forma-cli commands`.
 
 ## Summary
 
-279 Rhino commands: **171 ✓**, **56 partial**, **34 ✗**, **18 needs kernel**.
+279 Rhino commands: **172 ✓**, **58 partial**, **31 ✗**, **18 needs kernel**.
 
 ## Drawing: points and lines
 
@@ -59,7 +59,7 @@ is in `Help` and `forma-cli commands`.
 | Fillet | partial | `Fillet` between two lines / polyline segments; arcs and NURBS not yet |
 | FilletCorners | ✓ | `FilletCorners` (FC) |
 | Chamfer | partial | `Chamfer` between two lines |
-| BlendCrv | ✗ |  |
+| BlendCrv | partial | `BlendCrv` tangency or curvature (curvature exact at lines and arcs) |
 | MatchCrv | ✗ |  |
 | Extend | ✓ | `Extend` to boundary objects |
 | Trim | ✓ | `Trim` curves with cutting objects |
@@ -69,7 +69,7 @@ is in `Help` and `forma-cli commands`.
 | Rebuild | ✓ | `Rebuild <points> [degree]` (curves; NURBS surfaces need the kernel) |
 | Fair | ✗ |  |
 | Smooth | ✗ |  |
-| SimplifyCrv | ✗ |  |
+| SimplifyCrv | ✓ | `SimplifyCrv` |
 | Convert | ✓ | `Convert [tolerance]` → polylines |
 | CloseCrv | ✓ | `CloseCrv` |
 | Dir / Flip | ✓ | `Flip` (alias Dir) |
@@ -352,7 +352,7 @@ is in `Help` and `forma-cli commands`.
 | Grid | ✓ | F7 |
 | Wireframe / Shaded / Ghosted / X-Ray | ✓ |  |
 | Rendered / Arctic / Technical / Pen | ✗ |  |
-| ClippingPlane | ✗ |  |
+| ClippingPlane | partial | `ClippingPlane <point> <up|down|north…>` / `Off`: one section cut in every view (not an object, faces not capped) |
 | Ortho / Snap / Planar | ✓ | F8 / F9 |
 | Osnap | ✓ | End, Near, Point, Mid, Cen, Int, Perp, Tan, Quad, Knot, Vertex |
 | SmartTrack | ✓ |  |

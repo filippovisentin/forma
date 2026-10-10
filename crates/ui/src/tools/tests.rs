@@ -242,7 +242,7 @@ mod sequence_tools {
         let e = Engine::new();
         for s in seq::ALL {
             // View commands handled by the UI itself (construction planes).
-            if !s.name.starts_with("CPlane") {
+            if !s.name.starts_with("CPlane") && s.name != "ClippingPlane" {
                 assert_eq!(e.resolve(s.name), Some(s.name), "{}", s.name);
             }
             assert_eq!(ToolKind::from_name(s.name), Some(ToolKind::Seq(s)));

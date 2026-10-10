@@ -9,7 +9,11 @@ pub struct Entry {
 }
 
 /// Commands that only exist in the UI (views, display modes, toggles).
-pub const UI_COMMANDS: [(&str, &str); 28] = [
+pub const UI_COMMANDS: [(&str, &str); 29] = [
+    (
+        "ClippingPlane",
+        "Section cut in every view: ClippingPlane <point> <up|down|north…>, Off",
+    ),
     (
         "NamedView",
         "Save / restore a view: NamedView Save <name>, NamedView <name>",

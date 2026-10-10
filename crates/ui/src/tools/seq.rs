@@ -1704,8 +1704,30 @@ pub static BLEND_CRV: Seq = Seq {
     preview: none,
 };
 
+pub static CLIPPING_PLANE: Seq = Seq {
+    name: "ClippingPlane",
+    tip: "ClippingPlane — section cut: hide everything beyond a plane in every view",
+    sel: false,
+    steps: &[
+        In::Point("Point on the cutting plane (e.g. the cut height)"),
+        In::Choice(
+            "Cut away",
+            &["Up", "Down", "North", "South", "East", "West"],
+        ),
+    ],
+    emit: |v, _| {
+        format!(
+            "ClippingPlane {} {}",
+            fmt_p(v[0].p()),
+            v[1].t().to_lowercase()
+        )
+    },
+    preview: none,
+};
+
 /// Every sequence tool (for typed names, help and tests).
 pub static ALL: &[&Seq] = &[
+    &CLIPPING_PLANE,
     &BLEND_CRV,
     &CIRCLE_TTR,
     &ARC_DIRECTION,

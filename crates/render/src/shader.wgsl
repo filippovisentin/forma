@@ -4,7 +4,14 @@ struct Uniforms {
     view_proj: mat4x4<f32>,
     // xyz = eye position (perspective) or view direction towards the scene (ortho), w = 1 for ortho
     eye: vec4<f32>,
+    // Clipping plane in scene coordinates: xyz = normal, w = offset; everything
+    // on the normal's side is cut away. A zero normal disables it.
+    clip: vec4<f32>,
 };
+
+fn clipped(p: vec3<f32>) -> bool {
+    return dot(u.clip.xyz, u.clip.xyz) > 0.0 && dot(u.clip.xyz, p) + u.clip.w > 0.0;
+}
 
 @group(0) @binding(0) var<uniform> u: Uniforms;
 
@@ -52,6 +59,9 @@ fn shade(i: MeshOut) -> vec4<f32> {
 
 @fragment
 fn fs_mesh(i: MeshOut) -> @location(0) vec4<f32> {
+    if (clipped(i.world)) {
+        discard;
+    }
     return shade(i);
 }
 
@@ -63,6 +73,7 @@ struct LineIn {
 struct LineOut {
     @builtin(position) clip: vec4<f32>,
     @location(0) color: vec4<f32>,
+    @location(1) world: vec3<f32>,
 };
 
 @vertex
@@ -70,10 +81,20 @@ fn vs_line(v: LineIn) -> LineOut {
     var o: LineOut;
     o.clip = u.view_proj * vec4<f32>(v.pos, 1.0);
     o.color = v.color;
+    o.world = v.pos;
     return o;
 }
 
 @fragment
 fn fs_line(i: LineOut) -> @location(0) vec4<f32> {
+    if (clipped(i.world)) {
+        discard;
+    }
+    return i.color;
+}
+
+// The grid is never clipped.
+@fragment
+fn fs_grid(i: LineOut) -> @location(0) vec4<f32> {
     return i.color;
 }
