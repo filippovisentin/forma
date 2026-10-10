@@ -539,8 +539,20 @@ impl FormaApp {
             return;
         }
         if let Some(kind) = ToolKind::from_name(&first) {
-            // A sequence command typed with its arguments runs as written.
-            if toks.len() > 1 && matches!(kind, ToolKind::Seq(_)) {
+            // A sequence command typed with all its arguments runs as written;
+            // with only some of them (e.g. `BooleanDifference #3`) the tool starts
+            // with those and asks for the rest.
+            if let (true, ToolKind::Seq(seq)) = (toks.len() > 1, kind) {
+                if toks.len() - 1 < seq.steps.len() && !seq.sel {
+                    self.start_tool(kind);
+                    for t in &toks[1..] {
+                        self.feed_token(t);
+                        if self.tool.is_none() {
+                            break;
+                        }
+                    }
+                    return;
+                }
                 self.run_engine(text);
                 return;
             }
