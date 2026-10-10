@@ -7,6 +7,21 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.7.2] — 2026-10-10
+
+### Added
+- Dialog windows instead of typed prompts: File → Import and Export Selected (file dialogs;
+  Export writes .3dm, .obj or .stl by file type), Array, Box Edit, Annotation Style, select by
+  layer / colour / name / size, copy to layer, one layer on / off, rename / delete layer,
+  object name.
+- Layer panel right click: Show Only This Layer, New Sub-layer, Rename…, Delete….
+
+### Fixed
+- Saved `.3dm` files keep groups, hidden and locked objects; texts are real Rhino text objects
+  (dots stay dots, dimensions are lines + text in a group); all of these come back on Open.
+- Rhino files: hidden and locked objects and groups are read; texts and dots are shown.
+- Layer names with spaces can be renamed (`RenameLayer "old name" "new name"`).
+
 ## [0.7.1] — 2026-10-10
 
 ### Added
