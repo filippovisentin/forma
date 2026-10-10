@@ -49,6 +49,7 @@ pub(crate) mod ffi {
         pub fn f3dm_layer_count(m: *const Model) -> c_int;
         pub fn f3dm_layer_path(m: *const Model, i: c_int, buf: *mut c_char, cap: usize) -> usize;
         pub fn f3dm_object_count(m: *const Model) -> c_int;
+        pub fn f3dm_object_instance(m: *const Model, i: c_int) -> c_int;
         pub fn f3dm_object(m: *const Model, i: c_int, out: *mut Object) -> c_int;
         pub fn f3dm_layer_display(m: *const Model, i: c_int, rgb: *mut u8, visible: *mut c_int);
         pub fn f3dm_face_count(m: *const Model, obj: c_int) -> c_int;

@@ -54,6 +54,11 @@ struct F3dmModel {
   std::vector<const ON_Geometry*> geometry;
   std::vector<const ON_Brep*> breps;
   std::vector<ON_Brep*> owned_breps;
+  // Transformed copies of block members.
+  std::vector<ON_Geometry*> owned_geometry;
+  // Block instance number of each object, -1 for plain objects.
+  std::vector<int> object_instance;
+  int instance_count = 0;
   // Scratch buffers for the two-call "size, then copy" pattern.
   std::vector<std::vector<double>> scratch_loops;  // uv pairs per loop
   std::vector<int> scratch_loop_outer;
@@ -63,6 +68,7 @@ struct F3dmModel {
 
   ~F3dmModel() {
     for (ON_Brep* b : owned_breps) delete b;
+    for (ON_Geometry* g : owned_geometry) delete g;
   }
 };
 
@@ -87,6 +93,102 @@ static int kind_of(const ON_Geometry* g) {
 static std::string utf8(const ON_wString& w) {
   ON_String s(w);  // UTF-16/32 -> UTF-8
   return std::string(static_cast<const char*>(s));
+}
+
+// Adds one object (geometry owned by the model or by `m->owned_geometry`).
+// `instance` >= 0 marks members of one block instance; `parent_rgb` is the
+// instance's own colour (for members coloured "by parent"); `block_name`
+// names members that have no name of their own.
+static void read_object(F3dmModel* m, const std::map<int, int>& index_to_pos,
+                       const ON_Geometry* g, const ON_3dmObjectAttributes* a, int instance,
+                       long parent_rgb, const ON_wString* block_name) {
+  F3dmObject o{};
+  o.kind = kind_of(g);
+  o.layer = -1;
+  if (a) {
+    auto it = index_to_pos.find(a->m_layer_index);
+    if (it != index_to_pos.end()) o.layer = it->second;
+  }
+  if (const ON_Brep* b = ON_Brep::Cast(g)) {
+    o.brep_faces = b->m_F.Count();
+    o.is_solid = b->IsSolid() ? 1 : 0;
+  }
+  if (g) {
+    ON_BoundingBox bb = g->BoundingBox();
+    if (bb.IsValid()) {
+      o.bbox[0] = bb.m_min.x; o.bbox[1] = bb.m_min.y; o.bbox[2] = bb.m_min.z;
+      o.bbox[3] = bb.m_max.x; o.bbox[4] = bb.m_max.y; o.bbox[5] = bb.m_max.z;
+    }
+  }
+  m->objects.push_back(o);
+  long rgb = -1;
+  if (a && a->ColorSource() == ON::color_from_object) {
+    const ON_Color col = a->m_color;
+    rgb = (static_cast<long>(col.Red()) << 16) | (col.Green() << 8) | col.Blue();
+  } else if (a && a->ColorSource() == ON::color_from_parent) {
+    rgb = parent_rgb;
+  }
+  m->object_colors.push_back(rgb);
+  {
+    ON_wString wn;
+    if (a) wn = a->Name();
+    if (wn.IsEmpty() && block_name) wn = *block_name;
+    m->object_names.push_back(utf8(wn));
+  }
+  m->object_instance.push_back(instance);
+  m->geometry.push_back(g);
+  const ON_Brep* brep = ON_Brep::Cast(g);
+  if (!brep) {
+    if (const ON_Extrusion* ex = ON_Extrusion::Cast(g)) {
+      ON_Brep* converted = ex->BrepForm(nullptr);
+      if (converted) {
+        m->owned_breps.push_back(converted);
+        brep = converted;
+      }
+    }
+  }
+  m->breps.push_back(brep);
+}
+
+// Adds the members of a block instance, transformed by `parent * ref.m_xform`;
+// nested instances recurse (up to a sane depth).
+static void expand_instance(F3dmModel* m, const std::map<int, int>& index_to_pos,
+                            const ON_InstanceRef* ref, const ON_Xform& parent, int depth,
+                            int instance, const ON_3dmObjectAttributes* ref_attrs,
+                            long parent_rgb) {
+  if (depth > 16) return;
+  const ON_ModelComponentReference dref = m->model.ComponentFromId(
+      ON_ModelComponent::Type::InstanceDefinition, ref->m_instance_definition_uuid);
+  const ON_InstanceDefinition* idef = ON_InstanceDefinition::FromModelComponentRef(dref, nullptr);
+  if (!idef) return;
+  const ON_Xform x = parent * ref->m_xform;
+  const ON_wString name = idef->Name();
+  const ON_SimpleArray<ON_UUID>& ids = idef->InstanceGeometryIdList();
+  for (int k = 0; k < ids.Count(); k++) {
+    const ON_ModelComponentReference gref =
+        m->model.ComponentFromId(ON_ModelComponent::Type::ModelGeometry, ids[k]);
+    const ON_ModelGeometryComponent* mg =
+        ON_ModelGeometryComponent::FromModelComponentRef(gref, nullptr);
+    if (!mg) continue;
+    const ON_Geometry* g = mg->Geometry(nullptr);
+    const ON_3dmObjectAttributes* a = mg->Attributes(nullptr);
+    if (!g) continue;
+    long rgb = parent_rgb;
+    if (a && a->ColorSource() == ON::color_from_object) {
+      const ON_Color col = a->m_color;
+      rgb = (static_cast<long>(col.Red()) << 16) | (col.Green() << 8) | col.Blue();
+    }
+    if (const ON_InstanceRef* inner = ON_InstanceRef::Cast(g)) {
+      expand_instance(m, index_to_pos, inner, x, depth + 1, instance, ref_attrs, rgb);
+      continue;
+    }
+    ON_Geometry* copy = g->Duplicate();
+    if (!copy) continue;
+    copy->Transform(x);
+    m->owned_geometry.push_back(copy);
+    // Members on layer "0"-style defaults keep their own layer; Rhino does the same.
+    read_object(m, index_to_pos, copy, a ? a : ref_attrs, instance, parent_rgb, &name);
+  }
 }
 
 // Returns nullptr on failure.
@@ -133,58 +235,26 @@ F3dmModel* f3dm_read(const char* path) {
     m->layer_paths.push_back(path);
   }
 
+  // Top-level objects; block instances are expanded into their (transformed)
+  // member objects, which share an instance number so Forma can group them.
   ONX_ModelComponentIterator git(m->model, ON_ModelComponent::Type::ModelGeometry);
   for (const ON_ModelComponent* c = git.FirstComponent(); c; c = git.NextComponent()) {
     const ON_ModelGeometryComponent* mg = ON_ModelGeometryComponent::Cast(c);
     if (!mg) continue;
     const ON_Geometry* g = mg->Geometry(nullptr);
     const ON_3dmObjectAttributes* a = mg->Attributes(nullptr);
-    F3dmObject o{};
-    o.kind = kind_of(g);
-    o.layer = -1;
-    if (a) {
-      auto it = index_to_pos.find(a->m_layer_index);
-      if (it != index_to_pos.end()) o.layer = it->second;
-    }
-    if (const ON_Brep* b = ON_Brep::Cast(g)) {
-      o.brep_faces = b->m_F.Count();
-      o.is_solid = b->IsSolid() ? 1 : 0;
-    }
-    if (g) {
-      ON_BoundingBox bb = g->BoundingBox();
-      if (bb.IsValid()) {
-        o.bbox[0] = bb.m_min.x; o.bbox[1] = bb.m_min.y; o.bbox[2] = bb.m_min.z;
-        o.bbox[3] = bb.m_max.x; o.bbox[4] = bb.m_max.y; o.bbox[5] = bb.m_max.z;
+    if (a && a->IsInstanceDefinitionObject()) continue;  // block member, see below
+    if (const ON_InstanceRef* ref = ON_InstanceRef::Cast(g)) {
+      const int instance = m->instance_count++;
+      long rgb = -1;
+      if (a && a->ColorSource() == ON::color_from_object) {
+        const ON_Color col = a->m_color;
+        rgb = (static_cast<long>(col.Red()) << 16) | (col.Green() << 8) | col.Blue();
       }
+      expand_instance(m, index_to_pos, ref, ON_Xform::IdentityTransformation, 0, instance, a, rgb);
+      continue;
     }
-    m->objects.push_back(o);
-    long rgb = -1;
-    if (a && a->ColorSource() == ON::color_from_object) {
-      const ON_Color col = a->m_color;
-      rgb = (static_cast<long>(col.Red()) << 16) | (col.Green() << 8) | col.Blue();
-    }
-    m->object_colors.push_back(rgb);
-    {
-      std::string name;
-      if (a) {
-        const ON_wString wn = a->Name();
-        const ON_String utf8(wn);
-        name = static_cast<const char*>(utf8);
-      }
-      m->object_names.push_back(name);
-    }
-    m->geometry.push_back(g);
-    const ON_Brep* brep = ON_Brep::Cast(g);
-    if (!brep) {
-      if (const ON_Extrusion* ex = ON_Extrusion::Cast(g)) {
-        ON_Brep* converted = ex->BrepForm(nullptr);
-        if (converted) {
-          m->owned_breps.push_back(converted);
-          brep = converted;
-        }
-      }
-    }
-    m->breps.push_back(brep);
+    read_object(m, index_to_pos, g, a, -1, -1, nullptr);
   }
   return m;
 }
@@ -199,6 +269,12 @@ void f3dm_layer_display(const F3dmModel* m, int i, unsigned char rgb[3], int* vi
   rgb[1] = m->layers[i].rgb[1];
   rgb[2] = m->layers[i].rgb[2];
   *visible = m->layers[i].visible;
+}
+
+// Block instance number of an object (members of one instance share it), or -1.
+int f3dm_object_instance(const F3dmModel* m, int i) {
+  if (i < 0 || static_cast<size_t>(i) >= m->object_instance.size()) return -1;
+  return m->object_instance[i];
 }
 
 // Object colour when set on the object (returns 1), else 0 (by layer).

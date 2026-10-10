@@ -20,18 +20,35 @@ fn layer_for(doc: &mut Document, name: &str, color: [u8; 3], visible: bool) -> L
         .unwrap_or_else(|| doc.add_layer(name, color, visible))
 }
 
+/// Group and name of an imported object.
+type Extra = (Option<u32>, Option<String>);
+
 /// Add clipboard-style items to the document as one undo step; returns new ids.
-fn add_items(ctx: &mut Context, items: &[(ClipboardItem, bool)]) -> Vec<ObjectId> {
+/// `extra` (empty, or one per item) carries groups, offset by `group_base`, and names.
+fn add_items(
+    ctx: &mut Context,
+    items: &[(ClipboardItem, bool)],
+    extra: &[Extra],
+    group_base: u32,
+) -> Vec<ObjectId> {
     let layers: Vec<LayerId> = items
         .iter()
         .map(|(it, visible)| layer_for(&mut ctx.doc, &it.layer, it.layer_color, *visible))
         .collect();
     let mut t = ctx.doc.begin();
     let mut ids = Vec::new();
-    for ((it, _), layer) in items.iter().zip(layers) {
+    for (k, ((it, _), layer)) in items.iter().zip(layers).enumerate() {
         let id = t.add_on_layer(it.geometry.clone(), layer);
         if it.color.is_some() {
             t.set_color(id, it.color);
+        }
+        if let Some((g, n)) = extra.get(k) {
+            if let Some(g) = g {
+                t.set_group(id, Some(g + group_base));
+            }
+            if n.is_some() {
+                t.set_name(id, n.clone());
+            }
         }
         ids.push(id);
     }
@@ -105,7 +122,7 @@ impl Command for Paste {
         }
         let items: Vec<(ClipboardItem, bool)> =
             ctx.clipboard.iter().map(|c| (c.clone(), true)).collect();
-        let ids = add_items(ctx, &items);
+        let ids = add_items(ctx, &items, &[], 0);
         ctx.selection = ids.iter().copied().collect();
         Ok(format!("{} object(s) pasted", ids.len()))
     }
@@ -140,7 +157,11 @@ impl Command for Import {
         if items.is_empty() {
             return Err(CommandError::Invalid(format!("{path}: nothing to import")));
         }
-        let ids = add_items(ctx, &items);
+        // Block groups are renumbered after the existing ones; names are kept.
+        let base = ctx.doc.objects().filter_map(|o| o.group).max().unwrap_or(0);
+        let extra: Vec<(Option<u32>, Option<String>)> =
+            src.objects().map(|o| (o.group, o.name.clone())).collect();
+        let ids = add_items(ctx, &items, &extra, base);
         ctx.selection = ids.iter().copied().collect();
         Ok(format!("imported {} object(s) from {path}", ids.len()))
     }
@@ -309,6 +330,44 @@ fn export_stl(ctx: &Context, ids: &[ObjectId], path: &str) -> CommandResult {
 #[cfg(test)]
 mod tests {
     use crate::Engine;
+
+    /// Block instances arrive expanded, one named group per instance. Needs
+    /// rhino3dm (McNeel's Python reader/writer) to make the file; skipped without it.
+    #[test]
+    fn open_expands_blocks() {
+        let dir = std::env::temp_dir().join(format!("forma-blocks-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("blk.3dm");
+        let script = "import sys, rhino3dm as r\n\
+            m = r.File3dm()\n\
+            line = r.LineCurve(r.Point3d(0,0,0), r.Point3d(10,0,0))\n\
+            i = m.InstanceDefinitions.Add('sedia','','','',r.Point3d(0,0,0),(line,),(r.ObjectAttributes(),))\n\
+            d = m.InstanceDefinitions[i]\n\
+            for t in [(100,0,0),(0,50,0)]:\n    m.Objects.AddInstanceObject(r.InstanceReference(d.Id, r.Transform.Translation(*t)))\n\
+            assert m.Write(sys.argv[1], 8)\n";
+        let made = std::process::Command::new("python3")
+            .args(["-c", script, path.to_str().unwrap()])
+            .status()
+            .is_ok_and(|s| s.success());
+        if !made {
+            eprintln!("rhino3dm not available: skipped");
+            return;
+        }
+        let mut e = Engine::new();
+        e.run_line(&format!("Open {}", path.display())).unwrap();
+        assert_eq!(e.doc().len(), 2);
+        let groups: Vec<_> = e.doc().objects().map(|o| o.group).collect();
+        assert_eq!(groups, vec![Some(1), Some(2)]);
+        e.run_line("SelName sedia").unwrap();
+        assert_eq!(e.ctx.selection.len(), 2);
+        let b = e.doc().objects().next().unwrap().geometry.bounding_box();
+        assert!((b.min.x - 100.0).abs() < 1e-9 && (b.max.x - 110.0).abs() < 1e-9);
+        // Import keeps the blocks as groups after the existing ones.
+        e.run_line(&format!("Import {}", path.display())).unwrap();
+        let groups: Vec<_> = e.doc().objects().map(|o| o.group).collect();
+        assert_eq!(groups, vec![Some(1), Some(2), Some(3), Some(4)]);
+        std::fs::remove_dir_all(&dir).ok();
+    }
 
     #[test]
     fn export_obj_and_stl() {

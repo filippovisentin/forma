@@ -1,5 +1,5 @@
 //! Everyday workflow commands: SelPrev, ShowSelected, UnlockSelected, Lines,
-//! Stretch, ClosestPt, DupFaceBorder, UnifyMeshNormals.
+//! Stretch, ClosestPt, DupFaceBorder, UnifyMeshNormals, Block, Insert.
 
 use crate::edit::parse_ids;
 use crate::{Args, Command, CommandError, CommandResult, Context};
@@ -470,10 +470,149 @@ impl Command for UnifyMeshNormals {
     }
 }
 
+simple_command!(
+    Block,
+    "Block",
+    &[],
+    "Block <name> — turn the selected objects into a block: one group named <name> (Rhino blocks open the same way)"
+);
+impl Command for Block {
+    impl_meta!(Block);
+    fn run(&self, ctx: &mut Context, args: &mut Args) -> CommandResult {
+        let name = args.rest().join(" ");
+        let name = name.trim().trim_matches('"').to_string();
+        if name.is_empty() {
+            return Err(CommandError::MissingInput("name"));
+        }
+        let ids = ctx.selected("Block")?;
+        let g = ctx
+            .doc
+            .objects()
+            .filter_map(|o| o.group)
+            .max()
+            .map_or(1, |m| m + 1);
+        let mut t = ctx.doc.begin();
+        for id in &ids {
+            t.set_group(*id, Some(g));
+            t.set_name(*id, Some(name.clone()));
+        }
+        t.commit();
+        Ok(format!("block \"{name}\": {} object(s)", ids.len()))
+    }
+}
+
+simple_command!(
+    Insert,
+    "Insert",
+    &[],
+    "Insert <name> <point> [scale] [angle°] — place a copy of a block (a group named <name>) with its bottom centre at <point>"
+);
+impl Command for Insert {
+    impl_meta!(Insert);
+    fn run(&self, ctx: &mut Context, args: &mut Args) -> CommandResult {
+        let name = args
+            .next_token()
+            .ok_or(CommandError::MissingInput("name"))?
+            .trim_matches('"')
+            .to_string();
+        let at = args.point("insertion point", ctx.last_point)?;
+        let scale = args.optional_number().unwrap_or(1.0);
+        let angle = args.optional_number().unwrap_or(0.0);
+        if scale.abs() <= f64::EPSILON {
+            return Err(CommandError::Invalid("scale must not be 0".into()));
+        }
+        // The first group whose members carry this name is the definition.
+        let doc = &ctx.doc;
+        let group = doc
+            .objects()
+            .filter(|o| {
+                o.name
+                    .as_deref()
+                    .is_some_and(|n| n.eq_ignore_ascii_case(&name))
+            })
+            .find_map(|o| o.group)
+            .ok_or_else(|| CommandError::Invalid(format!("no block named \"{name}\"")))?;
+        let members: Vec<forma_doc::Object> = doc
+            .objects()
+            .filter(|o| o.group == Some(group))
+            .cloned()
+            .collect();
+        let pts: Vec<Point3> = members
+            .iter()
+            .flat_map(|o| {
+                let b = o.geometry.bounding_box();
+                [b.min, b.max]
+            })
+            .collect();
+        let bb = forma_geom::BoundingBox::from_points(&pts)
+            .ok_or_else(|| CommandError::Invalid("empty block".into()))?;
+        let base = Point3::new(
+            (bb.min.x + bb.max.x) / 2.0,
+            (bb.min.y + bb.max.y) / 2.0,
+            bb.min.z,
+        );
+        let x = Xform::translation(Point3::ORIGIN - base)
+            .then(&Xform::scale(Point3::ORIGIN, scale))
+            .then(&Xform::rotation(
+                Point3::ORIGIN,
+                Vec3::Z,
+                angle.to_radians(),
+            ))
+            .then(&Xform::translation(at - Point3::ORIGIN));
+        let new_group = doc.objects().filter_map(|o| o.group).max().unwrap_or(0) + 1;
+        let mut t = ctx.doc.begin();
+        let mut ids = Vec::new();
+        for o in &members {
+            let id = t.add_like(o.geometry.transformed(&x), o);
+            t.set_group(id, Some(new_group));
+            ids.push(id);
+        }
+        t.commit();
+        ctx.selection = ids.iter().copied().collect();
+        ctx.last_point = Some(at);
+        Ok(format!("inserted \"{name}\" ({} object(s))", ids.len()))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::Engine;
     use forma_doc::Geometry;
+
+    #[test]
+    fn block_insert_explode() {
+        let mut e = Engine::new();
+        e.run_line("Box 0,0 10,10 5").unwrap();
+        e.run_line("Circle 5,5,5 2").unwrap();
+        e.run_line("SelAll").unwrap();
+        e.run_line("Block tavolo").unwrap();
+        e.run_line("SelNone").unwrap();
+        e.run_line("Insert tavolo 100,0 2 90").unwrap();
+        assert_eq!(e.doc().len(), 4);
+        assert_eq!(e.ctx.selection.len(), 2);
+        let pts: Vec<_> = e
+            .ctx
+            .selection
+            .iter()
+            .flat_map(|id| {
+                let b = e.doc().object(*id).unwrap().geometry.bounding_box();
+                [b.min, b.max]
+            })
+            .collect();
+        let bb = forma_geom::BoundingBox::from_points(&pts).unwrap();
+        assert!(
+            (bb.min.x - 90.0).abs() < 1e-9 && (bb.max.x - 110.0).abs() < 1e-9,
+            "{bb:?}"
+        );
+        assert!(
+            bb.min.z.abs() < 1e-9 && (bb.max.z - 10.0).abs() < 1e-9,
+            "{bb:?}"
+        );
+        let g: Vec<_> = e.doc().objects().map(|o| o.group).collect();
+        assert_eq!(g, vec![Some(1), Some(1), Some(2), Some(2)]);
+        e.run_line("ExplodeBlock").unwrap();
+        assert!(e.run_line("Insert sedia 0,0").is_err());
+    }
 
     #[test]
     fn sel_prev_after_deselect() {

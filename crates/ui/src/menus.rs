@@ -181,6 +181,17 @@ impl FormaApp {
                         Act::Tool(K::OnSel("SelGroup")),
                     );
                 });
+                ui.menu_button("Blocks", |ui| {
+                    tool(ui, &mut act, "Create Block", K::Seq(&q::BLOCK));
+                    tool(ui, &mut act, "Insert Block", K::Seq(&q::INSERT));
+                    item(
+                        ui,
+                        &mut act,
+                        "Explode Block",
+                        "",
+                        Act::Tool(K::OnSel("ExplodeBlock")),
+                    );
+                });
                 ui.menu_button("Visibility", |ui| {
                     item(ui, &mut act, "Hide", "Ctrl+H", Act::Tool(K::OnSel("Hide")));
                     item(ui, &mut act, "Show", "Ctrl+Alt+H", Act::Cmd("Show"));

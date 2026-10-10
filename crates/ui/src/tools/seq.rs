@@ -1516,8 +1516,41 @@ sel_only!(
     "UnifyMeshNormals — make all faces of the selected meshes point the same way"
 );
 
+pub static BLOCK: Seq = Seq {
+    name: "Block",
+    tip: "Block — group the selected objects as a named block",
+    sel: true,
+    steps: &[In::Text("Block name")],
+    emit: |v, _| format!("Block {}", v[0].t()),
+    preview: none,
+};
+
+pub static INSERT: Seq = Seq {
+    name: "Insert",
+    tip: "Insert — place a copy of a block",
+    sel: false,
+    steps: &[
+        In::Text("Block name"),
+        In::Point("Insertion point"),
+        In::Num("Scale", Some(1.0)),
+        In::Num("Rotation angle", Some(0.0)),
+    ],
+    emit: |v, _| {
+        format!(
+            "Insert {} {} {} {}",
+            v[0].t(),
+            fmt_p(v[1].p()),
+            round(v[2].n()),
+            round(v[3].n())
+        )
+    },
+    preview: none,
+};
+
 /// Every sequence tool (for typed names, help and tests).
 pub static ALL: &[&Seq] = &[
+    &BLOCK,
+    &INSERT,
     &LINES,
     &STRETCH,
     &CLOSEST_PT,

@@ -251,7 +251,7 @@ impl Command for Group {
 simple_command!(
     Ungroup,
     "Ungroup",
-    &["Ug"],
+    &["Ug", "ExplodeBlock"],
     "Ungroup — remove the selected objects from their groups"
 );
 impl Command for Ungroup {

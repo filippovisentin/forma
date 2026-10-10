@@ -38,8 +38,11 @@ pub struct ImportedObject {
     pub color: Option<[u8; 3]>,
     /// Object name, if any.
     pub name: Option<String>,
-    /// `None` for objects that cannot be displayed yet (block instances, annotations…).
+    /// `None` for objects that cannot be displayed yet (annotations…).
     pub geometry: Option<DisplayGeometry>,
+    /// Block instance this object comes from (members of one instance share the
+    /// number); `None` for plain objects. Instances are expanded on import.
+    pub instance: Option<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -108,7 +111,10 @@ pub fn import_display(path: impl AsRef<Path>) -> Result<Import, Error> {
                 let len = (n as usize).min(buf.len() - 1);
                 String::from_utf8_lossy(&buf[..len]).into_owned()
             });
+            // SAFETY: model valid, obj in range.
+            let instance = usize::try_from(unsafe { ffi::f3dm_object_instance(m, obj) }).ok();
             ImportedObject {
+                instance,
                 kind: info.kind,
                 layer: info.layer,
                 color: has.then_some(rgb),

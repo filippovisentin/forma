@@ -14,8 +14,9 @@ fn unit(u: Units) -> LengthUnit {
     }
 }
 
-/// Read a Rhino file into a fresh document. Objects that cannot be displayed yet
-/// (block instances, annotations) are skipped.
+/// Read a Rhino file into a fresh document. Block instances arrive expanded, each
+/// one as a group named after its block. Objects that cannot be displayed yet
+/// (annotations) are skipped.
 pub fn open_3dm(path: &str) -> Result<Document, CommandError> {
     let imp = import_display(path).map_err(|e| CommandError::Invalid(e.to_string()))?;
     let mut doc = Document::new();
@@ -51,6 +52,9 @@ pub fn open_3dm(path: &str) -> Result<Document, CommandError> {
             }
             if o.name.is_some() {
                 t.set_name(id, o.name);
+            }
+            if let Some(i) = o.instance {
+                t.set_group(id, u32::try_from(i + 1).ok());
             }
         }
         t.commit();

@@ -12,7 +12,7 @@ is in `Help` and `forma-cli commands`.
 
 ## Summary
 
-279 Rhino commands: **162 ✓**, **52 partial**, **47 ✗**, **18 needs kernel**.
+279 Rhino commands: **163 ✓**, **54 partial**, **44 ✗**, **18 needs kernel**.
 
 ## Drawing: points and lines
 
@@ -224,10 +224,10 @@ is in `Help` and `forma-cli commands`.
 | SetObjectName (object name) | ✓ | `SetObjectName`, saved to .3dm |
 | Group / Ungroup | ✓ |  |
 | SelGroup | ✓ |  |
-| Block | ✗ |  |
-| Insert | ✗ |  |
+| Block | partial | `Block <name>`: a named group; Rhino block instances open expanded, one group each (not written back as blocks) |
+| Insert | partial | `Insert <name> <point> [scale] [angle]` copies a block group |
 | BlockEdit | ✗ |  |
-| ExplodeBlock | ✗ | block instances are not read yet |
+| ExplodeBlock | ✓ | `ExplodeBlock` (= `Ungroup`) |
 | History (Record History) | ✗ |  |
 
 ## Selection

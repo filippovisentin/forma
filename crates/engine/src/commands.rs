@@ -86,6 +86,8 @@ pub fn builtin() -> Vec<Box<dyn Command>> {
         Box::new(crate::workflow::ClosestPt),
         Box::new(crate::workflow::DupFaceBorder),
         Box::new(crate::workflow::UnifyMeshNormals),
+        Box::new(crate::workflow::Block),
+        Box::new(crate::workflow::Insert),
         Box::new(crate::select::SelCrv),
         Box::new(crate::select::SelMesh),
         Box::new(crate::select::SelPt),
@@ -424,7 +426,9 @@ mod tests {
         e.run_line(&format!("Open {p}")).unwrap();
         assert_eq!(e.doc().units.abbreviation(), "cm");
         assert_eq!(e.doc().layers.len(), 9);
-        assert!(e.doc().len() > 1100);
+        // 477 model objects; the 690 objects of its unused block definitions are
+        // not shown (Rhino does not show them either).
+        assert!(e.doc().len() > 450 && e.doc().len() < 1100);
         assert!(!e.doc().can_undo());
     }
 
