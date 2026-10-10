@@ -81,6 +81,10 @@ impl FormaApp {
         self.draw_point_objects(&p, &pr);
         self.draw_annotations(&p, &pr);
         self.draw_grips(&p, &pr);
+        if self.capturing() {
+            // Only the model in a view capture.
+            return;
+        }
         if let (Some(t), Some(h)) = (self.tool.as_ref(), self.hover.as_ref()) {
             self.draw_tool(&p, &pr, vi, t, h);
         }

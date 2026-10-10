@@ -60,6 +60,13 @@ impl FormaApp {
             return;
         }
         let first = line.split_whitespace().next().unwrap_or("").to_lowercase();
+        if first == "viewcapturetofile" || first == "capture" {
+            let rest = line
+                .split_once(' ')
+                .map(|(_, r)| r.trim().trim_matches('"').to_string());
+            self.capture_view(rest.filter(|r| !r.is_empty()));
+            return;
+        }
         if first.starts_with("cplane") {
             let rest = line.split_once(' ').map_or("", |(_, r)| r);
             match first.as_str() {

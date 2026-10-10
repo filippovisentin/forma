@@ -109,6 +109,7 @@ impl FormaApp {
             grips: crate::grips::Grips::default(),
             cplane_dirty: false,
             form: None,
+            capture: None,
             face_drag: None,
             face_typed: false,
             face_hot: false,
@@ -481,6 +482,7 @@ impl eframe::App for FormaApp {
             .show(ui, |ui| self.ui_viewports(ui, frame));
         self.ui_confirm(&ctx);
         self.ui_form(&ctx);
+        self.poll_capture(&ctx);
 
         // Changes made by panels this frame (commands, layer toggles) need a
         // redraw. Mouse and keyboard input repaint by themselves: no continuous

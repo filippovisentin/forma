@@ -103,7 +103,12 @@ impl FormaApp {
                 });
             });
             for ch in typed.chars() {
-                if ch == ' ' {
+                // In a text prompt (Text, Dot, Leader…) a space is part of the text.
+                let typing_text = self
+                    .tool
+                    .as_ref()
+                    .is_some_and(|t| t.want() == crate::tools::Want::Text);
+                if ch == ' ' && !typing_text {
                     let text = self.take_command();
                     self.submit_space(&text);
                 } else {

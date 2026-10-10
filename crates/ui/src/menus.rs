@@ -91,6 +91,7 @@ impl FormaApp {
                 item(ui, &mut act, "Save", "Ctrl+S", Act::Save);
                 item(ui, &mut act, "Save As…", "Ctrl+Shift+S", Act::SaveAs);
                 item(ui, &mut act, "Incremental Save", "", Act::Cmd("IncrementalSave"));
+                item(ui, &mut act, "Capture View to Image…", "", Act::Cmd("ViewCaptureToFile"));
                 item(
                     ui,
                     &mut act,

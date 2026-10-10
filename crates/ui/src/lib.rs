@@ -10,6 +10,7 @@
 //! (history, prompt, autocomplete), `menus`, `toolbar`, `panels`, `status`.
 
 mod app;
+mod capture;
 mod cmdline;
 mod commands;
 mod complete;
@@ -319,6 +320,8 @@ struct FormaApp {
     cplane_dirty: bool,
     /// The open command dialog (Array, Box Edit, layer operations…).
     form: Option<dialogs::OpenForm>,
+    /// A view capture to save (View → Capture View to Image).
+    capture: Option<capture::Capture>,
     /// Tool values remembered between uses (Offset distance, Fillet radius…).
     offset_distance: f64,
     fillet_radius: f64,
