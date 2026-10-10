@@ -55,7 +55,8 @@ pub fn run(open: Option<String>) -> eframe::Result {
             .with_title("Forma")
             .with_inner_size([1500.0, 950.0])
             .with_min_inner_size([800.0, 500.0])
-            .with_drag_and_drop(true),
+            .with_drag_and_drop(true)
+            .with_icon(std::sync::Arc::new(app_icon())),
         renderer: eframe::Renderer::Wgpu,
         ..Default::default()
     };
@@ -70,6 +71,72 @@ pub fn run(open: Option<String>) -> eframe::Result {
             Ok(Box::new(app))
         }),
     )
+}
+
+/// Window and taskbar icon, drawn in code (no image assets): a white
+/// wireframe box on a blue rounded square.
+fn app_icon() -> egui::IconData {
+    const N: usize = 64;
+    let mut rgba = vec![0u8; N * N * 4];
+    // Isometric box corners (pixels).
+    let p = |x: f32, y: f32| (x, y);
+    let (top, l, r, c) = (p(32.0, 12.0), p(13.0, 22.0), p(51.0, 22.0), p(32.0, 32.0));
+    let (lb, rb, cb) = (p(13.0, 42.0), p(51.0, 42.0), p(32.0, 53.0));
+    let edges = [
+        (top, l),
+        (top, r),
+        (l, c),
+        (r, c),
+        (l, lb),
+        (r, rb),
+        (c, cb),
+        (lb, cb),
+        (rb, cb),
+    ];
+    let dist = |(px, py): (f32, f32), (a, b): ((f32, f32), (f32, f32))| {
+        let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+        let t = (((px - a.0) * dx + (py - a.1) * dy) / (dx * dx + dy * dy)).clamp(0.0, 1.0);
+        ((px - a.0 - t * dx).powi(2) + (py - a.1 - t * dy).powi(2)).sqrt()
+    };
+    for y in 0..N {
+        for x in 0..N {
+            let (fx, fy) = (x as f32 + 0.5, y as f32 + 0.5);
+            // Rounded square, radius 12, with a soft edge.
+            let qx = (fx - 32.0).abs() - 20.0;
+            let qy = (fy - 32.0).abs() - 20.0;
+            let outside =
+                (qx.max(0.0).powi(2) + qy.max(0.0).powi(2)).sqrt() + qx.max(qy).min(0.0) - 10.0;
+            let alpha = (0.5 - outside).clamp(0.0, 1.0);
+            if alpha <= 0.0 {
+                continue;
+            }
+            // Blue background, lighter at the top.
+            let k = fy / N as f32;
+            let mut col = [
+                40.0 + 30.0 * (1.0 - k),
+                90.0 + 40.0 * (1.0 - k),
+                170.0 + 40.0 * (1.0 - k),
+            ];
+            let d = edges
+                .iter()
+                .map(|e| dist((fx, fy), *e))
+                .fold(f32::INFINITY, f32::min);
+            let line = (2.6 - d).clamp(0.0, 1.0);
+            for c in &mut col {
+                *c += (255.0 - *c) * line;
+            }
+            let i = (y * N + x) * 4;
+            rgba[i] = col[0] as u8;
+            rgba[i + 1] = col[1] as u8;
+            rgba[i + 2] = col[2] as u8;
+            rgba[i + 3] = (alpha * 255.0) as u8;
+        }
+    }
+    egui::IconData {
+        rgba,
+        width: N as u32,
+        height: N as u32,
+    }
 }
 
 #[derive(Clone, Copy, PartialEq)]

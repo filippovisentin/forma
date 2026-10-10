@@ -4,6 +4,7 @@ FORMA 0.7 — modellatore personale in stile Rhino 8
 Avvio
   Doppio clic su forma.exe. Se Windows mostra "PC protetto da Windows":
   "Ulteriori informazioni" -> "Esegui comunque" (l'app non è firmata).
+  "Crea collegamento sul Desktop.bat" aggiunge Forma al Desktop e al menu Start.
 
 Interfaccia (come Rhino 8)
   In alto: menu, riga di comando con lo storico, schede (Standard, Set View,
@@ -12,7 +13,7 @@ Interfaccia (come Rhino 8)
   Properties (F3), Layers e Help. In basso le schede delle viste, la barra Osnap
   e la barra di stato (Grid Snap, Ortho, Planar, Osnap, Gumball, Filter).
   Clic sul titolo di una vista ("Top ▾"): cambia vista, modalità di
-  visualizzazione (Wireframe, Shaded, Ghosted, X-Ray), massimizza.
+  visualizzazione (Wireframe, Shaded), massimizza.
   Doppio clic sul titolo: massimizza / torna a 4 viste.
 
 Mouse
@@ -27,6 +28,7 @@ Tastiera
   Esc: chiude un menu, annulla il comando in corso (e il testo scritto),
   altrimenti cancella il testo, altrimenti deseleziona.
   Canc elimina · Ctrl+Z/Y · Ctrl+C/X/V copia/taglia/incolla
+  F10 / F11 punti di controllo on/off · ZW zoom finestra
   Ctrl+G gruppo · Ctrl+Shift+G separa · Ctrl+H nascondi · Ctrl+Alt+H mostra
   Ctrl+L blocca · Ctrl+Alt+L sblocca · Ctrl+J Join · F1 aiuto · F3 proprietà
   F7 griglia · F8 Ortho · F9 Grid Snap

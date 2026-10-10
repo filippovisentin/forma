@@ -48,7 +48,7 @@ jobs:
         run: |
           mkdir -p dist/Forma
           cp target/release/forma.exe target/release/forma-cli.exe dist/Forma/
-          cp packaging/LEGGIMI.txt dist/Forma/
+          cp packaging/LEGGIMI.txt "packaging/Crea collegamento sul Desktop.bat" dist/Forma/
           cp LICENSE-MIT LICENSE-APACHE ATTRIBUTION.md dist/Forma/
           cp -r packaging/licenses dist/Forma/
           cd dist && 7z a -tzip Forma-windows.zip Forma > /dev/null

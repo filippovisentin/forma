@@ -7,6 +7,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.7.1] — 2026-10-10
+
+### Added
+- `Make2D [top|front|right|back|left|bottom] [hidden]`: hidden-line plans and elevations of
+  meshes and curves (Dimension menu).
+- Window and taskbar icon.
+- `Crea collegamento sul Desktop.bat` in the zip: Desktop and Start-menu shortcut.
+
 ## [0.7.0] — 2026-10-10
 
 ### Added
