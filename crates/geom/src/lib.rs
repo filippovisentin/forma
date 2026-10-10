@@ -6,6 +6,7 @@
 
 mod annotation;
 mod arc;
+mod brep;
 mod curve;
 mod curvetools;
 mod faces;
@@ -14,6 +15,7 @@ mod make2d;
 mod meshtools;
 mod nurbs;
 mod plane;
+mod polyhedron;
 mod primitives;
 mod reduce;
 mod solids;
@@ -22,6 +24,7 @@ mod xform;
 
 pub use annotation::{format_value, text_width, DimKind, Dimension, Label, Text};
 pub use arc::CircleArc;
+pub use brep::Brep;
 pub use curve::{
     carrier_intersections, chamfer_lines, crossings, extend, fillet_corners, fillet_lines, join,
     offset, side_of, split, trim, Chain, CurveError, ExtendTo, Seg,
@@ -43,6 +46,7 @@ pub use meshtools::{
 };
 pub use nurbs::{Bezier2, NurbsCurve};
 pub use plane::Plane;
+pub use polyhedron::{PolyFace, Polyhedron};
 pub use primitives::{
     cone_mesh, coons_mesh, edge_curves_to_sides, ellipsoid_mesh, grid_mesh, miter_offset,
     pipe_mesh, pyramid_mesh, ring, tapered_extrude_mesh, torus_mesh, tube_mesh,

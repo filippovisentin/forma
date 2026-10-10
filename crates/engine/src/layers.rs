@@ -170,7 +170,7 @@ impl Command for SelColor {
 /// Points describing an object for duplicate detection.
 fn signature(g: &Geometry) -> Vec<forma_geom::Point3> {
     match g {
-        Geometry::Mesh(m) => m.positions.clone(),
+        Geometry::Mesh(m) | Geometry::Brep(forma_geom::Brep { mesh: m, .. }) => m.positions.clone(),
         Geometry::Point(p) => vec![*p],
         g => g.curve_points(),
     }
@@ -311,10 +311,9 @@ impl Command for SelClosedMesh {
     impl_meta!(SelClosedMesh);
     fn run(&self, ctx: &mut Context, _args: &mut Args) -> CommandResult {
         let tol = ctx.doc.absolute_tolerance.max(1e-9);
-        select_objects(
-            ctx,
-            |o| matches!(&o.geometry, Geometry::Mesh(m) if m.is_closed(tol)),
-        )
+        select_objects(ctx, |o| {
+            o.geometry.is_surface() && o.geometry.is_closed_solid(tol)
+        })
     }
 }
 
@@ -328,10 +327,9 @@ impl Command for SelOpenMesh {
     impl_meta!(SelOpenMesh);
     fn run(&self, ctx: &mut Context, _args: &mut Args) -> CommandResult {
         let tol = ctx.doc.absolute_tolerance.max(1e-9);
-        select_objects(
-            ctx,
-            |o| matches!(&o.geometry, Geometry::Mesh(m) if !m.is_closed(tol)),
-        )
+        select_objects(ctx, |o| {
+            o.geometry.is_surface() && !o.geometry.is_closed_solid(tol)
+        })
     }
 }
 

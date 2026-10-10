@@ -326,10 +326,7 @@ impl Command for Join {
             .map(|id| ctx.doc.object(*id).expect("selected").clone())
             .collect();
         let curves: Vec<_> = objs.iter().filter(|o| o.geometry.is_curve()).collect();
-        let meshes: Vec<_> = objs
-            .iter()
-            .filter(|o| matches!(o.geometry, Geometry::Mesh(_)))
-            .collect();
+        let meshes: Vec<_> = objs.iter().filter(|o| o.geometry.is_surface()).collect();
         let mut t = ctx.doc.begin();
         let mut result = Vec::new();
         let mut before = 0;
@@ -352,16 +349,22 @@ impl Command for Join {
             }
         }
         if meshes.len() > 1 {
+            // Flat-faced polysurfaces join into an exact polysurface; anything
+            // else (meshes, curved surfaces) into a mesh for now.
+            let exact = meshes
+                .iter()
+                .all(|o| crate::exact::is_planar_brep(&o.geometry));
             let mut m = forma_geom::Mesh::default();
             for o in &meshes {
-                if let Geometry::Mesh(x) = &o.geometry {
+                if let Some(x) = o.geometry.as_mesh() {
                     m.append(x);
                 }
                 t.remove(o.id);
             }
             before += meshes.len();
             after += 1;
-            result.push(t.add_like(Geometry::Mesh(m), meshes[0]));
+            let g = crate::exact::result_geometry(m, exact, tol);
+            result.push(t.add_like(g, meshes[0]));
         }
         if result.is_empty() {
             return Err(CommandError::Invalid(
@@ -378,7 +381,7 @@ simple_command!(
     Explode,
     "Explode",
     &["X"],
-    "Explode — split polylines and polycurves into segments, meshes into faces"
+    "Explode — split polylines and polycurves into segments, polysurfaces into surfaces, meshes into pieces"
 );
 impl Command for Explode {
     impl_meta!(Explode);
@@ -398,6 +401,11 @@ impl Command for Explode {
                     .filter_map(|s: Seg| Geometry::from_chain(Chain::new(vec![s])))
                     .collect(),
                 Geometry::Mesh(m) => m.components().into_iter().map(Geometry::Mesh).collect(),
+                // A polysurface explodes into its (exact) faces.
+                Geometry::Brep(b) => forma_io_3dm::exact::faces(b)
+                    .into_iter()
+                    .map(Geometry::Brep)
+                    .collect(),
                 _ => Vec::new(),
             };
             if parts.len() < 2 {

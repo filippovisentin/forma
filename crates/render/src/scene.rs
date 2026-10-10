@@ -308,7 +308,7 @@ fn build_entry(o: &Object, color: [u8; 3], origin: DVec3) -> Entry {
     e.min = DVec3::new(b.min.x, b.min.y, b.min.z) - origin;
     e.max = DVec3::new(b.max.x, b.max.y, b.max.z) - origin;
     match &o.geometry {
-        Geometry::Mesh(m) => {
+        Geometry::Mesh(m) | Geometry::Brep(forma_geom::Brep { mesh: m, .. }) => {
             let c = surface_color(color);
             let normals = vertex_normals(m);
             for (p, n) in m.positions.iter().zip(&normals) {

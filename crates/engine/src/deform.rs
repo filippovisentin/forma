@@ -229,7 +229,11 @@ fn deform(ctx: &mut Context, cmd: &str, d: &Deform, axis_len: f64) -> CommandRes
     let mut t = ctx.doc.begin();
     let mut n = 0;
     for id in &ids {
-        let g = t.doc().object(*id).expect("selected").geometry.clone();
+        let mut g = t.doc().object(*id).expect("selected").geometry.clone();
+        // Free-form deformations bend exact surfaces into meshes (for now).
+        if let Geometry::Brep(b) = &g {
+            g = Geometry::Mesh(b.mesh.welded(tol));
+        }
         let out = match &g {
             Geometry::Mesh(m) => {
                 let longest = m

@@ -130,9 +130,11 @@ fn cut(ctx: &mut Context, cmd: &str, planes: &[Plane]) -> CommandResult {
     let mut out = Vec::new();
     for id in ids {
         let g = ctx.doc.object(id).expect("selected").geometry.clone();
+        let welded = crate::exact::editable_mesh(&g, tol);
         for plane in planes {
             match &g {
-                Geometry::Mesh(m) => {
+                Geometry::Mesh(_) | Geometry::Brep(_) => {
+                    let m = welded.as_ref().expect("mesh or brep");
                     for pl in mesh_plane_section(m, plane, tol) {
                         out.push(Geometry::Polyline(pl));
                     }
@@ -216,9 +218,9 @@ fn meshes(ctx: &Context, cmd: &str) -> Result<Vec<(ObjectId, forma_geom::Mesh)>,
     let out: Vec<_> = ctx
         .selected(cmd)?
         .into_iter()
-        .filter_map(|id| match &ctx.doc.object(id)?.geometry {
-            Geometry::Mesh(m) => Some((id, m.clone())),
-            _ => None,
+        .filter_map(|id| {
+            let tol = ctx.doc.absolute_tolerance.max(1e-9);
+            crate::exact::editable_mesh(&ctx.doc.object(id)?.geometry, tol).map(|m| (id, m))
         })
         .collect();
     if out.is_empty() {
@@ -237,11 +239,30 @@ impl Command for DupBorder {
     impl_meta!(DupBorder);
     fn run(&self, ctx: &mut Context, _args: &mut Args) -> CommandResult {
         let tol = ctx.doc.absolute_tolerance.max(1e-9);
-        let out: Vec<Geometry> = meshes(ctx, "DupBorder")?
-            .iter()
-            .flat_map(|(_, m)| mesh_border_loops(m, tol))
-            .map(Geometry::Polyline)
-            .collect();
+        let mut out = Vec::new();
+        for (id, m) in meshes(ctx, "DupBorder")? {
+            match &ctx.doc.object(id).expect("selected").geometry {
+                // Exact borders of a surface, joined into closed curves.
+                Geometry::Brep(b) => {
+                    let edges = forma_io_3dm::exact::edges(b, true);
+                    if edges.iter().any(|g| matches!(g, Geometry::Nurbs(_))) {
+                        out.extend(edges);
+                    } else {
+                        let chains = edges.iter().filter_map(Geometry::to_chain).collect();
+                        out.extend(
+                            forma_geom::join(chains, tol)
+                                .into_iter()
+                                .filter_map(|c| Geometry::from_chain(c.simplified(tol))),
+                        );
+                    }
+                }
+                _ => out.extend(
+                    mesh_border_loops(&m, tol)
+                        .into_iter()
+                        .map(Geometry::Polyline),
+                ),
+            }
+        }
         if out.is_empty() {
             return Err(CommandError::Invalid(
                 "DupBorder: the selected meshes are closed".into(),
@@ -264,7 +285,12 @@ impl Command for DupEdge {
     fn run(&self, ctx: &mut Context, _args: &mut Args) -> CommandResult {
         let tol = ctx.doc.absolute_tolerance.max(1e-9);
         let mut out = Vec::new();
-        for (_, m) in meshes(ctx, "DupEdge")? {
+        for (id, m) in meshes(ctx, "DupEdge")? {
+            if let Geometry::Brep(b) = &ctx.doc.object(id).expect("selected").geometry {
+                // The exact edge curves.
+                out.extend(forma_io_3dm::exact::edges(b, false));
+                continue;
+            }
             let mut segs = mesh_edge_segments(&m);
             // A crease is seen from both faces: keep one copy.
             let mut unique: Vec<[Point3; 2]> = Vec::new();
@@ -518,6 +544,7 @@ impl Command for ExtractPt {
                 }
                 Geometry::Nurbs(n) => n.points.clone(),
                 Geometry::Mesh(m) => m.welded(tol).positions,
+                Geometry::Brep(b) => b.mesh.welded(tol).positions,
                 _ => Vec::new(),
             };
             if g.is_closed_curve() && p.len() > 1 && p[0].distance_to(p[p.len() - 1]) <= tol {
@@ -544,7 +571,10 @@ fn curves_and_meshes(
     let mut ms = Vec::new();
     for id in ctx.selected(cmd)? {
         match &ctx.doc.object(id).expect("selected").geometry {
-            Geometry::Mesh(m) => ms.push(m.clone()),
+            g @ (Geometry::Mesh(_) | Geometry::Brep(_)) => {
+                let tol = ctx.doc.absolute_tolerance.max(1e-9);
+                ms.extend(crate::exact::editable_mesh(g, tol));
+            }
             g if g.is_curve() => crvs.push(g.clone()),
             Geometry::Point(p) => crvs.push(Geometry::Point(*p)),
             _ => {}

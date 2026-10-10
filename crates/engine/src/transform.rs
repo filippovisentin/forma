@@ -4,7 +4,7 @@
 use crate::edit::{parse_ids, transform_selection};
 use crate::{Args, Command, CommandError, CommandResult, Context};
 use forma_doc::{Geometry, ObjectId};
-use forma_geom::{box_mesh, BoundingBox, LineCurve, Plane, Point3, Vec3, Xform};
+use forma_geom::{BoundingBox, LineCurve, Plane, Point3, Vec3, Xform};
 
 fn factor(args: &mut Args) -> Result<f64, CommandError> {
     let f = args.number("scale factor")?;
@@ -91,7 +91,7 @@ impl Command for Orient {
 /// Bounding box of geometry in plane coordinates: (umin, vmin, umax, vmax).
 fn plane_box(g: &Geometry, plane: &Plane) -> (f64, f64, f64, f64) {
     let pts = match g {
-        Geometry::Mesh(m) => m.positions.clone(),
+        Geometry::Mesh(m) | Geometry::Brep(forma_geom::Brep { mesh: m, .. }) => m.positions.clone(),
         Geometry::Point(p) => vec![*p],
         g => g.curve_points(),
     };
@@ -184,16 +184,23 @@ impl Command for Flip {
         let mut n = 0;
         for id in &ids {
             let g = &t.doc().object(*id).expect("selected").geometry;
-            if matches!(g, Geometry::Point(_)) {
-                continue;
-            }
-            let r = g.reversed();
+            let r = match g {
+                Geometry::Point(_) => continue,
+                // Closed polysurfaces always face outwards (as in Rhino).
+                Geometry::Brep(b) if b.solid => continue,
+                Geometry::Brep(b) => match forma_io_3dm::exact::flipped(b) {
+                    Some(f) => Geometry::Brep(f),
+                    None => g.reversed(),
+                },
+                g => g.reversed(),
+            };
             t.replace(*id, r);
             n += 1;
         }
         if n == 0 {
             return Err(CommandError::Invalid(
-                "Flip: select curves or meshes".into(),
+                "Flip: select curves, open surfaces or meshes (closed polysurfaces always face outwards)"
+                    .into(),
             ));
         }
         t.commit();
@@ -269,7 +276,7 @@ impl Command for BoundingBoxCmd {
         let d = b.max - b.min;
         let flat = [d.x <= tol, d.y <= tol, d.z <= tol];
         let g = match flat.iter().filter(|f| **f).count() {
-            0 => Geometry::Mesh(box_mesh(&Plane::TOP.moved_to(b.min), d.x, d.y, d.z)),
+            0 => crate::exact::box_geometry(&Plane::TOP.moved_to(b.min), d.x, d.y, d.z),
             1 => {
                 let (a, c) = (b.min, b.max);
                 let pts = if flat[2] {
@@ -424,16 +431,28 @@ mod tests {
         let mut e = Engine::new();
         e.run_line("Line 0,0 10,0").unwrap();
         e.run_line("Box 0,0 10,10 10").unwrap();
+        e.run_line("Polyline 0,0,20 10,0,20 10,10,20 0,10,20 0,0,20")
+            .unwrap();
+        e.run_line("SelLast").unwrap();
+        e.run_line("PlanarSrf").unwrap();
         e.run_line("SelAll").unwrap();
         e.run_line("Dir").unwrap();
         let Geometry::Line(l) = g(&e, 1) else {
             panic!()
         };
         assert_eq!(l.from, Point3::new(10.0, 0.0, 0.0));
-        let Geometry::Mesh(m) = g(&e, 2) else {
+        // The closed box keeps facing outwards; the open surface flips.
+        let solid = e
+            .doc()
+            .objects()
+            .find(|o| matches!(&o.geometry, Geometry::Brep(b) if b.solid));
+        let Some(Geometry::Brep(b)) = solid.map(|o| &o.geometry) else {
             panic!()
         };
-        assert!(m.volume() < 0.0);
+        assert!(b.mesh.volume() > 0.0);
+        let last = e.doc().objects().last().unwrap();
+        let n = last.geometry.as_mesh().unwrap().triangle_normal(0).unwrap();
+        assert!(n.z < -0.99, "{n:?}");
     }
 
     #[test]
@@ -461,10 +480,11 @@ mod tests {
         e.run_line("Line 20,0 30,5,7").unwrap();
         e.run_line("SelAll").unwrap();
         e.run_line("BoundingBox").unwrap();
-        let Geometry::Mesh(m) = g(&e, 3) else {
+        let Geometry::Brep(bx) = g(&e, 3) else {
             panic!()
         };
-        let b = m.bounding_box().unwrap();
+        assert_eq!(bx.faces, 6);
+        let b = bx.mesh.bounding_box().unwrap();
         assert!((b.max.x - 30.0).abs() < 1e-6 && (b.min.z + 10.0).abs() < 1e-6);
         e.run_line("New").unwrap();
         e.run_line("Circle 0,0 10").unwrap();

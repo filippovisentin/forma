@@ -232,6 +232,16 @@ fn stretched(g: &Geometry, w: &Window, v: Vec3) -> Option<Geometry> {
                 triangles: m.triangles.clone(),
             })
         }
+        Geometry::Brep(b) => {
+            let inside = b.mesh.positions.iter().filter(|q| w.contains(**q)).count();
+            match inside {
+                0 => return None,
+                // Wholly inside: an exact move.
+                n if n == b.mesh.positions.len() => g.transformed(&mv),
+                // Partly inside: only the mesh can be stretched.
+                _ => stretched(&Geometry::Mesh(b.mesh.clone()), w, v)?,
+            }
+        }
         Geometry::Text(t) => w.contains(t.plane.origin).then(|| g.transformed(&mv))?,
         Geometry::Dimension(d) => {
             if !d.points.iter().any(|q| w.contains(*q)) {
@@ -314,7 +324,9 @@ fn closest_on_polyline(pts: &[Point3], p: Point3) -> Option<Point3> {
 fn closest_on(g: &Geometry, p: Point3) -> Option<Point3> {
     match g {
         Geometry::Point(q) => Some(*q),
-        Geometry::Mesh(m) => m.closest_triangle(p).map(|(_, q, _)| q),
+        Geometry::Mesh(m) | Geometry::Brep(forma_geom::Brep { mesh: m, .. }) => {
+            m.closest_triangle(p).map(|(_, q, _)| q)
+        }
         Geometry::Arc(a) => closest_on_polyline(&a.points(720), p),
         Geometry::Nurbs(n) => closest_on_polyline(&n.sample(64), p),
         g => closest_on_polyline(&g.curve_points(), p),
@@ -365,7 +377,7 @@ simple_command!(
     DupFaceBorder,
     "DupFaceBorder",
     &[],
-    "DupFaceBorder #id <point on face> — copy the outline of the flat face of a mesh under the point as curves"
+    "DupFaceBorder #id <point on face> — copy the border of the face under the point as curves (exact for polysurfaces)"
 );
 impl Command for DupFaceBorder {
     impl_meta!(DupFaceBorder);
@@ -379,8 +391,45 @@ impl Command for DupFaceBorder {
             .ok_or_else(|| CommandError::BadInput(tok.to_string()))?;
         let p = args.point("point on the face", ctx.last_point)?;
         let tol = ctx.tolerance.absolute;
-        let Some(Geometry::Mesh(m)) = ctx.doc.object(id).map(|o| &o.geometry) else {
-            return Err(CommandError::Invalid(format!("#{} is not a mesh", id.0)));
+        let Some(g) = ctx.doc.object(id).map(|o| o.geometry.clone()) else {
+            return Err(CommandError::Invalid(format!("no object #{}", id.0)));
+        };
+        if let Geometry::Brep(b) = &g {
+            // The exact border of the face under the point (any face shape).
+            let (tri, _, _) = b
+                .mesh
+                .closest_triangle(p)
+                .ok_or_else(|| CommandError::Invalid("empty surface".into()))?;
+            let face = b
+                .face_of_triangle(tri)
+                .ok_or_else(|| CommandError::Invalid("no face there".into()))?;
+            let mut t = ctx.doc.begin();
+            let mut n = 0;
+            for l in forma_io_3dm::exact::face_loops(b, face) {
+                let nurbs = l.iter().any(|g| matches!(g, Geometry::Nurbs(_)));
+                let chains: Vec<Chain> = l.iter().filter_map(Geometry::to_chain).collect();
+                if nurbs || chains.len() != l.len() {
+                    for g in l {
+                        t.add(g);
+                        n += 1;
+                    }
+                    continue;
+                }
+                for c in forma_geom::join(chains, tol.max(1e-9)) {
+                    if let Some(g) = Geometry::from_chain(c.simplified(tol.max(1e-9))) {
+                        t.add(g);
+                        n += 1;
+                    }
+                }
+            }
+            t.commit();
+            return Ok(format!("{n} border curve(s) added"));
+        }
+        let Geometry::Mesh(m) = &g else {
+            return Err(CommandError::Invalid(format!(
+                "#{} is not a surface or mesh",
+                id.0
+            )));
         };
         let (tri, _, _) = m
             .closest_triangle(p)
@@ -627,7 +676,15 @@ impl Command for MoveGrips {
                 )));
             }
             let moves: Vec<(usize, Vec3)> = idx.iter().map(|i| (*i, v)).collect();
-            t.replace(*id, g.with_grips_moved(&moves));
+            let out = match g.with_grips_moved(&moves) {
+                // Corners of a flat-faced polysurface moved: rebuild it exactly.
+                Geometry::Mesh(m) if crate::exact::is_planar_brep(&g) => {
+                    let tol = t.doc().absolute_tolerance.max(1e-9);
+                    crate::exact::result_geometry(m, true, tol)
+                }
+                out => out,
+            };
+            t.replace(*id, out);
             moved += idx.len();
         }
         t.commit();
@@ -687,7 +744,7 @@ impl Command for EditText {
 /// Points that must lie inside a boundary for an object to count as inside.
 fn sample_points(g: &Geometry) -> Vec<Point3> {
     match g {
-        Geometry::Mesh(m) => {
+        Geometry::Mesh(m) | Geometry::Brep(forma_geom::Brep { mesh: m, .. }) => {
             let step = (m.positions.len() / 2000).max(1);
             m.positions.iter().step_by(step).copied().collect()
         }
@@ -771,13 +828,7 @@ impl Command for Make2D {
         let ids = ctx.selected("Make2D")?;
         let doc = &ctx.doc;
         let objs: Vec<&forma_doc::Object> = ids.iter().filter_map(|i| doc.object(*i)).collect();
-        let meshes: Vec<&Mesh> = objs
-            .iter()
-            .filter_map(|o| match &o.geometry {
-                Geometry::Mesh(m) => Some(m),
-                _ => None,
-            })
-            .collect();
+        let meshes: Vec<&Mesh> = objs.iter().filter_map(|o| o.geometry.as_mesh()).collect();
         let curves: Vec<Vec<Point3>> = objs
             .iter()
             .filter(|o| o.geometry.is_curve())
@@ -897,7 +948,7 @@ impl Command for Silhouette {
         let tol = ctx.tolerance.absolute;
         let mut curves = Vec::new();
         for id in &ids {
-            let Geometry::Mesh(m) = &ctx.doc.object(*id).expect("selected").geometry else {
+            let Some(m) = ctx.doc.object(*id).expect("selected").geometry.as_mesh() else {
                 continue;
             };
             let chains: Vec<Chain> = forma_geom::outline_edges(m, dir, 20f64.to_radians(), tol)
@@ -1654,7 +1705,7 @@ mod tests {
     #[test]
     fn reduce_mesh_halves_a_sphere() {
         let mut e = Engine::new();
-        e.run_line("Sphere 0,0,0 50").unwrap();
+        e.run_line("MeshSphere 0,0,0 50").unwrap();
         e.run_line("SelAll").unwrap();
         let Geometry::Mesh(m) = &e.doc().objects().next().unwrap().geometry else {
             panic!()
@@ -1713,7 +1764,7 @@ mod tests {
         };
         assert!(p[0].distance_to(forma_geom::Point3::ORIGIN) < 1e-12);
         assert!(p[2].y > 0.0 && p[1].y < 10.0 && p[1].y > 0.0, "{p:?}");
-        e.run_line("Box 0,0 10,10 10").unwrap();
+        e.run_line("MeshBox 0,0 10,10 10").unwrap();
         e.run_line("SelLast").unwrap();
         e.run_line("Smooth").unwrap();
     }
@@ -1721,7 +1772,7 @@ mod tests {
     #[test]
     fn mesh_repair_closes_an_open_box() {
         let mut e = Engine::new();
-        e.run_line("Box 0,0 10,10 10").unwrap();
+        e.run_line("MeshBox 0,0 10,10 10").unwrap();
         // Remove the two top triangles: a box with a hole.
         let Geometry::Mesh(mut m) = e.doc().objects().next().unwrap().geometry.clone() else {
             panic!()
@@ -1865,7 +1916,7 @@ mod tests {
     #[test]
     fn unify_mesh_normals_fixes_a_flipped_triangle() {
         let mut e = Engine::new();
-        e.run_line("Box 0,0 10,10 10").unwrap();
+        e.run_line("MeshBox 0,0 10,10 10").unwrap();
         let Geometry::Mesh(mut m) = e.doc().objects().next().unwrap().geometry.clone() else {
             panic!()
         };

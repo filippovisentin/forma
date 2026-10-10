@@ -104,6 +104,11 @@ impl Geometry {
                     g
                 }
             }
+            // Flat-faced polysurfaces: their corners (like Rhino's SolidPtOn); the
+            // engine turns the moved result back into a polysurface.
+            Geometry::Brep(b) if b.planar => Geometry::Mesh(b.mesh.clone()).grips(),
+            // Curved exact surfaces: no control-point editing yet.
+            Geometry::Brep(_) => Vec::new(),
             Geometry::Text(t) => vec![t.plane.origin],
             Geometry::Dimension(d) => d.points.clone(),
         }
@@ -169,6 +174,8 @@ impl Geometry {
                     triangles: m.triangles.clone(),
                 })
             }
+            Geometry::Brep(b) if b.planar => Geometry::Mesh(b.mesh.clone()).with_grips_moved(moves),
+            Geometry::Brep(_) => self.clone(),
             Geometry::Text(_) => {
                 let v = moves
                     .iter()

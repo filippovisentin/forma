@@ -102,7 +102,9 @@ impl Command for AreaCentroid {
         for id in ids {
             let g = &ctx.doc.object(id).expect("selected").geometry;
             let c = match g {
-                Geometry::Mesh(m) => m.area_centroid(),
+                Geometry::Mesh(m) | Geometry::Brep(forma_geom::Brep { mesh: m, .. }) => {
+                    m.area_centroid()
+                }
                 Geometry::Arc(a) if a.is_closed() => Some(a.center()),
                 g => crate::surfaces::closed_plane(g, tol)
                     .and_then(|_| polygon_centroid(&g.curve_points())),
@@ -137,9 +139,11 @@ impl Command for VolumeCentroid {
         let tol = ctx.doc.absolute_tolerance.max(1e-9);
         let pts: Vec<Point3> = ids
             .iter()
-            .filter_map(|id| match &ctx.doc.object(*id)?.geometry {
-                Geometry::Mesh(m) if m.is_closed(tol) => m.volume_centroid(),
-                _ => None,
+            .filter_map(|id| {
+                let g = &ctx.doc.object(*id)?.geometry;
+                g.as_mesh()
+                    .filter(|_| g.is_closed_solid(tol))
+                    .and_then(forma_geom::Mesh::volume_centroid)
             })
             .collect();
         if pts.is_empty() {

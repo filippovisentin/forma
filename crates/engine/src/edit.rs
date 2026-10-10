@@ -529,7 +529,18 @@ mod tests {
             f.doc().layers
         );
         let kinds: Vec<&str> = f.doc().objects().map(|o| o.geometry.kind()).collect();
-        assert!(kinds.contains(&"mesh"), "{kinds:?}");
+        // The box comes back as the exact polysurface it was saved as.
+        assert!(kinds.contains(&"polysurface"), "{kinds:?}");
+        let b = f
+            .doc()
+            .objects()
+            .find_map(|o| match &o.geometry {
+                forma_doc::Geometry::Brep(b) => Some(b),
+                _ => None,
+            })
+            .unwrap();
+        assert!(b.solid && b.faces == 6);
+        assert!((b.mesh.volume() - 400.0 * 30.0 * 270.0).abs() < 1e-6);
         assert_eq!(
             f.doc()
                 .objects()

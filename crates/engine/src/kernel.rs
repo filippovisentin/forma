@@ -3,8 +3,9 @@
 //! ChamferEdge, Shell, OffsetSrf. Without the kernel they fail with a clear message.
 
 use crate::edit::parse_ids;
+use crate::exact::{editable_mesh, is_planar_brep, result_geometry};
 use crate::{Args, Command, CommandError, CommandResult, Context};
-use forma_doc::{Geometry, ObjectId};
+use forma_doc::ObjectId;
 use forma_geom::{
     fillet_edges, offset_solid, shell_solid, solid_boolean, BooleanOp, KernelError, Mesh, Point3,
     SolidOptions, Tolerance, KERNEL_AVAILABLE,
@@ -41,9 +42,11 @@ fn leading_ids(args: &mut Args) -> Result<Vec<ObjectId>, CommandError> {
     parse_ids(toks)
 }
 
-fn mesh_of<'a>(ctx: &'a Context, cmd: &str, id: ObjectId) -> Result<&'a Mesh, CommandError> {
+/// Triangles of a solid: a mesh, or the welded display mesh of a polysurface.
+fn mesh_of(ctx: &Context, cmd: &str, id: ObjectId) -> Result<Mesh, CommandError> {
+    let tol = ctx.doc.absolute_tolerance.max(1e-9);
     match ctx.doc.object(id).map(|o| &o.geometry) {
-        Some(Geometry::Mesh(m)) => Ok(m),
+        Some(g) if g.is_surface() => Ok(editable_mesh(g, tol).expect("surface")),
         Some(_) => Err(CommandError::Invalid(format!(
             "{cmd}: #{} is not a solid",
             id.0
@@ -59,23 +62,36 @@ fn no_leftovers(args: &Args) -> Result<(), CommandError> {
     }
 }
 
+/// True when every object is a flat-faced polysurface (results of flat-faced
+/// operations on them are rebuilt as exact polysurfaces).
+fn all_planar(ctx: &Context, ids: &[ObjectId]) -> bool {
+    ids.iter().all(|id| {
+        ctx.doc
+            .object(*id)
+            .is_some_and(|o| is_planar_brep(&o.geometry))
+    })
+}
+
 /// Replace `base` by the first result, add the others like it, delete `remove`, and
-/// select the results.
+/// select the results. With `exact`, flat-faced results become polysurfaces.
 fn apply(
     ctx: &mut Context,
     base: ObjectId,
     results: Vec<Mesh>,
     remove: &[ObjectId],
+    exact: bool,
 ) -> Vec<ObjectId> {
+    let tol = ctx.doc.absolute_tolerance.max(1e-9);
     let like = ctx.doc.object(base).expect("base exists").clone();
     let mut t = ctx.doc.begin();
     let mut ids = Vec::new();
     for (i, m) in results.into_iter().enumerate() {
+        let g = result_geometry(m, exact, tol);
         if i == 0 {
-            t.replace(base, Geometry::Mesh(m));
+            t.replace(base, g);
             ids.push(base);
         } else {
-            ids.push(t.add_like(Geometry::Mesh(m), &like));
+            ids.push(t.add_like(g, &like));
         }
     }
     for id in remove {
@@ -135,11 +151,13 @@ fn two_group(ctx: &mut Context, args: &mut Args, cmd: &str, op: BooleanOp) -> Co
         .iter()
         .map(|id| mesh_of(ctx, cmd, *id))
         .collect::<Result<Vec<_>, _>>()?;
-    let results = solid_boolean(op, &[a], &b, options(ctx)).map_err(|e| kernel_err(cmd, e))?;
+    let b: Vec<&Mesh> = b.iter().collect();
+    let results = solid_boolean(op, &[&a], &b, options(ctx)).map_err(|e| kernel_err(cmd, e))?;
     let n = results.len();
+    let exact = all_planar(ctx, &rest) && all_planar(ctx, &[base]);
     // BooleanSplit keeps the cutters (Rhino's default); the others consume them.
     let remove: &[ObjectId] = if op == BooleanOp::Split { &[] } else { &rest };
-    let ids = apply(ctx, base, results, remove);
+    let ids = apply(ctx, base, results, remove, exact);
     Ok(format!("{cmd}: {n} solid(s) {}", id_list(&ids)))
 }
 
@@ -169,10 +187,12 @@ impl Command for BooleanUnion {
             .iter()
             .map(|id| mesh_of(ctx, cmd, *id))
             .collect::<Result<Vec<_>, _>>()?;
+        let meshes: Vec<&Mesh> = meshes.iter().collect();
         let results = solid_boolean(BooleanOp::Union, &meshes, &[], options(ctx))
             .map_err(|e| kernel_err(cmd, e))?;
         let n = results.len();
-        let ids_out = apply(ctx, ids[0], results, &ids[1..]);
+        let exact = all_planar(ctx, &ids);
+        let ids_out = apply(ctx, ids[0], results, &ids[1..], exact);
         Ok(format!("{cmd}: {n} solid(s) {}", id_list(&ids_out)))
     }
 }
@@ -231,9 +251,13 @@ fn target_solid(
     let sel = ctx.selected(cmd)?;
     let best = sel
         .iter()
-        .filter_map(|id| match &ctx.doc.object(*id)?.geometry {
-            Geometry::Mesh(m) => m.closest_triangle(near).map(|(_, _, d)| (*id, d)),
-            _ => None,
+        .filter_map(|id| {
+            ctx.doc
+                .object(*id)?
+                .geometry
+                .as_mesh()?
+                .closest_triangle(near)
+                .map(|(_, _, d)| (*id, d))
         })
         .min_by(|a, b| a.1.total_cmp(&b.1));
     best.map(|(id, _)| id)
@@ -264,8 +288,11 @@ fn edge_command(ctx: &mut Context, args: &mut Args, cmd: &str, chamfer: bool) ->
     let (id, r, pts) = number_and_points(ctx, args, if chamfer { "distance" } else { "radius" })?;
     let id = target_solid(ctx, cmd, id, pts[0])?;
     let m = mesh_of(ctx, cmd, id)?;
-    let out = fillet_edges(m, r, &pts, chamfer, options(ctx)).map_err(|e| kernel_err(cmd, e))?;
-    apply(ctx, id, vec![out], &[]);
+    let out = fillet_edges(&m, r, &pts, chamfer, options(ctx)).map_err(|e| kernel_err(cmd, e))?;
+    // A chamfer keeps flat faces flat; a fillet is curved (a mesh until the
+    // kernel works on exact breps).
+    let exact = chamfer && all_planar(ctx, &[id]);
+    apply(ctx, id, vec![out], &[], exact);
     Ok(format!("{cmd}: {} edge pick(s) on #{}", pts.len(), id.0))
 }
 
@@ -309,8 +336,9 @@ impl Command for Shell {
         let (id, t, pts) = number_and_points(ctx, args, "thickness")?;
         let id = target_solid(ctx, cmd, id, pts[0])?;
         let m = mesh_of(ctx, cmd, id)?;
-        let out = shell_solid(m, t, &pts, options(ctx)).map_err(|e| kernel_err(cmd, e))?;
-        apply(ctx, id, vec![out], &[]);
+        let out = shell_solid(&m, t, &pts, options(ctx)).map_err(|e| kernel_err(cmd, e))?;
+        let exact = all_planar(ctx, &[id]);
+        apply(ctx, id, vec![out], &[], exact);
         Ok(format!("{cmd}: #{} hollowed, wall {t}", id.0))
     }
 }
@@ -335,12 +363,16 @@ impl Command for OffsetSrf {
             let m = mesh_of(ctx, cmd, *id)?;
             out.push((
                 *id,
-                offset_solid(m, d, opts).map_err(|e| kernel_err(cmd, e))?,
+                offset_solid(&m, d, opts).map_err(|e| kernel_err(cmd, e))?,
+                all_planar(ctx, &[*id]),
             ));
         }
+        let tol = ctx.doc.absolute_tolerance.max(1e-9);
         let mut t = ctx.doc.begin();
-        for (id, m) in out {
-            t.replace(id, Geometry::Mesh(m));
+        for (id, m, exact) in out {
+            // Offsetting a box outwards rounds its edges: only inward (or zero)
+            // offsets of flat-faced solids stay flat.
+            t.replace(id, result_geometry(m, exact && d <= 0.0, tol));
         }
         t.commit();
         Ok(format!("{cmd}: offset {} solid(s) by {d}", ids.len()))
@@ -350,13 +382,13 @@ impl Command for OffsetSrf {
 #[cfg(test)]
 mod tests {
     use crate::Engine;
-    use forma_doc::{Geometry, ObjectId};
+    use forma_doc::ObjectId;
     use forma_geom::KERNEL_AVAILABLE;
 
     fn volume(e: &Engine, id: u64) -> f64 {
-        match &e.doc().object(ObjectId(id)).unwrap().geometry {
-            Geometry::Mesh(m) => m.volume(),
-            g => panic!("{g:?}"),
+        match e.doc().object(ObjectId(id)).unwrap().geometry.as_mesh() {
+            Some(m) => m.volume(),
+            None => panic!("not a solid"),
         }
     }
 

@@ -1,7 +1,8 @@
 //! Push / pull the planar faces of solids (meshes until the solid kernel lands).
 
+use crate::exact::{editable_mesh, is_planar_brep, result_geometry};
 use crate::{Args, Command, CommandError, CommandResult, Context};
-use forma_doc::{Geometry, ObjectId};
+use forma_doc::ObjectId;
 
 fn face_tol(ctx: &Context) -> f64 {
     ctx.doc.absolute_tolerance.max(1e-6)
@@ -27,7 +28,11 @@ impl Command for MoveFace {
         let p = args.point("point on the face", None)?;
         let d = args.number("distance")?;
         let tol = face_tol(ctx);
-        let Some(Geometry::Mesh(m)) = ctx.doc.object(id).map(|o| &o.geometry) else {
+        let Some(g) = ctx.doc.object(id).map(|o| &o.geometry) else {
+            return Err(CommandError::Invalid(format!("no object #{}", id.0)));
+        };
+        let exact = is_planar_brep(g);
+        let Some(m) = editable_mesh(g, tol) else {
             return Err(CommandError::Invalid(format!(
                 "#{} is not a solid or surface",
                 id.0
@@ -48,7 +53,7 @@ impl Command for MoveFace {
             .ok_or_else(|| CommandError::Invalid("degenerate face".into()))?;
         let moved = m.move_face(&face, face.normal * d, tol);
         let mut t = ctx.doc.begin();
-        t.replace(id, Geometry::Mesh(moved));
+        t.replace(id, result_geometry(moved, exact, tol));
         t.commit();
         Ok(format!("moved face by {d}"))
     }
@@ -72,11 +77,15 @@ impl Command for PushPull {
         let tol = face_tol(ctx);
         let mut out = Vec::new();
         for id in ids {
-            let Some(Geometry::Mesh(m)) = ctx.doc.object(id).map(|o| &o.geometry) else {
+            let Some(g) = ctx.doc.object(id).map(|o| &o.geometry) else {
+                continue;
+            };
+            let exact = is_planar_brep(g);
+            let Some(m) = editable_mesh(g, tol) else {
                 continue;
             };
             if let Some(face) = m.extreme_face(dir, tol) {
-                out.push((id, m.move_face(&face, dir * d, tol)));
+                out.push((id, m.move_face(&face, dir * d, tol), exact));
             }
         }
         if out.is_empty() {
@@ -86,8 +95,8 @@ impl Command for PushPull {
         }
         let n = out.len();
         let mut t = ctx.doc.begin();
-        for (id, m) in out {
-            t.replace(id, Geometry::Mesh(m));
+        for (id, m, exact) in out {
+            t.replace(id, result_geometry(m, exact, tol));
         }
         t.commit();
         Ok(format!("moved {n} face(s) by {d}"))
@@ -115,10 +124,13 @@ mod tests {
         e.run_line("MoveFace #1 0,25,10 15").unwrap(); // the x = 0 face, outwards
         let b = bbox(&e);
         assert!((b.min.x + 15.0).abs() < 1e-9, "{b:?}");
-        let Geometry::Mesh(m) = &e.doc().objects().next().unwrap().geometry else {
+        // Still an exact six-face polysurface.
+        let Geometry::Brep(b) = &e.doc().objects().next().unwrap().geometry else {
             panic!()
         };
-        assert!((m.volume() - 75.0 * 50.0 * 50.0).abs() < 1e-6);
+        assert_eq!(b.faces, 6);
+        assert!(b.solid && b.planar);
+        assert!((b.mesh.volume() - 75.0 * 50.0 * 50.0).abs() < 1e-6);
         e.run_line("Undo").unwrap();
         e.run_line("Undo").unwrap();
         e.run_line("Undo").unwrap();

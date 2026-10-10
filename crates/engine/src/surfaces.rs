@@ -115,7 +115,7 @@ simple_command!(
     PlanarSrf,
     "PlanarSrf",
     &[],
-    "PlanarSrf — planar surfaces (meshes) from the selected closed planar curves; inner curves become holes"
+    "PlanarSrf — planar surfaces from the selected closed planar curves; inner curves become holes"
 );
 impl Command for PlanarSrf {
     impl_meta!(PlanarSrf);
@@ -131,10 +131,22 @@ impl Command for PlanarSrf {
         let out: Vec<(Geometry, Object)> = regions
             .into_iter()
             .map(|r| {
-                (
-                    Geometry::Mesh(planar_mesh(&r.outer, &r.holes, r.normal)),
-                    r.source,
-                )
+                // Exact trimmed plane; the mesh if openNURBS cannot make it.
+                let curves: Vec<&Geometry> = r
+                    .ids
+                    .iter()
+                    .filter_map(|i| ctx.doc.object(*i).map(|o| &o.geometry))
+                    .collect();
+                let exact = (curves.len() == r.ids.len())
+                    .then(|| {
+                        forma_io_3dm::exact::make_planar(curves[0], &curves[1..], r.normal, None)
+                    })
+                    .flatten();
+                let g = exact.map_or_else(
+                    || Geometry::Mesh(planar_mesh(&r.outer, &r.holes, r.normal)),
+                    Geometry::Brep,
+                );
+                (g, r.source)
             })
             .collect();
         let n = out.len();
@@ -147,7 +159,7 @@ simple_command!(
     ExtrudeSrf,
     "ExtrudeSrf",
     &[],
-    "ExtrudeSrf <distance> [direction] — extrude the selected open meshes (e.g. PlanarSrf) into closed solids"
+    "ExtrudeSrf <distance> [direction] — extrude the selected open surfaces (e.g. PlanarSrf) into closed solids"
 );
 impl Command for ExtrudeSrf {
     impl_meta!(ExtrudeSrf);
@@ -162,14 +174,28 @@ impl Command for ExtrudeSrf {
         let mut out = Vec::new();
         for id in ids {
             let obj = ctx.doc.object(id).expect("selected").clone();
-            let Geometry::Mesh(m) = &obj.geometry else {
+            let Some(m) = obj.geometry.as_mesh() else {
                 continue;
             };
             let along = dir
                 .or_else(|| m.area_vector().normalized())
                 .and_then(Vec3::normalized)
                 .unwrap_or(Vec3::Z);
-            if let Some(solid) = extrude_open_mesh(m, along * d, tol) {
+            if let Geometry::Brep(b) = &obj.geometry {
+                if b.solid {
+                    continue;
+                }
+                if let Some(solid) = forma_io_3dm::exact::extruded(b, along * d) {
+                    out.push((Geometry::Brep(solid), obj));
+                    continue;
+                }
+            }
+            let src = if matches!(obj.geometry, Geometry::Brep(_)) {
+                m.welded(tol)
+            } else {
+                m.clone()
+            };
+            if let Some(solid) = extrude_open_mesh(&src, along * d, tol) {
                 out.push((Geometry::Mesh(solid), obj));
             }
         }
@@ -188,7 +214,7 @@ simple_command!(
     Cap,
     "Cap",
     &[],
-    "Cap — close the planar holes of the selected meshes"
+    "Cap — close the planar holes of the selected surfaces and meshes"
 );
 impl Command for Cap {
     impl_meta!(Cap);
@@ -198,7 +224,15 @@ impl Command for Cap {
         let mut t = ctx.doc.begin();
         let mut caps = 0;
         for id in ids {
-            let Geometry::Mesh(m) = &t.doc().object(id).expect("selected").geometry else {
+            let g = &t.doc().object(id).expect("selected").geometry;
+            if let Geometry::Brep(b) = g {
+                if let Some((capped, n)) = forma_io_3dm::exact::capped(b, tol) {
+                    t.replace(id, Geometry::Brep(capped));
+                    caps += n;
+                }
+                continue;
+            }
+            let Geometry::Mesh(m) = g else {
                 continue;
             };
             let (capped, n) = cap_planar_holes(m, tol);
@@ -473,8 +507,15 @@ mod tests {
     use std::f64::consts::PI;
 
     fn mesh(e: &Engine, id: u64) -> forma_geom::Mesh {
+        match e.doc().object(ObjectId(id)).unwrap().geometry.as_mesh() {
+            Some(m) => m.clone(),
+            None => panic!("#{id} has no faces"),
+        }
+    }
+
+    fn brep(e: &Engine, id: u64) -> forma_geom::Brep {
         match &e.doc().object(ObjectId(id)).unwrap().geometry {
-            Geometry::Mesh(m) => m.clone(),
+            Geometry::Brep(b) => b.clone(),
             g => panic!("{g:?}"),
         }
     }
@@ -505,16 +546,23 @@ mod tests {
         e.run_line("SelAll").unwrap();
         e.run_line("PlanarSrf").unwrap();
         assert_eq!(e.doc().len(), 5);
+        // Exact trimmed planes; the display mesh approximates the round hole.
+        let b = brep(&e, 4);
+        assert_eq!(b.faces, 1);
         let m = mesh(&e, 4);
-        let hole = 96.0 / 2.0 * 100.0 * (2.0 * PI / 96.0).sin(); // inscribed 96-gon
-        assert!((m.area() - (5000.0 - hole)).abs() < 1e-6, "{}", m.area());
+        let area = 5000.0 - PI * 100.0;
+        assert!((m.area() - area).abs() / area < 1e-3, "{}", m.area());
         assert!((mesh(&e, 5).area() - 100.0).abs() < 1e-9);
         assert_eq!(e.ctx.selection.len(), 2);
         e.run_line("ExtrudeSrf 20").unwrap();
+        let b = brep(&e, 6);
+        // Four sides, the round hole wall, top and bottom.
+        assert_eq!(b.faces, 7);
+        assert!(b.solid);
         let s = mesh(&e, 6);
         assert!(s.is_closed(1e-6));
         assert!(
-            (s.volume() - (5000.0 - hole) * 20.0).abs() < 1e-4,
+            (s.volume() - area * 20.0).abs() / (area * 20.0) < 1e-3,
             "{}",
             s.volume()
         );

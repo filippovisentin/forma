@@ -91,9 +91,9 @@ impl Command for Area {
         let mut n = 0;
         for id in ids {
             let g = &ctx.doc.object(id).expect("selected").geometry;
-            let a = match g {
-                Geometry::Mesh(m) => Some(m.area()),
-                g => curve_area(g, tol),
+            let a = match g.as_mesh() {
+                Some(m) => Some(m.area()),
+                None => curve_area(g, tol),
             };
             if let Some(a) = a {
                 total += a;
@@ -126,11 +126,10 @@ impl Command for Volume {
         let mut total = 0.0;
         let mut n = 0;
         for id in ids {
-            if let Geometry::Mesh(m) = &ctx.doc.object(id).expect("selected").geometry {
-                if m.is_closed(tol) {
-                    total += m.volume().abs();
-                    n += 1;
-                }
+            let g = &ctx.doc.object(id).expect("selected").geometry;
+            if let Some(m) = g.as_mesh().filter(|_| g.is_closed_solid(tol)) {
+                total += m.volume().abs();
+                n += 1;
             }
         }
         if n == 0 {
@@ -187,6 +186,15 @@ impl Command for What {
                         } else {
                             ", open"
                         }
+                    );
+                }
+                Geometry::Brep(b) => {
+                    let _ = write!(
+                        out,
+                        ", {} face(s), {}{}",
+                        b.faces,
+                        if b.solid { "closed" } else { "open" },
+                        if b.planar { ", planar faces" } else { "" }
                     );
                 }
                 _ => {}
@@ -263,7 +271,8 @@ mod tests {
             r.contains("#1 nurbs on layer Default, degree 3, 4 control points"),
             "{r}"
         );
-        assert!(r.contains("#2 mesh"), "{r}");
+        assert!(r.contains("#2 polysurface"), "{r}");
+        assert!(r.contains("6 face(s)"), "{r}");
         assert!(r.contains("closed"), "{r}");
         assert!(r.contains("group 1"), "{r}");
     }

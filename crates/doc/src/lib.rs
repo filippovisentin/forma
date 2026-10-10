@@ -4,8 +4,8 @@
 //! they can be undone as one step.
 
 use forma_geom::{
-    BoundingBox, Chain, CircleArc, Dimension, Label, LineCurve, Mesh, NurbsCurve, Point3, Seg,
-    Text, Vec3, Xform,
+    BoundingBox, Brep, Chain, CircleArc, Dimension, Label, LineCurve, Mesh, NurbsCurve, Point3,
+    Seg, Text, Vec3, Xform,
 };
 mod grips;
 pub use grips::MAX_MESH_GRIPS;
@@ -39,6 +39,10 @@ pub enum Geometry {
     Point(Point3),
     /// NURBS curve (free-form curves, ellipses, arcs after a non-uniform scale).
     Nurbs(NurbsCurve),
+    /// Exact surface or polysurface (an openNURBS brep or extrusion kept as
+    /// is, with a display mesh). Imported from Rhino or made by Box, Cylinder,
+    /// Sphere, Extrude…; written back unchanged.
+    Brep(Brep),
     /// Text or text dot (annotation, not a curve).
     Text(Text),
     /// Dimension (annotation, not a curve).
@@ -54,6 +58,8 @@ impl Geometry {
             Geometry::Arc(_) => "arc",
             Geometry::PolyCurve(_) => "polycurve",
             Geometry::Mesh(_) => "mesh",
+            Geometry::Brep(b) if b.faces == 1 => "surface",
+            Geometry::Brep(_) => "polysurface",
             Geometry::Point(_) => "point",
             Geometry::Nurbs(_) => "nurbs",
             Geometry::Text(t) if t.dot => "textdot",
@@ -65,8 +71,35 @@ impl Geometry {
     pub fn is_curve(&self) -> bool {
         !matches!(
             self,
-            Geometry::Mesh(_) | Geometry::Point(_) | Geometry::Text(_) | Geometry::Dimension(_)
+            Geometry::Mesh(_)
+                | Geometry::Brep(_)
+                | Geometry::Point(_)
+                | Geometry::Text(_)
+                | Geometry::Dimension(_)
         )
+    }
+
+    /// The triangles of a mesh, or the display mesh of an exact surface.
+    pub fn as_mesh(&self) -> Option<&Mesh> {
+        match self {
+            Geometry::Mesh(m) => Some(m),
+            Geometry::Brep(b) => Some(&b.mesh),
+            _ => None,
+        }
+    }
+
+    /// A closed mesh or a closed exact solid (a polysurface that is a solid).
+    pub fn is_closed_solid(&self, tol: f64) -> bool {
+        match self {
+            Geometry::Mesh(m) => m.is_closed(tol),
+            Geometry::Brep(b) => b.solid,
+            _ => false,
+        }
+    }
+
+    /// True for meshes and exact surfaces/solids (things with faces).
+    pub fn is_surface(&self) -> bool {
+        self.as_mesh().is_some()
     }
 
     /// True for text, text dots and dimensions.
@@ -125,9 +158,11 @@ impl Geometry {
             Geometry::Arc(a) => Some(Chain::new(vec![Seg::Arc(*a)])),
             Geometry::PolyCurve(s) => Some(Chain::new(s.clone())),
             Geometry::Nurbs(n) => Some(Chain::from_points(&n.points())),
-            Geometry::Mesh(_) | Geometry::Point(_) | Geometry::Text(_) | Geometry::Dimension(_) => {
-                None
-            }
+            Geometry::Mesh(_)
+            | Geometry::Brep(_)
+            | Geometry::Point(_)
+            | Geometry::Text(_)
+            | Geometry::Dimension(_) => None,
         }
     }
 
@@ -159,7 +194,7 @@ impl Geometry {
             Geometry::Nurbs(n) => n.points(),
             Geometry::Text(t) => t.outline(),
             Geometry::Dimension(d) => d.outline(),
-            Geometry::Mesh(_) | Geometry::Point(_) => Vec::new(),
+            Geometry::Mesh(_) | Geometry::Brep(_) | Geometry::Point(_) => Vec::new(),
         }
     }
 
@@ -171,9 +206,11 @@ impl Geometry {
             Geometry::Arc(a) => Some(a.radius * a.sweep),
             Geometry::PolyCurve(s) => Some(s.iter().map(Seg::length).sum()),
             Geometry::Nurbs(n) => Some(n.length()),
-            Geometry::Mesh(_) | Geometry::Point(_) | Geometry::Text(_) | Geometry::Dimension(_) => {
-                None
-            }
+            Geometry::Mesh(_)
+            | Geometry::Brep(_)
+            | Geometry::Point(_)
+            | Geometry::Text(_)
+            | Geometry::Dimension(_) => None,
         }
     }
 
@@ -190,6 +227,12 @@ impl Geometry {
             Geometry::PolyCurve(s) => Geometry::PolyCurve(Chain::new(s.clone()).reversed().segs),
             Geometry::Nurbs(n) => Geometry::Nurbs(n.reversed()),
             Geometry::Mesh(m) => Geometry::Mesh(m.flipped()),
+            // The exact object keeps its orientation (Flip on a polysurface is
+            // display-only until the kernel can reverse brep faces).
+            Geometry::Brep(b) => Geometry::Brep(Brep {
+                mesh: b.mesh.flipped(),
+                ..b.clone()
+            }),
             Geometry::Point(p) => Geometry::Point(*p),
             Geometry::Text(_) | Geometry::Dimension(_) => self.clone(),
         }
@@ -231,6 +274,7 @@ impl Geometry {
                     })
                     .collect(),
             ),
+            Geometry::Brep(b) => Geometry::Brep(b.transformed(x)),
             Geometry::Mesh(m) => {
                 let flip = x.flips();
                 Geometry::Mesh(Mesh {
@@ -292,6 +336,10 @@ impl Geometry {
                     max: Point3::ORIGIN,
                 })
             }
+            Geometry::Brep(b) => b.mesh.bounding_box().unwrap_or(BoundingBox {
+                min: Point3::ORIGIN,
+                max: Point3::ORIGIN,
+            }),
             Geometry::Mesh(m) => m.bounding_box().unwrap_or(BoundingBox {
                 min: Point3::ORIGIN,
                 max: Point3::ORIGIN,
@@ -701,6 +749,17 @@ impl Document {
                         o.id.0,
                         layer,
                         m.triangles.len()
+                    );
+                }
+                Geometry::Brep(b) => {
+                    let _ = writeln!(
+                        out,
+                        "#{} {} [{}] {} faces{}",
+                        o.id.0,
+                        o.geometry.kind(),
+                        layer,
+                        b.faces,
+                        if b.solid { " closed" } else { "" }
                     );
                 }
                 Geometry::Point(p) => {

@@ -39,6 +39,7 @@ mod curves;
 mod deform;
 mod draw;
 mod edit;
+mod exact;
 mod files;
 mod import;
 mod kernel;

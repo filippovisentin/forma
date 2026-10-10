@@ -50,6 +50,7 @@ pub fn open_3dm(path: &str) -> Result<Document, CommandError> {
             let layer = o.layer.map_or(LayerId(0), |i| ids[i]);
             let geometry = match o.geometry {
                 Some(DisplayGeometry::Mesh(m)) => Geometry::Mesh(m),
+                Some(DisplayGeometry::Brep(b)) => Geometry::Brep(b),
                 Some(DisplayGeometry::Polyline(p)) => Geometry::Polyline(p),
                 Some(DisplayGeometry::Point(p)) => Geometry::Point(p),
                 Some(DisplayGeometry::Text {

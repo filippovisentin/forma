@@ -5,7 +5,7 @@
 use crate::{Args, Command, CommandError, CommandResult, Context};
 use forma_doc::{Geometry, ObjectId};
 use forma_geom::{
-    box_mesh, cylinder_mesh, extrude_mesh, sphere_mesh, CircleArc, NurbsCurve, Plane, Point3, Vec3,
+    cylinder_mesh, extrude_mesh, sphere_mesh, CircleArc, NurbsCurve, Plane, Point3, Vec3,
 };
 
 pub(crate) fn finish(
@@ -142,7 +142,9 @@ impl Command for BoxCmd {
         let (u, v, _) = plane.coords(b);
         positive(u, "width", ctx)?;
         positive(v, "depth", ctx)?;
-        let ids = finish(ctx, vec![Geometry::Mesh(box_mesh(&plane, u, v, h))], false)?;
+        // Exact polysurface (six planar faces); the mesh only if openNURBS fails.
+        let g = crate::exact::box_geometry(&plane, u, v, h);
+        let ids = finish(ctx, vec![g], false)?;
         Ok(format!(
             "added #{} box {:.4} x {:.4} x {:.4}",
             ids[0].0,
@@ -168,8 +170,18 @@ impl Command for Cylinder {
         let r = positive(args.number("radius")?, "radius", ctx)?.abs();
         let h = positive(args.number("height")?, "height", ctx)?;
         let n = args.optional_vector().unwrap_or(Vec3::Z);
-        let mesh = cylinder_mesh(&Plane::from_normal(c, n), r, h, 64);
-        let ids = finish(ctx, vec![Geometry::Mesh(mesh)], false)?;
+        let base = Plane::from_normal(c, n);
+        // A negative height goes below the base plane.
+        let exact_base = if h < 0.0 {
+            Plane::from_normal(c + base.z * h, n)
+        } else {
+            base
+        };
+        let g = forma_io_3dm::exact::make_cylinder(&exact_base, r, h.abs()).map_or_else(
+            || Geometry::Mesh(cylinder_mesh(&base, r, h, 64)),
+            Geometry::Brep,
+        );
+        let ids = finish(ctx, vec![g], false)?;
         Ok(format!("added #{} cylinder r {r} h {}", ids[0].0, h.abs()))
     }
 }
@@ -187,7 +199,9 @@ impl Command for Sphere {
     fn run(&self, ctx: &mut Context, args: &mut Args) -> CommandResult {
         let c = args.point("center", ctx.last_point)?;
         let r = positive(args.number("radius")?, "radius", ctx)?.abs();
-        let ids = finish(ctx, vec![Geometry::Mesh(sphere_mesh(c, r, 48))], false)?;
+        let g = forma_io_3dm::exact::make_sphere(c, r)
+            .map_or_else(|| Geometry::Mesh(sphere_mesh(c, r, 48)), Geometry::Brep);
+        let ids = finish(ctx, vec![g], false)?;
         Ok(format!("added #{} sphere r {r}", ids[0].0))
     }
 }
@@ -224,11 +238,20 @@ impl Command for Extrude {
                 .or(Some(r.normal))
                 .and_then(Vec3::normalized)
                 .unwrap_or(Vec3::Z);
-            out.push(Geometry::Mesh(forma_geom::extrude_region(
-                &r.outer,
-                &r.holes,
-                along * d,
-            )));
+            let geo: Vec<&Geometry> = r
+                .ids
+                .iter()
+                .filter_map(|i| ctx.doc.object(*i).map(|o| &o.geometry))
+                .collect();
+            let exact = (geo.len() == r.ids.len())
+                .then(|| {
+                    forma_io_3dm::exact::make_planar(geo[0], &geo[1..], r.normal, Some(along * d))
+                })
+                .flatten();
+            out.push(exact.map_or_else(
+                || Geometry::Mesh(forma_geom::extrude_region(&r.outer, &r.holes, along * d)),
+                Geometry::Brep,
+            ));
             used.extend(r.ids);
         }
         for id in &ids {
@@ -241,12 +264,19 @@ impl Command for Extrude {
                 .unwrap_or(Vec3::Z)
                 .normalized()
                 .unwrap_or(Vec3::Z);
+            // Exact: a capped solid for a closed planar curve, else a surface.
+            let v = along * d;
+            let exact = match g.curve_normal() {
+                Some(n) if g.is_closed_curve() => {
+                    forma_io_3dm::exact::make_planar(g, &[], n, Some(v))
+                }
+                _ => forma_io_3dm::exact::make_extruded_curve(g, v),
+            };
             let pts = g.curve_points();
-            out.push(Geometry::Mesh(extrude_mesh(
-                &pts,
-                along * d,
-                g.is_closed_curve(),
-            )));
+            out.push(exact.map_or_else(
+                || Geometry::Mesh(extrude_mesh(&pts, v, g.is_closed_curve())),
+                Geometry::Brep,
+            ));
         }
         if out.is_empty() {
             return Err(CommandError::Invalid("Extrude: select curves first".into()));
@@ -451,16 +481,20 @@ mod tests {
         e.run_line("Circle 1000,0 50").unwrap();
         e.run_line("SelAll").unwrap();
         e.run_line("Extrude 300 0,0,1").unwrap();
-        let meshes: Vec<&forma_geom::Mesh> = e
+        let breps: Vec<&forma_geom::Brep> = e
             .doc()
             .objects()
             .filter_map(|o| match &o.geometry {
-                Geometry::Mesh(m) => Some(m),
+                Geometry::Brep(b) => Some(b),
                 _ => None,
             })
             .collect();
-        // One wall (with its hole) and one cylinder.
-        assert_eq!(meshes.len(), 2);
+        // One wall (with its hole) and one cylinder, both exact closed solids.
+        assert_eq!(breps.len(), 2);
+        assert!(breps.iter().all(|b| b.solid));
+        // The wall: 4 outer + 4 inner sides + 2 caps.
+        assert!(breps.iter().any(|b| b.faces == 10 && b.planar));
+        let meshes: Vec<&forma_geom::Mesh> = breps.iter().map(|b| &b.mesh).collect();
         let wall = (560.0 * 460.0 - 500.0 * 400.0) * 300.0;
         assert!(meshes
             .iter()
@@ -588,8 +622,9 @@ mod tests {
         let solid = e
             .doc()
             .objects()
-            .find(|o| matches!(o.geometry, forma_doc::Geometry::Mesh(_)))
+            .find(|o| matches!(o.geometry, forma_doc::Geometry::Brep(_)))
             .unwrap();
+        assert_eq!(solid.geometry.kind(), "polysurface");
         let b = solid.geometry.bounding_box();
         assert!((b.max.z - 720.0).abs() < 1e-9);
         assert_eq!(e.ctx.selection.len(), 1); // the new solid is selected

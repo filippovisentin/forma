@@ -271,7 +271,7 @@ fn export_obj(ctx: &Context, ids: &[ObjectId], path: &str) -> CommandResult {
             }
         };
         match &o.geometry {
-            Geometry::Mesh(m) => {
+            Geometry::Mesh(m) | Geometry::Brep(forma_geom::Brep { mesh: m, .. }) => {
                 let _ = writeln!(s, "o {layer}_{}\nusemtl {mat}", id.0);
                 for p in &m.positions {
                     let (x, y, z) = up(p.x, p.y, p.z);
@@ -348,10 +348,7 @@ fn export_obj(ctx: &Context, ids: &[ObjectId], path: &str) -> CommandResult {
 fn export_stl(ctx: &Context, ids: &[ObjectId], path: &str) -> CommandResult {
     let tris: Vec<[forma_geom::Point3; 3]> = ids
         .iter()
-        .filter_map(|id| match &ctx.doc.object(*id)?.geometry {
-            Geometry::Mesh(m) => Some(m),
-            _ => None,
-        })
+        .filter_map(|id| ctx.doc.object(*id)?.geometry.as_mesh())
         .flat_map(|m| {
             m.triangles
                 .iter()

@@ -1,5 +1,6 @@
 //! Visibility, locking, groups and selection filters: Hide, Show, Isolate, Lock,
-//! Unlock, Group, Ungroup, SelGroup, SelLast, SelCrv, SelMesh, SelPt, Invert.
+//! Unlock, Group, Ungroup, SelGroup, SelLast, SelCrv, SelMesh, SelSrf, SelPolysrf, SelPt,
+//! Invert.
 
 use crate::edit::parse_ids;
 use crate::{Args, Command, CommandError, CommandResult, Context};
@@ -335,16 +336,37 @@ impl Command for SelCrv {
     }
 }
 
-simple_command!(
-    SelMesh,
-    "SelMesh",
-    &["SelSrf", "SelPolysrf"],
-    "SelMesh — select all meshes (surfaces and solids are meshes for now)"
-);
+simple_command!(SelMesh, "SelMesh", &[], "SelMesh — select all meshes");
 impl Command for SelMesh {
     impl_meta!(SelMesh);
     fn run(&self, ctx: &mut Context, _args: &mut Args) -> CommandResult {
         select_where(ctx, |g| matches!(g, Geometry::Mesh(_)))
+    }
+}
+
+simple_command!(
+    SelSrf,
+    "SelSrf",
+    &[],
+    "SelSrf — select all surfaces (single-face exact surfaces)"
+);
+impl Command for SelSrf {
+    impl_meta!(SelSrf);
+    fn run(&self, ctx: &mut Context, _args: &mut Args) -> CommandResult {
+        select_where(ctx, |g| matches!(g, Geometry::Brep(b) if b.faces == 1))
+    }
+}
+
+simple_command!(
+    SelPolysrf,
+    "SelPolysrf",
+    &[],
+    "SelPolysrf — select all polysurfaces (exact surfaces with several faces, solids)"
+);
+impl Command for SelPolysrf {
+    impl_meta!(SelPolysrf);
+    fn run(&self, ctx: &mut Context, _args: &mut Args) -> CommandResult {
+        select_where(ctx, |g| matches!(g, Geometry::Brep(b) if b.faces > 1))
     }
 }
 
@@ -495,8 +517,15 @@ mod tests {
         e.run_line("SelNone").unwrap();
         e.run_line("SelPt").unwrap();
         assert_eq!(e.ctx.selection.iter().next(), Some(&ObjectId(2)));
-        e.run_line("SelSrf").unwrap();
+        e.run_line("SelPolysrf").unwrap();
         assert_eq!(e.ctx.selection.len(), 2);
+        e.run_line("SelNone").unwrap();
+        e.run_line("SelSrf").unwrap();
+        assert!(e.ctx.selection.is_empty());
+        e.run_line("SelMesh").unwrap();
+        assert!(e.ctx.selection.is_empty());
+        e.run_line("SelPt").unwrap();
+        e.run_line("SelPolysrf").unwrap();
         e.run_line("SelInvert").unwrap();
         assert_eq!(e.ctx.selection.iter().next(), Some(&ObjectId(1)));
         // SelGroup expands the selection to the group.

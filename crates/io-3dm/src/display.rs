@@ -11,6 +11,7 @@
 use crate::{ffi, Error, ModelHandle, ObjectKind, Summary};
 use forma_geom::{Mesh, Point3, Vec3};
 use spade::{ConstrainedDelaunayTriangulation, Point2, Triangulation};
+use std::collections::HashMap;
 use std::ffi::c_int;
 use std::path::Path;
 
@@ -25,6 +26,9 @@ pub struct ImportedLayer {
 #[derive(Debug, Clone, PartialEq)]
 pub enum DisplayGeometry {
     Mesh(Mesh),
+    /// Exact surface or polysurface (brep, extrusion, surface): the native
+    /// object as bytes (see [`crate::exact`]) with its display mesh.
+    Brep(forma_geom::Brep),
     Polyline(Vec<Point3>),
     Point(Point3),
     /// Text (`dot` = text dot): plane origin and axes, height (0 for dots).
@@ -94,9 +98,26 @@ pub fn import_display(path: impl AsRef<Path>) -> Result<Import, Error> {
             let obj = i as c_int;
             // SAFETY (all calls below): model valid for this scope, obj in range.
             let geometry = match info.kind {
-                ObjectKind::Brep | ObjectKind::Extrusion => {
-                    let mesh = unsafe { brep_mesh(m, obj) };
-                    (!mesh.triangles.is_empty()).then_some(DisplayGeometry::Mesh(mesh))
+                ObjectKind::Brep | ObjectKind::Extrusion | ObjectKind::Surface => {
+                    let (mesh, face_ends) = unsafe { brep_mesh_faces(m, obj) };
+                    if mesh.triangles.is_empty() {
+                        None
+                    } else {
+                        let mut len = 0usize;
+                        let p = unsafe { ffi::f3dm_object_bytes(m, obj, &mut len) };
+                        match unsafe { crate::exact::take_bytes(p, len) } {
+                            Some(data) => Some(DisplayGeometry::Brep(forma_geom::Brep {
+                                data: std::sync::Arc::new(data),
+                                xform: forma_geom::Xform::IDENTITY,
+                                mesh,
+                                faces: info.brep_faces.unwrap_or(1),
+                                solid: info.is_solid,
+                                planar: info.all_planar,
+                                face_ends,
+                            })),
+                            None => Some(DisplayGeometry::Mesh(mesh)),
+                        }
+                    }
                 }
                 ObjectKind::Mesh => unsafe { mesh_object(m, obj) }.map(DisplayGeometry::Mesh),
                 ObjectKind::Line
@@ -211,14 +232,17 @@ unsafe fn mesh_object(m: *mut ffi::Model, obj: c_int) -> Option<Mesh> {
     })
 }
 
-unsafe fn brep_mesh(m: *mut ffi::Model, obj: c_int) -> Mesh {
+/// Display mesh of a brep and, per face, the end of its triangles.
+pub(crate) unsafe fn brep_mesh_faces(m: *mut ffi::Model, obj: c_int) -> (Mesh, Vec<u32>) {
     let mut out = Mesh::default();
+    let mut ends = Vec::new();
     for face in 0..ffi::f3dm_face_count(m, obj) {
         if let Some(fm) = face_mesh(m, obj, face) {
             out.append(&fm);
         }
+        ends.push(out.triangles.len() as u32);
     }
-    out
+    (out, ends)
 }
 
 struct FaceInfo {
@@ -253,12 +277,25 @@ unsafe fn face_mesh(m: *mut ffi::Model, obj: c_int, face: c_int) -> Option<Mesh>
     };
 
     let mut loops = Vec::new();
+    // Loop samples lie on the brep edges: their 3D points come from the edge, so
+    // neighbouring faces share them exactly (a closed brep gives a closed mesh).
+    let mut on_edges: HashMap<(u64, u64), Point3> = HashMap::new();
     for k in 0..ffi::f3dm_face_loops(m, obj, face) {
         let mut outer: c_int = 0;
         let n = ffi::f3dm_loop_points(m, k, std::ptr::null_mut(), 0, &mut outer);
         let mut buf = vec![0.0; n as usize * 2];
         ffi::f3dm_loop_points(m, k, buf.as_mut_ptr(), n, &mut outer);
+        let mut xyz = vec![f64::NAN; n as usize * 3];
+        ffi::f3dm_loop_xyz(m, k, xyz.as_mut_ptr(), n);
         let pts: Vec<[f64; 2]> = buf.chunks(2).map(|c| [c[0], c[1]]).collect();
+        for (p, q) in pts.iter().zip(xyz.chunks(3)) {
+            if q.iter().all(|x| x.is_finite()) {
+                on_edges.insert(
+                    (p[0].to_bits(), p[1].to_bits()),
+                    Point3::new(q[0], q[1], q[2]),
+                );
+            }
+        }
         if pts.len() >= 3 {
             loops.push(pts);
         }
@@ -267,8 +304,9 @@ unsafe fn face_mesh(m: *mut ffi::Model, obj: c_int, face: c_int) -> Option<Mesh>
         let [u0, u1, v0, v1] = info.domain;
         loops.push(vec![[u0, v0], [u1, v0], [u1, v1], [u0, v1]]);
     }
+    let (nu, nv) = grid_size(m, obj, face, &info);
 
-    let (uv, tris) = triangulate_trimmed(&loops, &info);
+    let (uv, tris) = triangulate_trimmed(&loops, &info, nu, nv);
     if tris.is_empty() {
         return None;
     }
@@ -288,7 +326,13 @@ unsafe fn face_mesh(m: *mut ffi::Model, obj: c_int, face: c_int) -> Option<Mesh>
     );
     let positions: Vec<Point3> = xyz
         .chunks(3)
-        .map(|c| Point3::new(c[0], c[1], c[2]))
+        .zip(&uv)
+        .map(|(c, p)| {
+            on_edges
+                .get(&(p[0].to_bits(), p[1].to_bits()))
+                .copied()
+                .unwrap_or(Point3::new(c[0], c[1], c[2]))
+        })
         .collect();
     let normals: Vec<Vec3> = nrm.chunks(3).map(|c| Vec3::new(c[0], c[1], c[2])).collect();
     let triangles = tris
@@ -321,18 +365,94 @@ fn inside(p: [f64; 2], loops: &[Vec<[f64; 2]>]) -> bool {
     inside
 }
 
-/// Number of interior grid intervals along one parameter direction.
+/// Number of interior grid intervals along one parameter direction, from the
+/// surface structure alone (used when the face does not turn).
 fn intervals(spans: i32, degree: i32) -> usize {
     if degree <= 1 {
         spans.max(1) as usize
     } else {
-        (spans.max(1) * degree * 2).clamp(4, 32) as usize
+        (spans.max(1) * degree).clamp(2, 32) as usize
     }
+}
+
+/// Largest normal turning angle allowed across one grid interval.
+const TURN_PER_INTERVAL: f64 = 10.0 * std::f64::consts::PI / 180.0;
+const MAX_INTERVALS: usize = 64;
+
+/// Grid intervals in u and v: enough for the face's spans, and more where its
+/// normal turns (one interval per 10°), measured on a sample grid.
+unsafe fn grid_size(
+    m: *mut ffi::Model,
+    obj: c_int,
+    face: c_int,
+    info: &FaceInfo,
+) -> (usize, usize) {
+    let base = (
+        intervals(info.spans[0], info.degree[0]),
+        intervals(info.spans[1], info.degree[1]),
+    );
+    if info.degree[0] <= 1 && info.degree[1] <= 1 {
+        return base;
+    }
+    let [u0, u1, v0, v1] = info.domain;
+    let k =
+        |spans: i32, degree: i32| ((spans.max(1) * degree.max(1) * 2 + 1) as usize).clamp(9, 33);
+    let (ku, kv) = (
+        k(info.spans[0], info.degree[0]),
+        k(info.spans[1], info.degree[1]),
+    );
+    let mut uv = Vec::with_capacity(ku * kv * 2);
+    for j in 0..kv {
+        for i in 0..ku {
+            uv.push(u0 + (u1 - u0) * i as f64 / (ku - 1) as f64);
+            uv.push(v0 + (v1 - v0) * j as f64 / (kv - 1) as f64);
+        }
+    }
+    let n = ku * kv;
+    let mut xyz = vec![0.0; n * 3];
+    let mut nrm = vec![0.0; n * 3];
+    ffi::f3dm_face_eval(
+        m,
+        obj,
+        face,
+        n as c_int,
+        uv.as_ptr(),
+        xyz.as_mut_ptr(),
+        nrm.as_mut_ptr(),
+    );
+    let normal = |i: usize, j: usize| {
+        let o = 3 * (j * ku + i);
+        Vec3::new(nrm[o], nrm[o + 1], nrm[o + 2]).normalized()
+    };
+    let angle = |a: Option<Vec3>, b: Option<Vec3>| match (a, b) {
+        (Some(a), Some(b)) => a.dot(b).clamp(-1.0, 1.0).acos(),
+        _ => 0.0,
+    };
+    let mut turn_u: f64 = 0.0;
+    for j in 0..kv {
+        let t: f64 = (1..ku).map(|i| angle(normal(i - 1, j), normal(i, j))).sum();
+        turn_u = turn_u.max(t);
+    }
+    let mut turn_v: f64 = 0.0;
+    for i in 0..ku {
+        let t: f64 = (1..kv).map(|j| angle(normal(i, j - 1), normal(i, j))).sum();
+        turn_v = turn_v.max(t);
+    }
+    let by_turn = |t: f64| (t / TURN_PER_INTERVAL).ceil() as usize;
+    (
+        base.0.max(by_turn(turn_u)).clamp(1, MAX_INTERVALS),
+        base.1.max(by_turn(turn_v)).clamp(1, MAX_INTERVALS),
+    )
 }
 
 /// Constrained triangulation of a trimmed (u, v) region. Returns the vertex
 /// positions in (u, v) and counter-clockwise triangles inside the region.
-fn triangulate_trimmed(loops: &[Vec<[f64; 2]>], info: &FaceInfo) -> (Vec<[f64; 2]>, Vec<[u32; 3]>) {
+fn triangulate_trimmed(
+    loops: &[Vec<[f64; 2]>],
+    info: &FaceInfo,
+    nu: usize,
+    nv: usize,
+) -> (Vec<[f64; 2]>, Vec<[u32; 3]>) {
     let mut cdt = ConstrainedDelaunayTriangulation::<Point2<f64>>::new();
 
     for l in loops {
@@ -350,8 +470,6 @@ fn triangulate_trimmed(loops: &[Vec<[f64; 2]>], info: &FaceInfo) -> (Vec<[f64; 2
     }
 
     let [u0, u1, v0, v1] = info.domain;
-    let nu = intervals(info.spans[0], info.degree[0]);
-    let nv = intervals(info.spans[1], info.degree[1]);
     if nu > 1 || nv > 1 {
         for i in 1..nu {
             for j in 1..nv {
@@ -409,7 +527,7 @@ mod tests {
             degree: [3, 3],
             reversed: false,
         };
-        let (uv, tris) = triangulate_trimmed(&loops, &info);
+        let (uv, tris) = triangulate_trimmed(&loops, &info, 6, 6);
         let a = area(&uv, &tris);
         assert!((a - 96.0).abs() < 1e-9, "area {a}");
         assert!(tris.iter().all(|t| {
@@ -427,7 +545,7 @@ mod tests {
             degree: [1, 1],
             reversed: false,
         };
-        let (uv, tris) = triangulate_trimmed(&loops, &info);
+        let (uv, tris) = triangulate_trimmed(&loops, &info, 1, 1);
         assert_eq!(uv.len(), 4);
         assert_eq!(tris.len(), 2);
     }

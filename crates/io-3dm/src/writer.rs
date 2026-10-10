@@ -26,9 +26,31 @@ fn units(u: LengthUnit) -> Units {
     }
 }
 
+/// Writes a mesh object. SAFETY: `w` is a valid writer.
+unsafe fn write_mesh(w: &Writer, layer: c_int, m: &forma_geom::Mesh) -> c_int {
+    let xyz: Vec<f64> = m.positions.iter().flat_map(|q| [q.x, q.y, q.z]).collect();
+    let nrm: Vec<f64> = m.normals.iter().flat_map(|n| [n.x, n.y, n.z]).collect();
+    let tri: Vec<u32> = m.triangles.iter().flatten().copied().collect();
+    let normals = if m.normals.len() == m.positions.len() {
+        nrm.as_ptr()
+    } else {
+        std::ptr::null()
+    };
+    ffi::f3dm_writer_mesh(
+        w.0,
+        layer,
+        xyz.as_ptr(),
+        normals,
+        m.positions.len() as c_int,
+        tri.as_ptr(),
+        m.triangles.len() as c_int,
+    )
+}
+
 /// Save `doc` to `path`. Curves are written as Rhino curves (lines, polylines,
-/// arcs/circles, polycurves, NURBS curves), points as point objects; solids and
-/// surfaces are written as meshes. Annotations are written in a simplified form
+/// arcs/circles, polycurves, NURBS curves), points as point objects; exact
+/// surfaces and polysurfaces as the breps/extrusions they are (transformed as
+/// needed), meshes as meshes. Annotations are written in a simplified form
 /// Rhino can display: text and text dots become text dots, dimensions become their
 /// lines plus a text dot with the measured value (not editable Rhino dimensions).
 pub fn write_document(path: impl AsRef<Path>, doc: &Document) -> Result<(), Error> {
@@ -224,24 +246,23 @@ pub fn write_document(path: impl AsRef<Path>, doc: &Document) -> Result<(), Erro
                         n.knots.as_ptr(),
                     )
                 }
-                Geometry::Mesh(m) => {
-                    let xyz: Vec<f64> = m.positions.iter().flat_map(|q| [q.x, q.y, q.z]).collect();
-                    let nrm: Vec<f64> = m.normals.iter().flat_map(|n| [n.x, n.y, n.z]).collect();
-                    let tri: Vec<u32> = m.triangles.iter().flatten().copied().collect();
-                    let normals = if m.normals.len() == m.positions.len() {
-                        nrm.as_ptr()
-                    } else {
-                        std::ptr::null()
-                    };
-                    ffi::f3dm_writer_mesh(
-                        w.0,
-                        layer,
-                        xyz.as_ptr(),
-                        normals,
-                        m.positions.len() as c_int,
-                        tri.as_ptr(),
-                        m.triangles.len() as c_int,
-                    )
+                Geometry::Mesh(m) => write_mesh(&w, layer, m),
+                Geometry::Brep(b) => {
+                    // Apply a pending transform first (and keep solids outward).
+                    let baked = crate::exact::baked(b);
+                    let data = baked.as_ref().map_or(&b.data, |x| &x.data);
+                    match baked.is_some().then(|| {
+                        ffi::f3dm_writer_bytes(
+                            w.0,
+                            layer,
+                            data.as_ptr(),
+                            data.len(),
+                            std::ptr::null(),
+                        )
+                    }) {
+                        Some(ok) if ok != 0 => ok,
+                        _ => write_mesh(&w, layer, &b.mesh),
+                    }
                 }
             }
         };

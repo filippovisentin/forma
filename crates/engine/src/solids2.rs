@@ -796,6 +796,9 @@ mod tests {
         let mut e = Engine::new();
         e.run_line("Box 0,0 10,10 10").unwrap();
         e.run_line("SelAll").unwrap();
+        // Weld works on meshes, not on polysurfaces.
+        assert!(e.run_line("Weld").is_err());
+        e.run_line("Mesh").unwrap();
         e.run_line("Weld").unwrap();
         assert!(last_mesh(&e).boundary_edges().is_empty());
         e.run_line("Unweld 30").unwrap();

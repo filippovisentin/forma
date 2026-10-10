@@ -4,6 +4,7 @@
 //! Full import into `forma-doc` arrives with milestones M1/M5.
 
 mod display;
+pub mod exact;
 mod writer;
 
 pub use display::{import_display, DisplayGeometry, Import, ImportedLayer, ImportedObject};
@@ -34,6 +35,7 @@ pub(crate) mod ffi {
         pub layer: c_int,
         pub brep_faces: c_int,
         pub is_solid: c_int,
+        pub all_planar: c_int,
         pub bbox: [f64; 6],
     }
 
@@ -73,6 +75,7 @@ pub(crate) mod ffi {
             reversed: *mut c_int,
         ) -> c_int;
         pub fn f3dm_face_loops(m: *mut Model, obj: c_int, face: c_int) -> c_int;
+        pub fn f3dm_loop_xyz(m: *const Model, k: c_int, xyz: *mut f64, cap_points: c_int) -> c_int;
         pub fn f3dm_loop_points(
             m: *const Model,
             k: c_int,
@@ -171,6 +174,75 @@ pub(crate) mod ffi {
         ) -> c_int;
         pub fn f3dm_object_name(m: *const Model, i: c_int, buf: *mut c_char, cap: c_int) -> c_int;
         pub fn f3dm_point(m: *const Model, obj: c_int, xyz: *mut f64) -> c_int;
+        pub fn f3dm_bytes_free(p: *mut u8);
+        pub fn f3dm_object_bytes(m: *const Model, obj: c_int, len: *mut usize) -> *mut u8;
+        pub fn f3dm_bytes_model(data: *const u8, len: usize, x16: *const f64) -> *mut Model;
+        pub fn f3dm_bytes_transformed(
+            data: *const u8,
+            len: usize,
+            x16: *const f64,
+            out_len: *mut usize,
+        ) -> *mut u8;
+        pub fn f3dm_bytes_flipped(data: *const u8, len: usize, out_len: *mut usize) -> *mut u8;
+        pub fn f3dm_writer_bytes(
+            w: *mut Writer,
+            layer: c_int,
+            data: *const u8,
+            len: usize,
+            x16: *const f64,
+        ) -> c_int;
+        pub fn f3dm_make_box(corners: *const f64, len: *mut usize) -> *mut u8;
+        pub fn f3dm_make_cylinder(plane: *const f64, r: f64, h: f64, len: *mut usize) -> *mut u8;
+        pub fn f3dm_make_cone(plane: *const f64, r: f64, h: f64, len: *mut usize) -> *mut u8;
+        pub fn f3dm_make_sphere(center: *const f64, r: f64, len: *mut usize) -> *mut u8;
+        pub fn f3dm_make_torus(plane: *const f64, a: f64, b: f64, len: *mut usize) -> *mut u8;
+        pub fn f3dm_make_extruded_curve(
+            stream: *const f64,
+            n: usize,
+            dir: *const f64,
+            len: *mut usize,
+        ) -> *mut u8;
+        pub fn f3dm_bytes_face(data: *const u8, len: usize, i: c_int, out: *mut usize) -> *mut u8;
+        pub fn f3dm_bytes_edges(
+            data: *const u8,
+            len: usize,
+            which: c_int,
+            n: *mut usize,
+        ) -> *mut f64;
+        pub fn f3dm_bytes_face_loops(
+            data: *const u8,
+            len: usize,
+            i: c_int,
+            n: *mut usize,
+        ) -> *mut f64;
+        pub fn f3dm_bytes_extruded(
+            data: *const u8,
+            len: usize,
+            dir: *const f64,
+            out: *mut usize,
+        ) -> *mut u8;
+        pub fn f3dm_bytes_capped(
+            data: *const u8,
+            len: usize,
+            tol: f64,
+            caps: *mut c_int,
+            out: *mut usize,
+        ) -> *mut u8;
+        pub fn f3dm_make_polyhedron(
+            pts: *const f64,
+            npts: c_int,
+            data: *const c_int,
+            ndata: usize,
+            len: *mut usize,
+        ) -> *mut u8;
+        pub fn f3dm_make_planar(
+            plane: *const f64,
+            stream: *const f64,
+            n: usize,
+            loops: c_int,
+            dir: *const f64,
+            len: *mut usize,
+        ) -> *mut u8;
         pub fn f3dm_write_line(
             path: *const c_char,
             a: *const f64,
@@ -288,10 +360,12 @@ pub struct ObjectInfo {
     pub kind: ObjectKind,
     /// Index into [`Summary::layers`], if the layer was found.
     pub layer: Option<usize>,
-    /// Number of faces, for breps only.
+    /// Number of faces, for breps, extrusions and surfaces.
     pub brep_faces: Option<usize>,
     /// Whether a brep is a closed solid.
     pub is_solid: bool,
+    /// Whether every face of a brep is planar.
+    pub all_planar: bool,
     pub bbox: Option<BoundingBox>,
 }
 
@@ -357,6 +431,11 @@ impl ModelHandle {
         Err(Error::ReadFailed(path.display().to_string()))
     }
 
+    /// Takes ownership of a model made by the shim (non-null).
+    pub(crate) fn from_raw(m: *mut ffi::Model) -> Self {
+        Self(m)
+    }
+
     pub(crate) fn ptr(&self) -> *mut ffi::Model {
         self.0
     }
@@ -404,8 +483,13 @@ unsafe fn summarise(m: *const ffi::Model) -> Summary {
         objects.push(ObjectInfo {
             kind,
             layer: usize::try_from(o.layer).ok(),
-            brep_faces: (kind == ObjectKind::Brep).then_some(o.brep_faces as usize),
+            brep_faces: matches!(
+                kind,
+                ObjectKind::Brep | ObjectKind::Extrusion | ObjectKind::Surface
+            )
+            .then_some(o.brep_faces as usize),
             is_solid: o.is_solid != 0,
+            all_planar: o.all_planar != 0,
             bbox,
         });
     }

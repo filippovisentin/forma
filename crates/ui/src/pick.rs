@@ -70,7 +70,7 @@ fn ray_mesh(
             continue;
         }
         let Some(o) = doc.object(id) else { continue };
-        let Geometry::Mesh(m) = &o.geometry else {
+        let Some(m) = o.geometry.as_mesh() else {
             continue;
         };
         if !doc.is_selectable(o) {
@@ -212,7 +212,7 @@ pub fn window_select(
             continue;
         }
         let hit = match &o.geometry {
-            Geometry::Mesh(m) => m
+            Geometry::Mesh(m) | Geometry::Brep(forma_geom::Brep { mesh: m, .. }) => m
                 .positions
                 .iter()
                 .any(|p| pr.to_screen(*p).is_some_and(|s| rect.contains(s))),
@@ -264,7 +264,7 @@ pub fn selection_skeleton(doc: &Document, ids: &BTreeSet<ObjectId>) -> Vec<[Poin
     for id in ids {
         let Some(o) = doc.object(*id) else { continue };
         match &o.geometry {
-            Geometry::Mesh(m) => {
+            Geometry::Mesh(m) | Geometry::Brep(forma_geom::Brep { mesh: m, .. }) => {
                 let edges = m.boundary_edges();
                 if edges.len() <= 4000 {
                     out.extend(
