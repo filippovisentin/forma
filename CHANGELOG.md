@@ -7,6 +7,31 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.8.0] — 2026-10-10
+
+### Added
+- **Section cut**: View → Section (Clipping Plane) — hide everything above a height (or
+  beyond a plane) in every view; `ClippingPlane <point> <up|down|north…>`, `ClippingPlane Off`.
+- **Capture View to Image** (File menu, `ViewCaptureToFile`): PNG of the active view with texts
+  and dimensions.
+- **Named views** (View → Named Views) and **layer states** (Layers panel → States).
+- Curves: `CircleTTR` (circle tangent to two curves), `ArcDirection`, `BlendCrv` (tangency or
+  curvature), `SimplifyCrv`, `Smooth`, `Silhouette`, Line from midpoint / vertical /
+  perpendicular from a curve / angle bisector; `Fillet` now works between arcs, circles,
+  polylines and lines.
+- Surfaces and meshes: `Sweep2`, `ReduceMesh` (fewer triangles on heavy imported meshes).
+- Annotation: `DimRotated`. Document: `Units` (File → Units…, with or without scaling).
+
+### Changed
+- **Faster commands on big models**: only the changed part of the scene is rebuilt after a
+  command (about 30 times less work on a 950-object model).
+- `Extrude` on curves inside one another makes one solid with holes (walls from their two
+  outlines, like Rhino).
+- OBJ export writes a `.mtl` with layer colours, normals, and Y up (Blender, D5 Render,
+  SketchUp…); STL export is in millimetres for slicers.
+- Typing a command with only some of its values (`BooleanDifference #3`) starts it with them;
+  spaces typed in a text prompt stay in the text.
+
 ## [0.7.2] — 2026-10-10
 
 ### Added

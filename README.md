@@ -18,7 +18,7 @@ architect and reviewer.
 
 Forma **works**: you can draw a room in centimetres, extrude walls, push and pull faces,
 arrange furniture, colour things by layer, and save a `.3dm` file. But it is young
-(**v0.7.0**), and one thing matters before you rely on it:
+(**v0.8.0**), and one thing matters before you rely on it:
 
 > **Solids and surfaces are display meshes for now.** Box, Cylinder, Sphere, extrusions,
 > Loft, Revolve, Sweep1 and PlanarSrf produce triangle meshes, not exact NURBS solids.
@@ -262,7 +262,7 @@ revisore e unico utente.
 
 **Stato.** Funziona: si disegna una stanza in centimetri, si estrudono i muri, si
 spingono e tirano le facce, si organizzano layer e colori e si salva in `.3dm`. È però
-giovane (v0.7.0): **solidi e superfici sono per ora mesh di visualizzazione**, non solidi
+giovane (v0.8.0): **solidi e superfici sono per ora mesh di visualizzazione**, non solidi
 NURBS esatti. Booleane, `FilletEdge`, `ChamferEdge` e `Shell` funzionano già sulle mesh
 chiuse grazie al kernel OpenCascade (versione Windows); le superfici NURBS esatte arriveranno
 dopo. Le curve invece sono esatte.
