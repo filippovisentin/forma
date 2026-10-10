@@ -322,6 +322,8 @@ struct FormaApp {
     form: Option<dialogs::OpenForm>,
     /// A view capture to save (View → Capture View to Image).
     capture: Option<capture::Capture>,
+    /// Values being edited in the Properties panel.
+    prop_edit: Option<panels::PropEdit>,
     /// Section cut shown in every view (ClippingPlane): point and normal.
     clip: Option<(forma_geom::Point3, forma_geom::Vec3)>,
     /// Named views of this session: name, view kind, camera, CPlane.

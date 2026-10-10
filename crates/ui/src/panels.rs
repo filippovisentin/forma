@@ -22,6 +22,16 @@ const SWATCHES: [[u8; 3]; 14] = [
     [70, 110, 140],
 ];
 
+/// Editable values of the Properties panel for one selection and document state.
+pub(crate) struct PropEdit {
+    key: (Vec<forma_doc::ObjectId>, u64),
+    name: String,
+    size: [String; 3],
+    pos: [String; 3],
+    text: String,
+    radius: String,
+}
+
 impl FormaApp {
     /// Right panel with Properties, Layers and Help tabs.
     pub(crate) fn ui_side(&mut self, ui: &mut egui::Ui) {
@@ -113,6 +123,42 @@ impl FormaApp {
             return;
         }
         let mut cmd: Option<String> = None;
+        // Editable values, refreshed when the selection or the document changes.
+        let key = (sel.iter().map(|o| o.id).collect::<Vec<_>>(), doc.version());
+        if self.prop_edit.as_ref().is_none_or(|p| p.key != key) {
+            let names: std::collections::BTreeSet<Option<&String>> =
+                sel.iter().map(|o| o.name.as_ref()).collect();
+            let fmt = |v: f64| crate::tools::round(v).to_string();
+            let (size, pos) = match self.sel_info.bbox {
+                Some(b) => (
+                    [
+                        fmt(b.max.x - b.min.x),
+                        fmt(b.max.y - b.min.y),
+                        fmt(b.max.z - b.min.z),
+                    ],
+                    [fmt(b.min.x), fmt(b.min.y), fmt(b.min.z)],
+                ),
+                None => Default::default(),
+            };
+            self.prop_edit = Some(PropEdit {
+                key: key.clone(),
+                name: match names.iter().next() {
+                    Some(Some(n)) if names.len() == 1 => (*n).clone(),
+                    _ => String::new(),
+                },
+                size,
+                pos,
+                text: match (sel.len(), &sel[0].geometry) {
+                    (1, forma_doc::Geometry::Text(t)) => t.text.clone(),
+                    (1, forma_doc::Geometry::Dimension(d)) => d.text.clone().unwrap_or_default(),
+                    _ => String::new(),
+                },
+                radius: match (sel.len(), &sel[0].geometry) {
+                    (1, forma_doc::Geometry::Arc(a)) => fmt(a.radius),
+                    _ => String::new(),
+                },
+            });
+        }
         let kinds: std::collections::BTreeSet<&str> =
             sel.iter().map(|o| o.geometry.kind()).collect();
         let kind = if kinds.len() == 1 {
@@ -130,6 +176,53 @@ impl FormaApp {
                 ui.weak("Type");
                 ui.label(kind);
                 ui.end_row();
+
+                // Name (Enter or leaving the field applies it).
+                let pe = self.prop_edit.as_mut().expect("set above");
+                ui.weak("Name");
+                let r = ui.add(
+                    egui::TextEdit::singleline(&mut pe.name)
+                        .desired_width(150.0)
+                        .hint_text("(none)"),
+                );
+                if r.lost_focus() && r.changed()
+                    || r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))
+                {
+                    let n = pe.name.trim();
+                    cmd = Some(if n.is_empty() {
+                        "SetObjectName \"\"".into()
+                    } else {
+                        format!("SetObjectName {n}")
+                    });
+                }
+                ui.end_row();
+                if kind == "text" || kind == "textdot" || kind == "dimension" {
+                    ui.weak("Text");
+                    let r = ui.add(egui::TextEdit::singleline(&mut pe.text).desired_width(150.0));
+                    if r.lost_focus() && !pe.text.trim().is_empty() {
+                        cmd = Some(format!("EditText #{} {}", sel[0].id.0, pe.text.trim()));
+                    }
+                    ui.end_row();
+                }
+                if !pe.radius.is_empty() {
+                    ui.weak("Radius");
+                    let r = ui.add(egui::TextEdit::singleline(&mut pe.radius).desired_width(80.0));
+                    if r.lost_focus() {
+                        if let (forma_doc::Geometry::Arc(a), Ok(nr)) = (
+                            &sel[0].geometry,
+                            pe.radius.trim().replace(',', ".").parse::<f64>(),
+                        ) {
+                            if nr > 0.0 && (nr - a.radius).abs() > 1e-12 {
+                                cmd = Some(format!(
+                                    "Scale {} {}",
+                                    crate::tools::fmt_p(a.center()),
+                                    crate::tools::round(nr / a.radius)
+                                ));
+                            }
+                        }
+                    }
+                    ui.end_row();
+                }
 
                 // Layer.
                 let layers: std::collections::BTreeSet<usize> =
@@ -214,17 +307,56 @@ impl FormaApp {
                 });
                 ui.end_row();
 
-                // Size (cached: bounding boxes of big meshes are slow).
-                if let Some(bb) = self.sel_info.bbox {
+                // Size and position of the bounding box, editable (Box Edit).
+                if self.sel_info.bbox.is_some() {
                     let u = doc.units.abbreviation();
-                    ui.weak("Size");
-                    ui.label(format!(
-                        "{:.2} × {:.2} × {:.2} {u}",
-                        bb.max.x - bb.min.x,
-                        bb.max.y - bb.min.y,
-                        bb.max.z - bb.min.z
-                    ));
-                    ui.end_row();
+                    let pe = self.prop_edit.as_mut().expect("set above");
+                    let row = |ui: &mut egui::Ui, label: &str, vals: &mut [String; 3]| -> bool {
+                        ui.weak(label);
+                        let mut out = None;
+                        ui.horizontal(|ui| {
+                            for (i, axis) in ["x", "y", "z"].iter().enumerate() {
+                                let r = ui
+                                    .add(
+                                        egui::TextEdit::singleline(&mut vals[i])
+                                            .desired_width(52.0),
+                                    )
+                                    .on_hover_text(format!("{label} {axis} ({u}) — Enter applies"));
+                                if r.lost_focus() && r.changed() {
+                                    out = Some(i);
+                                }
+                                if r.lost_focus()
+                                    && ui.input(|inp| inp.key_pressed(egui::Key::Enter))
+                                {
+                                    out = Some(i);
+                                }
+                            }
+                        });
+                        ui.end_row();
+                        out.is_some()
+                    };
+                    let size_changed = row(ui, "Size", &mut pe.size);
+                    let pos_changed = row(ui, "Position", &mut pe.pos);
+                    let num = |s: &str| s.trim().replace(',', ".").parse::<f64>().ok();
+                    if size_changed {
+                        let parts: Vec<String> = ["x", "y", "z"]
+                            .iter()
+                            .zip(&pe.size)
+                            .filter_map(|(a, v)| {
+                                num(v).filter(|v| *v > 0.0).map(|v| format!("{a}={v}"))
+                            })
+                            .collect();
+                        if !parts.is_empty() {
+                            cmd = Some(format!("BoxEdit {}", parts.join(" ")));
+                        }
+                    }
+                    if pos_changed {
+                        if let (Some(x), Some(y), Some(z)) =
+                            (num(&pe.pos[0]), num(&pe.pos[1]), num(&pe.pos[2]))
+                        {
+                            cmd = Some(format!("BoxEdit at={x},{y},{z}"));
+                        }
+                    }
                 }
                 let groups: std::collections::BTreeSet<Option<u32>> =
                     sel.iter().map(|o| o.group).collect();
@@ -246,11 +378,6 @@ impl FormaApp {
                         let len: f64 = c.segs.iter().map(forma_geom::Seg::length).sum();
                         ui.weak("Length");
                         ui.label(format!("{len:.3} {}", doc.units.abbreviation()));
-                        ui.end_row();
-                    }
-                    if let forma_doc::Geometry::Arc(a) = &sel[0].geometry {
-                        ui.weak("Radius");
-                        ui.label(format!("{:.3}", a.radius));
                         ui.end_row();
                     }
                 }

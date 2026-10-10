@@ -7,6 +7,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.8.1] — 2026-10-10
+
+### Added
+- Properties panel: editable name, size and position (Box Edit), text, and circle radius.
+- `HatchSolid` (solid fill) and crossed hatch; `MeshRepair`.
+
 ## [0.8.0] — 2026-10-10
 
 ### Added
