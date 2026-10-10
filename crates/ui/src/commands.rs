@@ -135,7 +135,20 @@ impl FormaApp {
         tool.curves = self.selected_curves();
         self.log(LogKind::Command, format!("Command: {}", kind.name()));
         self.set_last(kind.name());
+        // A tool that starts by asking for one object takes the preselected
+        // one (FilletEdge, Shell… on the selected solid), like Rhino.
+        let first_is_object = !tool.selecting
+            && matches!(tool.seq_step(), Some((_, crate::tools::seq::In::Object(_))));
+        let preselected = (self.engine.ctx.selection.len() == 1)
+            .then(|| self.engine.ctx.selection.iter().next().map(|i| i.0))
+            .flatten();
         self.tool = Some(tool);
+        if let (true, Some(id)) = (first_is_object, preselected) {
+            if let Some(t) = self.tool.as_mut() {
+                let step = t.feed_object(id);
+                self.handle_step(step);
+            }
+        }
     }
 
     /// Selected curves with their own plane normals (Offset preview).
