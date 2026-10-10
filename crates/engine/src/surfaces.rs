@@ -41,6 +41,76 @@ pub(crate) fn closed_plane(g: &Geometry, tol: f64) -> Option<(Plane, Vec<Point3>
         .then_some((plane, pts))
 }
 
+/// A planar region: an outer loop, the loops directly inside it (holes), the
+/// plane normal, the object to copy attributes from and the curves used.
+pub(crate) struct Region {
+    pub outer: Vec<Point3>,
+    pub holes: Vec<Vec<Point3>>,
+    pub normal: forma_geom::Vec3,
+    pub source: Object,
+    pub ids: Vec<ObjectId>,
+}
+
+/// Regions made by the closed planar curves among `ids`: coplanar loops are
+/// grouped, loops inside loops become holes (and islands inside holes become
+/// regions again).
+pub(crate) fn planar_regions(ctx: &Context, ids: &[ObjectId], tol: f64) -> Vec<Region> {
+    struct Group {
+        plane: Plane,
+        loops: Vec<(Vec<Point3>, f64, ObjectId)>,
+        source: Object,
+    }
+    let mut groups: Vec<Group> = Vec::new();
+    for id in ids {
+        let Some(obj) = ctx.doc.object(*id) else {
+            continue;
+        };
+        let Some((plane, pts)) = closed_plane(&obj.geometry, tol) else {
+            continue;
+        };
+        let area = geom::newell_area(&pts).length();
+        let same = groups.iter_mut().find(|g| {
+            g.plane.z.cross(plane.z).length() < 1e-6 && g.plane.coords(pts[0]).2.abs() <= tol
+        });
+        match same {
+            Some(g) => g.loops.push((pts, area, *id)),
+            None => groups.push(Group {
+                plane,
+                loops: vec![(pts, area, *id)],
+                source: obj.clone(),
+            }),
+        }
+    }
+    let mut out = Vec::new();
+    for g in groups {
+        let n = g.loops.len();
+        let contains = |i: usize, j: usize| {
+            // Loop j inside loop i.
+            i != j
+                && g.loops[i].1 > g.loops[j].1
+                && point_in_polygon(g.loops[j].0[0], &g.loops[i].0, &g.plane)
+        };
+        let depth: Vec<usize> = (0..n)
+            .map(|j| (0..n).filter(|i| contains(*i, j)).count())
+            .collect();
+        for o in (0..n).filter(|i| depth[*i].is_multiple_of(2)) {
+            let inner: Vec<usize> = (0..n)
+                .filter(|h| depth[*h] == depth[o] + 1 && contains(o, *h))
+                .collect();
+            let mut ids = vec![g.loops[o].2];
+            ids.extend(inner.iter().map(|h| g.loops[*h].2));
+            out.push(Region {
+                outer: g.loops[o].0.clone(),
+                holes: inner.iter().map(|h| g.loops[*h].0.clone()).collect(),
+                normal: g.plane.z,
+                source: g.source.clone(),
+                ids,
+            });
+        }
+    }
+    out
+}
+
 simple_command!(
     PlanarSrf,
     "PlanarSrf",
@@ -52,57 +122,21 @@ impl Command for PlanarSrf {
     fn run(&self, ctx: &mut Context, _args: &mut Args) -> CommandResult {
         let ids = ctx.selected("PlanarSrf")?;
         let tol = ctx.tolerance.absolute.max(1e-9);
-        // Group coplanar loops.
-        struct Group {
-            plane: Plane,
-            loops: Vec<(Vec<Point3>, f64)>,
-            source: Object,
-        }
-        let mut groups: Vec<Group> = Vec::new();
-        for id in &ids {
-            let obj = ctx.doc.object(*id).expect("selected");
-            let Some((plane, pts)) = closed_plane(&obj.geometry, tol) else {
-                continue;
-            };
-            let area = geom::newell_area(&pts).length();
-            let same = groups.iter_mut().find(|g| {
-                g.plane.z.cross(plane.z).length() < 1e-6 && g.plane.coords(pts[0]).2.abs() <= tol
-            });
-            match same {
-                Some(g) => g.loops.push((pts, area)),
-                None => groups.push(Group {
-                    plane,
-                    loops: vec![(pts, area)],
-                    source: obj.clone(),
-                }),
-            }
-        }
-        if groups.is_empty() {
+        let regions = planar_regions(ctx, &ids, tol);
+        if regions.is_empty() {
             return Err(CommandError::Invalid(
                 "PlanarSrf: select closed planar curves".into(),
             ));
         }
-        let mut out = Vec::new();
-        for g in groups {
-            let n = g.loops.len();
-            let contains = |i: usize, j: usize| {
-                // Loop j inside loop i.
-                i != j
-                    && g.loops[i].1 > g.loops[j].1
-                    && point_in_polygon(g.loops[j].0[0], &g.loops[i].0, &g.plane)
-            };
-            let depth: Vec<usize> = (0..n)
-                .map(|j| (0..n).filter(|i| contains(*i, j)).count())
-                .collect();
-            for o in (0..n).filter(|i| depth[*i].is_multiple_of(2)) {
-                let holes: Vec<Vec<Point3>> = (0..n)
-                    .filter(|h| depth[*h] == depth[o] + 1 && contains(o, *h))
-                    .map(|h| g.loops[h].0.clone())
-                    .collect();
-                let m = planar_mesh(&g.loops[o].0, &holes, g.plane.z);
-                out.push((Geometry::Mesh(m), g.source.clone()));
-            }
-        }
+        let out: Vec<(Geometry, Object)> = regions
+            .into_iter()
+            .map(|r| {
+                (
+                    Geometry::Mesh(planar_mesh(&r.outer, &r.holes, r.normal)),
+                    r.source,
+                )
+            })
+            .collect();
         let n = out.len();
         add_selected(ctx, out);
         Ok(format!("{n} planar surface(s)"))

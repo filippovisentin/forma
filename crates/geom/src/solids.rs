@@ -175,6 +175,67 @@ pub fn extrude_mesh(profile: &[Point3], dir: Vec3, closed: bool) -> Mesh {
     m
 }
 
+/// Closed solid from a planar region with holes (e.g. the two outlines of a
+/// wall in plan) swept along `dir`: outer and inner side walls plus both caps.
+pub fn extrude_region(outer: &[Point3], holes: &[Vec<Point3>], dir: Vec3) -> Mesh {
+    let clean = |p: &[Point3]| {
+        let mut v = p.to_vec();
+        if v.len() > 1 && v[0].distance_to(*v.last().expect("len")) < 1e-9 {
+            v.pop();
+        }
+        v.dedup_by(|a, b| a.distance_to(*b) < 1e-9);
+        v
+    };
+    let mut o = clean(outer);
+    if o.len() < 3 || dir.length() < 1e-12 {
+        return Mesh::default();
+    }
+    // Outer loop counter-clockwise seen from `dir`, holes clockwise: every side
+    // wall then faces out of the material.
+    if polygon_normal(&o).dot(dir) < 0.0 {
+        o.reverse();
+    }
+    let hs: Vec<Vec<Point3>> = holes
+        .iter()
+        .map(|h| {
+            let mut h = clean(h);
+            if h.len() >= 3 && polygon_normal(&h).dot(dir) > 0.0 {
+                h.reverse();
+            }
+            h
+        })
+        .filter(|h| h.len() >= 3)
+        .collect();
+    let mut m = extrude_walls(&o, dir, true);
+    for h in &hs {
+        let w = extrude_walls(h, dir, true);
+        let base = m.positions.len() as u32;
+        m.positions.extend(w.positions);
+        m.normals.extend(w.normals);
+        m.triangles
+            .extend(w.triangles.iter().map(|t| t.map(|i| i + base)));
+    }
+    let cap = crate::planar_mesh(&o, &hs, dir);
+    let nd = dir.normalized().unwrap_or(Vec3::Z);
+    let base = m.positions.len() as u32;
+    m.positions.extend(cap.positions.iter().copied());
+    m.normals
+        .extend(std::iter::repeat_n(-nd, cap.positions.len()));
+    // The bottom faces away from `dir`.
+    m.triangles.extend(
+        cap.triangles
+            .iter()
+            .map(|t| [t[0] + base, t[2] + base, t[1] + base]),
+    );
+    let base = m.positions.len() as u32;
+    m.positions.extend(cap.positions.iter().map(|p| *p + dir));
+    m.normals
+        .extend(std::iter::repeat_n(nd, cap.positions.len()));
+    m.triangles
+        .extend(cap.triangles.iter().map(|t| t.map(|i| i + base)));
+    m
+}
+
 /// Side walls of a profile (no repeated closing point) moved along `dir`: one quad
 /// `p[i], p[i+1], p[i+1]+dir, p[i]+dir` per segment, in the given order. Corners
 /// sharper than 30° become visible edges; smoother ones share vertices.
@@ -318,6 +379,29 @@ mod tests {
                 a.dot(b.cross(c)) / 6.0
             })
             .sum()
+    }
+
+    #[test]
+    fn wall_from_two_rectangles() {
+        let r = |x0: f64, y0: f64, x1: f64, y1: f64| {
+            vec![
+                Point3::new(x0, y0, 0.0),
+                Point3::new(x1, y0, 0.0),
+                Point3::new(x1, y1, 0.0),
+                Point3::new(x0, y1, 0.0),
+            ]
+        };
+        let outer = r(-30.0, -30.0, 530.0, 430.0);
+        // Hole given in the same (counter-clockwise) direction: reversed inside.
+        let hole = r(0.0, 0.0, 500.0, 400.0);
+        let m = extrude_region(&outer, &[hole], Vec3::new(0.0, 0.0, 300.0));
+        assert!(m.is_closed(1e-6));
+        let expected = (560.0 * 460.0 - 500.0 * 400.0) * 300.0;
+        assert!(
+            (m.volume() - expected).abs() < 1e-3 * expected,
+            "{}",
+            m.volume()
+        );
     }
 
     #[test]

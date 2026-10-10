@@ -212,9 +212,28 @@ impl Command for Extrude {
         let dir = args.optional_vector();
         let ids = ctx.selected("Extrude")?;
         let mut out = Vec::new();
+        // Closed planar curves inside one another (a wall drawn as its two
+        // outlines in plan) make one solid with holes, like Rhino's ExtrudeCrv.
+        let tol = ctx.tolerance.absolute.max(1e-9);
+        let mut used = std::collections::BTreeSet::new();
+        for r in crate::surfaces::planar_regions(ctx, &ids, tol) {
+            if r.holes.is_empty() {
+                continue;
+            }
+            let along = dir
+                .or(Some(r.normal))
+                .and_then(Vec3::normalized)
+                .unwrap_or(Vec3::Z);
+            out.push(Geometry::Mesh(forma_geom::extrude_region(
+                &r.outer,
+                &r.holes,
+                along * d,
+            )));
+            used.extend(r.ids);
+        }
         for id in &ids {
             let g = &ctx.doc.object(*id).expect("selected exists").geometry;
-            if !g.is_curve() {
+            if !g.is_curve() || used.contains(id) {
                 continue;
             }
             let along = dir
@@ -422,6 +441,30 @@ mod tests {
 
     fn last(e: &Engine) -> Geometry {
         e.doc().objects().last().unwrap().geometry.clone()
+    }
+
+    #[test]
+    fn extrude_nested_curves_makes_one_wall_solid() {
+        let mut e = Engine::new();
+        e.run_line("Rectangle 0,0 500,400").unwrap();
+        e.run_line("Rectangle -30,-30 530,430").unwrap();
+        e.run_line("Circle 1000,0 50").unwrap();
+        e.run_line("SelAll").unwrap();
+        e.run_line("Extrude 300 0,0,1").unwrap();
+        let meshes: Vec<&forma_geom::Mesh> = e
+            .doc()
+            .objects()
+            .filter_map(|o| match &o.geometry {
+                Geometry::Mesh(m) => Some(m),
+                _ => None,
+            })
+            .collect();
+        // One wall (with its hole) and one cylinder.
+        assert_eq!(meshes.len(), 2);
+        let wall = (560.0 * 460.0 - 500.0 * 400.0) * 300.0;
+        assert!(meshes
+            .iter()
+            .any(|m| (m.volume() - wall).abs() < 1e-3 * wall));
     }
 
     #[test]

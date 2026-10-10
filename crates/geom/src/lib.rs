@@ -48,7 +48,9 @@ pub use primitives::{
     pipe_mesh, pyramid_mesh, ring, tapered_extrude_mesh, torus_mesh, tube_mesh,
 };
 pub use reduce::reduce_mesh;
-pub use solids::{box_mesh, cylinder_mesh, extrude_mesh, sphere_mesh, triangulate_polygon};
+pub use solids::{
+    box_mesh, cylinder_mesh, extrude_mesh, extrude_region, sphere_mesh, triangulate_polygon,
+};
 pub use surface::{
     cap_planar_holes, extrude_open_mesh, loft_mesh, newell_area, planar_mesh, point_in_polygon,
     resample, revolve_mesh, sweep1_mesh, triangulate_with_holes,
