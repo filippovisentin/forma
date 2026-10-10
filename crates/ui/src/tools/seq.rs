@@ -1288,12 +1288,26 @@ pub static HATCH: Seq = Seq {
     tip: "Hatch — parallel lines inside closed planar curves",
     sel: true,
     steps: &[
-        In::Num("Hatch spacing", None),
+        In::Choice("Pattern", &["Lines", "Cross"]),
+        In::Num("Hatch spacing", Some(10.0)),
         In::Num("Hatch angle", Some(45.0)),
     ],
-    emit: |v, _| format!("Hatch {} {}", round(v[0].n()), round(v[1].n())),
+    emit: |v, _| {
+        format!(
+            "Hatch {} {}{}",
+            round(v[1].n()),
+            round(v[2].n()),
+            if v[0].t() == "Cross" { " cross" } else { "" }
+        )
+    },
     preview: none,
 };
+
+sel_only!(
+    HATCH_SOLID,
+    "HatchSolid",
+    "HatchSolid — solid fill inside the selected closed curves (holes kept)"
+);
 
 // ----------------------------------------------------------------- analysis
 
@@ -1845,6 +1859,7 @@ pub static SWEEP2: Seq = Seq {
 
 /// Every sequence tool (for typed names, help and tests).
 pub static ALL: &[&Seq] = &[
+    &HATCH_SOLID,
     &SWEEP2,
     &LINE_BOTH_SIDES,
     &LINE_VERTICAL,

@@ -337,14 +337,62 @@ simple_command!(
     Hatch,
     "Hatch",
     &[],
-    "Hatch <spacing> [angle°=45] — hatch lines (one group) inside the selected closed planar curves; curves inside others make holes"
+    "Hatch <spacing> [angle°=45] [cross] | Hatch solid — hatch lines (one group, crossed with `cross`) or a solid fill inside the selected closed planar curves; curves inside others make holes"
 );
+/// Solid fill: a flat surface inside the selected closed curves (holes kept),
+/// in one group, for poché in plans.
+fn solid_hatch(ctx: &mut Context, tol: f64) -> CommandResult {
+    let ids = ctx.selected("Hatch")?;
+    let regions = crate::surfaces::planar_regions(ctx, &ids, tol);
+    if regions.is_empty() {
+        return Err(CommandError::Invalid(
+            "Hatch: select closed planar curves".into(),
+        ));
+    }
+    let group = ctx
+        .doc
+        .objects()
+        .filter_map(|o| o.group)
+        .max()
+        .map_or(1, |m| m + 1);
+    let mut t = ctx.doc.begin();
+    let mut new = Vec::new();
+    for r in regions {
+        let m = forma_geom::planar_mesh(&r.outer, &r.holes, r.normal);
+        let id = t.add_like(Geometry::Mesh(m), &r.source);
+        t.set_group(id, Some(group));
+        new.push(id);
+    }
+    t.commit();
+    let n = new.len();
+    ctx.selection = new.into_iter().collect();
+    Ok(format!("solid hatch: {n} region(s) in group {group}"))
+}
+
+simple_command!(
+    HatchSolid,
+    "HatchSolid",
+    &["Fill"],
+    "HatchSolid — solid fill inside the selected closed planar curves (curves inside others make holes)"
+);
+impl Command for HatchSolid {
+    impl_meta!(HatchSolid);
+    fn run(&self, ctx: &mut Context, _args: &mut Args) -> CommandResult {
+        let tol = ctx.doc.absolute_tolerance.max(1e-9);
+        solid_hatch(ctx, tol)
+    }
+}
+
 impl Command for Hatch {
     impl_meta!(Hatch);
     fn run(&self, ctx: &mut Context, args: &mut Args) -> CommandResult {
+        let tol = ctx.doc.absolute_tolerance.max(1e-9);
+        if args.keyword("solid") {
+            return solid_hatch(ctx, tol);
+        }
         let spacing = positive(args.number("hatch spacing")?, "spacing", ctx)?.abs();
         let angle = args.optional_number().unwrap_or(45.0);
-        let tol = ctx.doc.absolute_tolerance.max(1e-9);
+        let cross = args.keyword("cross");
         let ids = ctx.selected("Hatch")?;
         let mut loops = Vec::new();
         let mut plane: Option<Plane> = None;
@@ -377,7 +425,15 @@ impl Command for Hatch {
             y: plane.z.cross(x),
             z: plane.z,
         };
-        let segs = forma_geom::hatch_lines(&loops, &frame, spacing, angle.to_radians());
+        let mut segs = forma_geom::hatch_lines(&loops, &frame, spacing, angle.to_radians());
+        if cross {
+            segs.extend(forma_geom::hatch_lines(
+                &loops,
+                &frame,
+                spacing,
+                (angle + 90.0).to_radians(),
+            ));
+        }
         if segs.is_empty() {
             return Err(CommandError::Invalid("Hatch: no hatch lines".into()));
         }
@@ -415,6 +471,44 @@ mod tests {
 
     fn last(e: &Engine) -> Geometry {
         e.doc().objects().last().unwrap().geometry.clone()
+    }
+
+    #[test]
+    fn hatch_cross_and_solid() {
+        let mut e = crate::Engine::new();
+        e.run_line("Rectangle 0,0 100,100").unwrap();
+        e.run_line("Rectangle 40,40 60,60").unwrap();
+        e.run_line("SelAll").unwrap();
+        let single = e.run_line("Hatch 10 0").unwrap();
+        e.run_line("Undo").unwrap();
+        e.run_line("SelAll").unwrap();
+        let crossed = e.run_line("Hatch 10 0 cross").unwrap();
+        let count = |s: &str| {
+            s.split_whitespace()
+                .nth(1)
+                .unwrap()
+                .parse::<usize>()
+                .unwrap()
+        };
+        assert!(
+            count(&crossed) > count(&single) * 3 / 2,
+            "{single} / {crossed}"
+        );
+        e.run_line("Undo").unwrap();
+        e.run_line("SelAll").unwrap();
+        e.run_line("Hatch solid").unwrap();
+        let forma_doc::Geometry::Mesh(m) = &e.doc().objects().last().unwrap().geometry else {
+            panic!()
+        };
+        let area: f64 = m
+            .triangles
+            .iter()
+            .map(|t| {
+                let p = t.map(|i| m.positions[i as usize]);
+                (p[1] - p[0]).cross(p[2] - p[0]).length() / 2.0
+            })
+            .sum();
+        assert!((area - (10000.0 - 400.0)).abs() < 1e-6, "{area}");
     }
 
     #[test]

@@ -473,6 +473,7 @@ impl FormaApp {
                 ui.separator();
                 tool(ui, &mut act, "Make2D (plan / elevation)", K::Seq(&q::MAKE2D));
                 tool(ui, &mut act, "Hatch", K::Seq(&q::HATCH));
+                tool(ui, &mut act, "Solid Fill", K::Seq(&q::HATCH_SOLID));
                 ui.separator();
                 item(
                     ui,

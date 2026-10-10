@@ -331,7 +331,7 @@ is in `Help` and `forma-cli commands`.
 | Leader | ✓ | `Leader <p1> <p2> … <text>` |
 | Text | partial | `Text <origin> <height|*> [normal] <text>`: one line, UI font; saved to .3dm as a Rhino text |
 | TextDot | ✓ | `Dot` (alias TextDot) |
-| Hatch | partial | `Hatch <spacing> [angle]`: grouped lines, no hatch object / patterns |
+| Hatch | partial | `Hatch <spacing> [angle] [cross]`, `HatchSolid`: grouped lines or a flat fill; no hatch object |
 | AnnotationStyles / DimStyle | partial | `DimStyle [height] [decimals]` per document |
 | EditText | ✓ | `EditText #id <text>` (texts, dots, dimension overrides) |
 | Layout / Detail / Print | ✗ |  |
