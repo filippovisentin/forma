@@ -83,6 +83,9 @@ impl std::error::Error for CommandError {}
 
 pub type CommandResult = Result<String, CommandError>;
 
+/// Visibility and lock of every layer, by layer name (see `LayerState`).
+pub type LayerSnapshot = Vec<(String, bool, bool)>;
+
 /// Session state shared by commands.
 pub struct Context {
     pub doc: Document,
@@ -99,7 +102,7 @@ pub struct Context {
     /// the UI cleared it (for SelPrev).
     pub prev_selection: BTreeSet<ObjectId>,
     /// Saved layer states (LayerState): name → (layer name, visible, locked).
-    pub layer_states: Vec<(String, Vec<(String, bool, bool)>)>,
+    pub layer_states: Vec<(String, LayerSnapshot)>,
 }
 
 /// One object on the internal clipboard: geometry plus the attributes that survive
