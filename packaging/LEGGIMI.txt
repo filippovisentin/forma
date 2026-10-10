@@ -88,32 +88,45 @@ File, salvataggio e impostazioni
   %APPDATA%\Forma\settings.txt (si può cancellare per tornare ai valori
   iniziali).
 
-Comandi principali (si scrivono come in Rhino)
-  Curve:      Point, Line, Polyline, Curve, InterpCrv, Rectangle, Circle, Arc,
-              Ellipse, Polygon
-  Modifica:   Offset, Trim, Split, Extend, Fillet, Chamfer, FilletCorners,
-              Join, Explode, Flip, Intersect, ProjectToCPlane
-  Superfici:  PlanarSrf, ExtrudeCrv, ExtrudeSrf, Loft, Revolve, Sweep1, Cap
-  Solidi:     Box, Cylinder, Sphere
-  Trasforma:  Move, Copy, Rotate, Scale, Scale1D, Scale2D, Mirror, Orient,
-              Align, Array, ArrayLinear, ArrayPolar
-  Visibilità: Hide, Show, Isolate, Lock, Unlock, Group, Ungroup
-  Selezione:  SelAll, SelNone, Invert, SelLast, SelCrv, SelMesh, SelPt, SelGroup
-  Analisi:    Distance, Length, Area, Volume, BoundingBox, What
-  Attributi:  Layer, ChangeLayer, SetObjectColor, LayerColor, MatchProperties
-  File:       New, Open, Import, Save, Save As, Export (solo selezionati)
-  Viste:      ZE, ZEA, ZS, Top, Front, Right, Perspective,
-              Wireframe, Shaded, Ghosted, XRay
+Comandi principali (si scrivono come in Rhino; elenco completo: F1 o docs/commands.md)
+  Curve:      Point, Line (+ da punto medio, verticale, perpendicolare,
+              bisettrice), Lines, Polyline, Curve, InterpCrv, Rectangle,
+              Circle (+ CircleTTR tangente a due curve), Arc (+ ArcDirection),
+              Ellipse, Polygon, BlendCrv
+  Modifica:   Offset, Trim, Split, Extend, Fillet (linee, archi, polilinee),
+              Chamfer, FilletCorners, Join, Explode, SimplifyCrv, Smooth,
+              Stretch, punti di controllo (F10)
+  Superfici:  PlanarSrf, ExtrudeCrv (curve una dentro l'altra = muro con il
+              foro), ExtrudeSrf, Loft, Revolve, Sweep1, Sweep2, Cap
+  Solidi:     Box, Cylinder, Sphere, BooleanUnion/Difference/Intersection/Split,
+              FilletEdge, ChamferEdge, Shell, OffsetSrf, MoveFace / PushPull
+  Mesh:       ReduceMesh (alleggerisce le mesh pesanti), UnifyMeshNormals, Weld
+  Trasforma:  Move, Copy, Rotate, Scale, Mirror, Orient, Align, Array (finestra),
+              Box Edit (finestra), Bend, Twist, Taper
+  Blocchi:    Block, Insert, ExplodeBlock (i blocchi di Rhino si aprono come gruppi)
+  Annotazioni: Text, Dot, Dim, DimAligned, DimRotated, DimAngle, Leader,
+              Hatch (linee, incrociate), HatchSolid (campitura piena), EditText
+  Disegni 2D: Make2D (pianta e prospetti con linee nascoste), Silhouette
+  Selezione:  SelAll, SelNone, Invert, SelLast, SelPrev, SelBoundary, per
+              layer / colore / nome (finestre nel menu Edit)
+  Layer:      pannello Layers (clic destro: rinomina, elimina, sotto-layer),
+              States: salva e ripristina quali layer sono accesi
+  Viste:      ZE, ZEA, ZS, ZW, Top, Front, Right, Back, Left, Bottom,
+              Perspective, Wireframe, Shaded, CPlane, viste con nome,
+              sezione (View → Section: nasconde tutto sopra un'altezza)
+  File:       New, Open, Import, Save, Save As, IncrementalSave, Export
+              selezionati (.3dm, .obj con materiali per layer, .stl in mm per
+              la stampa 3D), Capture View to Image (PNG), Units
 
 Osnap
   End, Near, Point, Mid, Cen, Int, Perp, Tan, Quad, Knot, Vertex, più
   Project (proietta sul piano) e Disable.
 
 Limiti di questa versione
-  - Loft, Revolve, Sweep1, PlanarSrf, ExtrudeSrf e Cap creano mesh, non
+  - Loft, Revolve, Sweep, PlanarSrf, ExtrudeSrf e Cap creano mesh, non
     superfici NURBS. Curve, InterpCrv ed Ellipse sono vere NURBS.
-  - BooleanUnion/Difference/Intersection e FilletEdge arriveranno con il kernel
-    OpenCascade (nei menu sono visibili ma disattivati).
+  - Booleane, FilletEdge e Shell funzionano su solidi chiusi (mesh) con il kernel
+    OpenCascade incluso; il risultato è una mesh.
   - Salvando un file aperto da Rhino, la prima volta Forma propone un nuovo nome
     (nome-forma.3dm): le superfici importate vengono salvate come mesh.
 
