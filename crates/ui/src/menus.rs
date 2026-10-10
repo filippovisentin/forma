@@ -446,6 +446,8 @@ impl FormaApp {
                 tool(ui, &mut act, "Text", K::Seq(&q::TEXT));
                 tool(ui, &mut act, "Text Dot", K::Seq(&q::DOT));
                 tool(ui, &mut act, "Edit Text", K::Seq(&q::EDIT_TEXT));
+                ui.separator();
+                tool(ui, &mut act, "Make2D (plan / elevation)", K::Seq(&q::MAKE2D));
                 tool(ui, &mut act, "Hatch", K::Seq(&q::HATCH));
                 ui.separator();
                 item(

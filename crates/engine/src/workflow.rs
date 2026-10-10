@@ -747,6 +747,138 @@ impl Command for SelBoundary {
     }
 }
 
+simple_command!(
+    Make2D,
+    "Make2D",
+    &[],
+    "Make2D [top|front|right|back|left|bottom] [hidden] — flat hidden-line drawing of the selected objects (plans, elevations): visible lines on layer Make2D::Visible, hidden ones on Make2D::Hidden; the plan stays in place, elevations go beside the model"
+);
+impl Command for Make2D {
+    impl_meta!(Make2D);
+    fn run(&self, ctx: &mut Context, args: &mut Args) -> CommandResult {
+        let mut view_name = "top".to_string();
+        let mut with_hidden = false;
+        for t in args.rest() {
+            if t.eq_ignore_ascii_case("hidden") {
+                with_hidden = true;
+            } else if forma_geom::View2D::named(t).is_some() {
+                view_name = t.to_ascii_lowercase();
+            } else {
+                return Err(CommandError::BadInput(t.to_string()));
+            }
+        }
+        let view = forma_geom::View2D::named(&view_name).expect("checked");
+        let ids = ctx.selected("Make2D")?;
+        let doc = &ctx.doc;
+        let objs: Vec<&forma_doc::Object> = ids.iter().filter_map(|i| doc.object(*i)).collect();
+        let meshes: Vec<&Mesh> = objs
+            .iter()
+            .filter_map(|o| match &o.geometry {
+                Geometry::Mesh(m) => Some(m),
+                _ => None,
+            })
+            .collect();
+        let curves: Vec<Vec<Point3>> = objs
+            .iter()
+            .filter(|o| o.geometry.is_curve())
+            .map(|o| o.geometry.curve_points())
+            .filter(|p| p.len() >= 2)
+            .collect();
+        let pts: Vec<Point3> = objs
+            .iter()
+            .flat_map(|o| {
+                let b = o.geometry.bounding_box();
+                [b.min, b.max]
+            })
+            .collect();
+        let bb = forma_geom::BoundingBox::from_points(&pts)
+            .ok_or_else(|| CommandError::Invalid("Make2D: nothing to draw".into()))?;
+        let size = bb.min.distance_to(bb.max).max(1e-6);
+        let tris: usize = meshes.iter().map(|m| m.triangles.len()).sum();
+        if tris > 400_000 {
+            return Err(CommandError::Invalid(format!(
+                "Make2D: {tris} triangles is too many for now — select fewer objects"
+            )));
+        }
+        let d = forma_geom::make2d(&meshes, &curves, &view, size);
+        // Plans stay in place; elevations go to the right of the model.
+        let shift = if view_name == "top" {
+            Vec3::new(0.0, 0.0, 0.0)
+        } else {
+            let all: Vec<Point3> = d
+                .visible
+                .iter()
+                .chain(&d.hidden)
+                .flatten()
+                .copied()
+                .collect();
+            match forma_geom::BoundingBox::from_points(&all) {
+                Some(db) => Vec3::new(bb.max.x + size * 0.15 - db.min.x, bb.min.y - db.min.y, 0.0),
+                None => Vec3::new(0.0, 0.0, 0.0),
+            }
+        };
+        let tol = ctx.tolerance.absolute;
+        let polylines = |segs: &[[Point3; 2]]| -> Vec<Geometry> {
+            let chains: Vec<Chain> = segs
+                .iter()
+                .map(|[a, b]| Chain::new(vec![Seg::Line(*a + shift, *b + shift)]))
+                .collect();
+            forma_geom::join(chains, tol)
+                .into_iter()
+                .map(|c| {
+                    let p = merge_collinear(&c.points(), tol);
+                    if p.len() == 2 {
+                        Geometry::Line(LineCurve::new(p[0], p[1]))
+                    } else {
+                        Geometry::Polyline(p)
+                    }
+                })
+                .collect()
+        };
+        let visible = polylines(&d.visible);
+        let hidden = if with_hidden {
+            polylines(&d.hidden)
+        } else {
+            Vec::new()
+        };
+        if visible.is_empty() && hidden.is_empty() {
+            return Err(CommandError::Invalid("Make2D: nothing visible".into()));
+        }
+        let lv = crate::edit::layer_named(&mut ctx.doc, "Make2D::Visible");
+        ctx.doc.edit_layer(lv, |l| l.color = [0, 0, 0]);
+        let lh = with_hidden.then(|| {
+            let l = crate::edit::layer_named(&mut ctx.doc, "Make2D::Hidden");
+            ctx.doc.edit_layer(l, |x| x.color = [150, 150, 150]);
+            l
+        });
+        let group = ctx.doc.objects().filter_map(|o| o.group).max().unwrap_or(0) + 1;
+        let (nv, nh) = (visible.len(), hidden.len());
+        let mut t = ctx.doc.begin();
+        let mut new = Vec::new();
+        for g in visible {
+            new.push(t.add_on_layer(g, lv));
+        }
+        if let Some(lh) = lh {
+            for g in hidden {
+                new.push(t.add_on_layer(g, lh));
+            }
+        }
+        for id in &new {
+            t.set_group(*id, Some(group));
+        }
+        t.commit();
+        ctx.selection = new.into_iter().collect();
+        Ok(format!(
+            "Make2D {view_name}: {nv} visible curve(s){}",
+            if with_hidden {
+                format!(", {nh} hidden")
+            } else {
+                String::new()
+            }
+        ))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::Engine;
@@ -813,6 +945,33 @@ mod tests {
         assert_eq!(t.text, "Cucina");
         assert!(e.run_line("EditText #4 x").is_err());
         assert!(e.run_line("SelBoundary #4").is_err());
+    }
+
+    #[test]
+    fn make2d_plan_and_elevation() {
+        let mut e = Engine::new();
+        e.run_line("Box 0,0 100,50 30").unwrap();
+        e.run_line("Box 20,60 40,80 80").unwrap();
+        e.run_line("SelAll").unwrap();
+        let out = e.run_line("Make2D top").unwrap();
+        assert!(out.starts_with("Make2D top: 2 visible"), "{out}");
+        let plan: f64 = e
+            .ctx
+            .selection
+            .iter()
+            .map(|id| e.doc().object(*id).unwrap().geometry.length().unwrap())
+            .sum();
+        assert!((plan - (300.0 + 80.0)).abs() < 1e-6, "{plan}");
+        e.run_line("SelAll").unwrap();
+        e.run_line("Make2D front hidden").unwrap();
+        let hidden = e.doc().find_layer("Make2D::Hidden").unwrap();
+        assert!(e.doc().objects().any(|o| o.layer == hidden));
+        // Elevations sit beside the model, flat.
+        for id in &e.ctx.selection {
+            let b = e.doc().object(*id).unwrap().geometry.bounding_box();
+            assert!(b.min.x > 100.0 && b.max.z.abs() < 1e-9, "{b:?}");
+        }
+        assert!(e.run_line("Make2D sideways").is_err());
     }
 
     #[test]

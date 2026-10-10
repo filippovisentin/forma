@@ -12,7 +12,7 @@ is in `Help` and `forma-cli commands`.
 
 ## Summary
 
-279 Rhino commands: **168 ✓**, **54 partial**, **39 ✗**, **18 needs kernel**.
+279 Rhino commands: **168 ✓**, **55 partial**, **38 ✗**, **18 needs kernel**.
 
 ## Drawing: points and lines
 
@@ -96,7 +96,7 @@ is in `Help` and `forma-cli commands`.
 | ExtractPt | ✓ | `ExtractPt` |
 | ProjectToCPlane | ✓ | `ProjectToCPlane` |
 | Silhouette | ✗ |  |
-| Make2D | ✗ | hidden-line drawing: not yet |
+| Make2D | partial | `Make2D [top|front|right|back|left|bottom] [hidden]`: parallel views, meshes and curves; no perspective |
 
 ## Surfaces
 

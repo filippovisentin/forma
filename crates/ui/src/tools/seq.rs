@@ -1610,8 +1610,24 @@ pub static CPLANE_FACE: Seq = Seq {
     preview: none,
 };
 
+pub static MAKE2D: Seq = Seq {
+    name: "Make2D",
+    tip: "Make2D — flat hidden-line drawing (plan or elevation) of the selection",
+    sel: true,
+    steps: &[
+        In::Choice("View", &["Top", "Front", "Right", "Back", "Left", "Bottom"]),
+        In::Choice("Hidden lines", &["No", "Yes"]),
+    ],
+    emit: |v, _| {
+        let hidden = if v[1].t() == "Yes" { " hidden" } else { "" };
+        format!("Make2D {}{hidden}", v[0].t().to_lowercase())
+    },
+    preview: none,
+};
+
 /// Every sequence tool (for typed names, help and tests).
 pub static ALL: &[&Seq] = &[
+    &MAKE2D,
     &CPLANE,
     &CPLANE_ORIGIN,
     &CPLANE_FACE,

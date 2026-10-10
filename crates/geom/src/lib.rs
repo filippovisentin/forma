@@ -10,6 +10,7 @@ mod curve;
 mod curvetools;
 mod faces;
 mod kernel;
+mod make2d;
 mod meshtools;
 mod nurbs;
 mod plane;
@@ -34,6 +35,7 @@ pub use kernel::{
     fillet_edges, offset_solid, rebuild_solid, shell_solid, solid_boolean, solid_info, BooleanOp,
     KernelError, SolidInfo, SolidOptions, KERNEL_AVAILABLE,
 };
+pub use make2d::{make2d, outline_edges, Drawing, View2D};
 pub use meshtools::{
     densify, mesh_border_loops, mesh_edge_segments, mesh_plane_section, polygon_centroid,
     polyline_plane_points, Deform,

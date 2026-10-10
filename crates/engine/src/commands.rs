@@ -91,6 +91,7 @@ pub fn builtin() -> Vec<Box<dyn Command>> {
         Box::new(crate::workflow::MoveGrips),
         Box::new(crate::workflow::EditText),
         Box::new(crate::workflow::SelBoundary),
+        Box::new(crate::workflow::Make2D),
         Box::new(crate::edit::IncrementalSave),
         Box::new(crate::select::SelCrv),
         Box::new(crate::select::SelMesh),
