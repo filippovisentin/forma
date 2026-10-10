@@ -596,8 +596,109 @@ impl Command for CopyObjectsToLayer {
     }
 }
 
+simple_command!(
+    LayerState,
+    "LayerState",
+    &["LayerStateManager"],
+    "LayerState [Save|Restore|Delete] <name> — remember which layers are on and locked, and bring that back later (plan, furniture, electrical…); alone lists the states"
+);
+impl Command for LayerState {
+    impl_meta!(LayerState);
+    fn run(&self, ctx: &mut Context, args: &mut Args) -> CommandResult {
+        let words = quoted_words(&args.rest().join(" "));
+        let (verb, name) = match words.as_slice() {
+            [] => {
+                let names: Vec<&str> = ctx.layer_states.iter().map(|s| s.0.as_str()).collect();
+                return Ok(if names.is_empty() {
+                    "no layer states — LayerState Save <name>".into()
+                } else {
+                    format!("layer states: {}", names.join(", "))
+                });
+            }
+            [v, rest @ ..]
+                if ["save", "restore", "delete"].contains(&v.to_lowercase().as_str())
+                    && !rest.is_empty() =>
+            {
+                (v.to_lowercase(), rest.join(" "))
+            }
+            all => ("restore".to_string(), all.join(" ")),
+        };
+        let pos = ctx
+            .layer_states
+            .iter()
+            .position(|s| s.0.eq_ignore_ascii_case(&name));
+        match verb.as_str() {
+            "save" => {
+                let state: Vec<(String, bool, bool)> = ctx
+                    .doc
+                    .layers
+                    .iter()
+                    .map(|l| (l.name.clone(), l.visible, l.locked))
+                    .collect();
+                let n = state.len();
+                match pos {
+                    Some(i) => ctx.layer_states[i].1 = state,
+                    None => ctx.layer_states.push((name.clone(), state)),
+                }
+                Ok(format!("layer state \"{name}\" saved ({n} layers)"))
+            }
+            "delete" => {
+                let i =
+                    pos.ok_or_else(|| CommandError::Invalid(format!("no layer state {name}")))?;
+                ctx.layer_states.remove(i);
+                Ok(format!("layer state \"{name}\" deleted"))
+            }
+            _ => {
+                let i =
+                    pos.ok_or_else(|| CommandError::Invalid(format!("no layer state {name}")))?;
+                let state = ctx.layer_states[i].1.clone();
+                let mut n = 0;
+                for (lname, visible, locked) in state {
+                    if let Some(id) = ctx.doc.find_layer(&lname) {
+                        ctx.doc.edit_layer(id, |l| {
+                            l.visible = visible;
+                            l.locked = locked;
+                        });
+                        n += 1;
+                    }
+                }
+                // Hidden or locked objects cannot stay selected.
+                let doc = &ctx.doc;
+                ctx.selection
+                    .retain(|id| doc.object(*id).is_some_and(|o| doc.is_selectable(o)));
+                Ok(format!("layer state \"{name}\" restored ({n} layers)"))
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn layer_states_save_and_restore() {
+        let mut e = crate::Engine::new();
+        e.run_line("Layer arredi").unwrap();
+        e.run_line("Layer impianti").unwrap();
+        e.run_line("Layer Default").unwrap();
+        e.run_line("LayerState Save \"tutto acceso\"").unwrap();
+        e.run_line("LayerVisible off arredi").unwrap();
+        e.run_line("LayerLock on impianti").unwrap();
+        e.run_line("LayerState Save pianta").unwrap();
+        e.run_line("LayerState tutto acceso").unwrap();
+        let l = |e: &crate::Engine, n: &str| {
+            let id = e.doc().find_layer(n).unwrap();
+            (e.doc().layer(id).visible, e.doc().layer(id).locked)
+        };
+        assert_eq!(l(&e, "arredi"), (true, false));
+        assert_eq!(l(&e, "impianti"), (true, false));
+        e.run_line("LayerState Restore pianta").unwrap();
+        assert_eq!(l(&e, "arredi"), (false, false));
+        assert_eq!(l(&e, "impianti"), (true, true));
+        assert!(e.run_line("LayerState").unwrap().contains("pianta"));
+        e.run_line("LayerState Delete pianta").unwrap();
+        assert!(e.run_line("LayerState pianta").is_err());
+    }
+
     #[test]
     fn one_layer_off() {
         let mut e = crate::Engine::new();

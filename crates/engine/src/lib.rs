@@ -98,6 +98,8 @@ pub struct Context {
     /// The selection before the last command that started with one, or before
     /// the UI cleared it (for SelPrev).
     pub prev_selection: BTreeSet<ObjectId>,
+    /// Saved layer states (LayerState): name → (layer name, visible, locked).
+    pub layer_states: Vec<(String, Vec<(String, bool, bool)>)>,
 }
 
 /// One object on the internal clipboard: geometry plus the attributes that survive
@@ -159,6 +161,7 @@ impl Engine {
                 selection: BTreeSet::new(),
                 last_created: Vec::new(),
                 prev_selection: BTreeSet::new(),
+                layer_states: Vec::new(),
                 clipboard: Vec::new(),
             },
             commands: Vec::new(),

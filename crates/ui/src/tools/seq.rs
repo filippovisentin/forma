@@ -1171,6 +1171,29 @@ pub static DIM_ALIGNED: Seq = Seq {
     },
 };
 
+pub static DIM_ROTATED: Seq = Seq {
+    name: "DimRotated",
+    tip: "DimRotated — dimension measured along a rotated direction",
+    sel: false,
+    steps: &[
+        In::Num("Rotation angle (degrees from the x axis)", Some(45.0)),
+        In::Point("First dimension point"),
+        In::Point("Second dimension point"),
+        In::Point("Dimension line location"),
+    ],
+    emit: |v, pl| {
+        format!(
+            "DimRotated {} {} {} {} {}",
+            round(v[0].n()),
+            fmt_p(v[1].p()),
+            fmt_p(v[2].p()),
+            fmt_p(v[3].p()),
+            n(pl)
+        )
+    },
+    preview: band,
+};
+
 pub static DIM_ANGLE: Seq = Seq {
     name: "DimAngle",
     tip: "DimAngle — angle between two lines from a vertex",
@@ -1727,6 +1750,7 @@ pub static CLIPPING_PLANE: Seq = Seq {
 
 /// Every sequence tool (for typed names, help and tests).
 pub static ALL: &[&Seq] = &[
+    &DIM_ROTATED,
     &CLIPPING_PLANE,
     &BLEND_CRV,
     &CIRCLE_TTR,

@@ -453,6 +453,7 @@ impl FormaApp {
             ui.menu_button("Dimension", |ui| {
                 tool(ui, &mut act, "Linear Dimension", K::Seq(&q::DIM));
                 tool(ui, &mut act, "Aligned Dimension", K::Seq(&q::DIM_ALIGNED));
+                tool(ui, &mut act, "Rotated Dimension", K::Seq(&q::DIM_ROTATED));
                 tool(ui, &mut act, "Radial Dimension", K::Seq(&q::DIM_RADIUS));
                 tool(ui, &mut act, "Diameter Dimension", K::Seq(&q::DIM_DIAMETER));
                 tool(ui, &mut act, "Angle Dimension", K::Seq(&q::DIM_ANGLE));

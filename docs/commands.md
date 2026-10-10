@@ -12,7 +12,7 @@ is in `Help` and `forma-cli commands`.
 
 ## Summary
 
-279 Rhino commands: **172 ✓**, **58 partial**, **31 ✗**, **18 needs kernel**.
+279 Rhino commands: **174 ✓**, **58 partial**, **29 ✗**, **18 needs kernel**.
 
 ## Drawing: points and lines
 
@@ -290,7 +290,7 @@ is in `Help` and `forma-cli commands`.
 | Layer delete | ✓ | `DeleteLayer <layer>` (with its objects) |
 | Layer colour / lock / visibility | ✓ | panel, `LayerColor`, `LayerLock`, `LayerVisible` |
 | Purge | partial | `Purge` removes empty layers (no blocks / materials yet) |
-| LayerStateManager | ✗ |  |
+| LayerStateManager | ✓ | `LayerState Save/Restore/Delete <name>`; Layers panel → States (this session) |
 
 ## Analysis
 
@@ -322,7 +322,7 @@ is in `Help` and `forma-cli commands`.
 |---|---|---|
 | Dim / DimLinear | ✓ | `Dim` (alias DimLinear): horizontal or vertical from the line point |
 | DimAligned | ✓ |  |
-| DimRotated | ✗ |  |
+| DimRotated | ✓ | `DimRotated <angle> <p1> <p2> <line point>` |
 | DimRadius | ✓ |  |
 | DimDiameter | ✓ |  |
 | DimAngle | ✓ |  |

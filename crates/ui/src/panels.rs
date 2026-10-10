@@ -262,6 +262,7 @@ impl FormaApp {
 
     fn ui_layers(&mut self, ui: &mut egui::Ui) {
         let mut cmd: Option<String> = None;
+        let mut save_state = false;
         ui.horizontal(|ui| {
             if ui
                 .button("＋ New Layer")
@@ -289,7 +290,38 @@ impl FormaApp {
                 let doc = self.engine.doc();
                 cmd = Some(format!("ChangeLayer {}", doc.layer(doc.current_layer).name));
             }
+            let states: Vec<String> = self
+                .engine
+                .ctx
+                .layer_states
+                .iter()
+                .map(|s| s.0.clone())
+                .collect();
+            ui.menu_button("States ▾", |ui| {
+                if ui.button("Save Layer State…").clicked() {
+                    save_state = true;
+                    ui.close();
+                }
+                if !states.is_empty() {
+                    ui.separator();
+                }
+                for n in &states {
+                    if ui
+                        .button(n)
+                        .on_hover_text("Restore which layers are on and locked")
+                        .clicked()
+                    {
+                        cmd = Some(format!("LayerState Restore \"{n}\""));
+                        ui.close();
+                    }
+                }
+            })
+            .response
+            .on_hover_text("Layer states: save and restore which layers are on / locked");
         });
+        if save_state {
+            self.open_form(&crate::dialogs::SAVE_LAYER_STATE);
+        }
         ui.add_space(4.0);
         let doc = self.engine.doc();
         let mut counts = vec![0usize; doc.layers.len()];

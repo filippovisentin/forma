@@ -101,6 +101,43 @@ impl Command for Dim {
 }
 
 simple_command!(
+    DimRotated,
+    "DimRotated",
+    &[],
+    "DimRotated <angle°> <first point> <second point> <dimension line point> [normal] — dimension measured along a direction at the angle from the x axis"
+);
+impl Command for DimRotated {
+    impl_meta!(DimRotated);
+    fn run(&self, ctx: &mut Context, args: &mut Args) -> CommandResult {
+        let ang = args.number("rotation angle")?.to_radians();
+        let a = args.point("first dimension point", ctx.last_point)?;
+        let b = args.point("second dimension point", Some(a))?;
+        let l = args.point("dimension line location", Some(b))?;
+        let n = args.optional_vector().unwrap_or(Vec3::Z);
+        let (h, dec) = style(ctx);
+        let base = Plane::from_normal(a, n);
+        let x = base.x * ang.cos() + base.y * ang.sin();
+        let y = base.z.cross(x);
+        let d = Dimension {
+            kind: DimKind::Linear,
+            plane: Plane {
+                origin: base.origin,
+                x,
+                y,
+                z: base.z,
+            },
+            points: vec![a, b, l],
+            text: None,
+            height: h,
+            decimals: dec,
+        };
+        positive(d.value(), "dimension", ctx)?;
+        ctx.last_point = Some(l);
+        add(ctx, Geometry::Dimension(d))
+    }
+}
+
+simple_command!(
     DimAligned,
     "DimAligned",
     &[],
@@ -378,6 +415,21 @@ mod tests {
 
     fn last(e: &Engine) -> Geometry {
         e.doc().objects().last().unwrap().geometry.clone()
+    }
+
+    #[test]
+    fn dim_rotated_measures_along_its_direction() {
+        let mut e = crate::Engine::new();
+        e.run_line("DimRotated 45 0,0 10,10 0,10").unwrap();
+        let forma_doc::Geometry::Dimension(d) = &e.doc().objects().next().unwrap().geometry else {
+            panic!()
+        };
+        assert!((d.value() - 200f64.sqrt()).abs() < 1e-9, "{}", d.value());
+        e.run_line("DimRotated 0 0,0 10,10 0,20").unwrap();
+        let forma_doc::Geometry::Dimension(d) = &e.doc().objects().last().unwrap().geometry else {
+            panic!()
+        };
+        assert!((d.value() - 10.0).abs() < 1e-9);
     }
 
     #[test]

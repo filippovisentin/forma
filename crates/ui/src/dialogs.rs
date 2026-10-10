@@ -220,6 +220,15 @@ pub(crate) static SAVE_VIEW: Form = Form {
     needs_selection: false,
 };
 
+pub(crate) static SAVE_LAYER_STATE: Form = Form {
+    title: "Save layer state",
+    help: "Remembers which layers are on and locked (e.g. \"pianta arredi\"), to restore later.",
+    fields: &[Field::Text("Name")],
+    init: one_blank,
+    emit: |v| Ok(format!("LayerState Save {}", q(&need(&v[0], "name")?))),
+    needs_selection: false,
+};
+
 pub(crate) static SEL_LAYER: Form = Form {
     title: "Select by layer",
     help: "Selects every visible object on the layer.",
