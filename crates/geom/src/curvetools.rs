@@ -532,9 +532,11 @@ pub fn hatch_lines(
             .map(|(a, b)| a.0 + (y - a.1) / (b.1 - a.1) * (b.0 - a.0))
             .collect();
         xs.sort_by(f64::total_cmp);
-        for w in xs.chunks_exact(2) {
-            if w[1] - w[0] > 1e-9 {
-                out.push([from2(w[0], y), from2(w[1], y)]);
+        // Crossings pair up: inside between the 1st and 2nd, the 3rd and 4th, …
+        for k in (0..xs.len() / 2).map(|i| 2 * i) {
+            let (x0, x1) = (xs[k], xs[k + 1]);
+            if x1 - x0 > 1e-9 {
+                out.push([from2(x0, y), from2(x1, y)]);
             }
         }
     }

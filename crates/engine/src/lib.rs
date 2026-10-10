@@ -200,6 +200,18 @@ impl Engine {
         rest.starts_with('#').then_some("object ids")
     }
 
+    /// For a bare command name whose arguments are all optional (`Name [arg] …`),
+    /// the argument part of its help, so a UI can offer them before running it.
+    /// Commands whose optional arguments are object ids (they act on the
+    /// selection) give `None`.
+    pub fn optional_args(&self, name: &str) -> Option<&'static str> {
+        let idx = *self.lookup.get(&name.to_lowercase())?;
+        let help: &'static str = self.commands[idx].help();
+        let rest = help.split_once(' ').map_or("", |(_, r)| r).trim_start();
+        let args = rest.split(" — ").next().unwrap_or("").trim();
+        (args.starts_with('[') && !args.starts_with("[#")).then_some(args)
+    }
+
     /// Run a command by name with pre-split argument tokens.
     pub fn execute(&mut self, name: &str, tokens: &[&str]) -> CommandResult {
         let idx = *self
@@ -272,6 +284,9 @@ mod tests {
         assert_eq!(e.missing_input("select"), Some("object ids"));
         assert_eq!(e.missing_input("SelAll"), None);
         assert_eq!(e.missing_input("Delete"), None);
+        assert_eq!(e.optional_args("New"), Some("[cm|mm|m]"));
+        assert_eq!(e.optional_args("Delete"), None);
+        assert_eq!(e.optional_args("SelAll"), None);
     }
 
     #[test]

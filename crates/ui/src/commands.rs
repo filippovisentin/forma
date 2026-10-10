@@ -355,7 +355,12 @@ impl FormaApp {
             let is_tool = ToolKind::from_name(first).is_some()
                 || ToolKind::selection_command(first).is_some();
             if !is_tool {
-                if let Some(what) = self.engine.missing_input(first) {
+                // Arguments to come (required or optional): collect them until Enter.
+                let what = self
+                    .engine
+                    .missing_input(first)
+                    .or_else(|| self.engine.optional_args(first));
+                if let Some(what) = what {
                     self.pending = Some((toks.join(" "), what));
                     return;
                 }
