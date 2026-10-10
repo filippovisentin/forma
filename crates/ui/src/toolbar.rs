@@ -74,7 +74,9 @@ fn tooltip(ui: &mut egui::Ui, it: &Item) {
     ui.set_max_width(320.0);
     ui.label(RichText::new(it.name).strong());
     if !it.desc.is_empty() && it.desc != it.name {
-        ui.label(it.desc);
+        let mut d = it.desc.chars();
+        let first = d.next().map(|c| c.to_uppercase().to_string());
+        ui.label(format!("{}{}", first.unwrap_or_default(), d.as_str()));
     }
     let mut keys = Vec::new();
     if let Some(a) = it.alias {

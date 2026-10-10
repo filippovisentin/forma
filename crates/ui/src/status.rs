@@ -137,11 +137,6 @@ impl FormaApp {
                 "Gumball",
                 "Axis handles on the selection",
             );
-            ui.add_enabled(
-                false,
-                egui::Button::new(egui::RichText::new("Record History").size(12.5)).frame(false),
-            )
-            .on_disabled_hover_text("Not available yet");
             let filter = &mut self.filter;
             ui.menu_button(egui::RichText::new("Filter").size(12.5), |ui| {
                 ui.checkbox(&mut filter.curves, "Curves");
