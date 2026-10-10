@@ -91,18 +91,40 @@ jobs:
         shell: bash
         run: |
           cargo build --release -p forma -p forma-cli --features forma/occt,forma-cli/occt
-          ls -l target/release/forma.exe target/release/forma-cli.exe
           echo "::notice title=binary size::forma.exe $(stat -c %s target/release/forma.exe) bytes, forma-cli.exe $(stat -c %s target/release/forma-cli.exe) bytes"
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
           mkdir -p dist/Forma
           cp target/release/forma.exe target/release/forma-cli.exe dist/Forma/
           cp packaging/LEGGIMI.txt LICENSE-MIT LICENSE-APACHE ATTRIBUTION.md dist/Forma/
           cp -r packaging/licenses dist/Forma/
           cd dist && 7z a -tzip Forma-windows-occt.zip Forma > /dev/null
-          mkdir -p ../smoke && cd ../smoke && 7z x ../dist/Forma-windows-occt.zip > /dev/null
-          ./Forma/forma-cli.exe run --script "Box 0,0 10,10 10; Box 5,5 15,15 10; BooleanUnion #1 #2; FilletEdge #1 1 0,5,10" --dump | tee smoke.txt
-          grep -q "1 solid" smoke.txt
-      - name: Upload package (Windows)
+      - name: Smoke test of the unpacked zip (Windows)
         if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/smoke" && cd "$RUNNER_TEMP/smoke"
+          7z x "$GITHUB_WORKSPACE/dist/Forma-windows-occt.zip" > /dev/null
+          run() {
+            set +e
+            out=$(./Forma/forma-cli.exe run --script "$1" --dump 2>&1)
+            code=$?
+            set -e
+            echo "$out"
+            flat=$(echo "$out" | tail -8 | sed ':a;N;$!ba;s/%/%25/g;s/\r//g;s/\n/%0A/g')
+            if [ $code -ne 0 ] || ! echo "$out" | grep -q "$2"; then
+              echo "::error title=smoke::$1%0Aexit $code%0A$flat"
+              return 1
+            fi
+            echo "::notice title=smoke ok::$1"
+          }
+          run "Box 0,0 10,10 10" "box"
+          run "Box 0,0 10,10 10; Box 5,5 15,15 10; BooleanUnion #1 #2" "1 solid"
+          run "Box 0,0 40,20 20; FilletEdge #1 3 20,0,20; Shell #1 1 20,10,20" "hollowed"
+      - name: Upload package (Windows)
+        if: always() && runner.os == 'Windows'
         uses: actions/upload-artifact@v4
         with:
           name: Forma-windows-occt
