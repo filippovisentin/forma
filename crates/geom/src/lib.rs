@@ -26,7 +26,7 @@ pub use curve::{
     offset, side_of, split, trim, Chain, CurveError, ExtendTo, Seg,
 };
 pub use curvetools::{
-    arc_3pt, arc_start_dir_end, chain_points_at_lengths, chain_segments, circle_3pt,
+    arc_3pt, arc_start_dir_end, blend_curves, chain_points_at_lengths, chain_segments, circle_3pt,
     circle_tangent_tangent, dist_to_segment, division_lengths, hatch_lines, in_plane, loop_inside,
     region_boolean, simplify_polyline, spiral_points, step_lengths, RegionOp,
 };

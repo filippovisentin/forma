@@ -95,6 +95,8 @@ pub fn builtin() -> Vec<Box<dyn Command>> {
         Box::new(crate::workflow::Silhouette),
         Box::new(crate::workflow::CircleTTR),
         Box::new(crate::workflow::ArcDirection),
+        Box::new(crate::workflow::BlendCrv),
+        Box::new(crate::workflow::SimplifyCrv),
         Box::new(crate::edit::IncrementalSave),
         Box::new(crate::select::SelCrv),
         Box::new(crate::select::SelMesh),

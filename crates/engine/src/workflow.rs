@@ -1004,6 +1004,150 @@ impl Command for ArcDirection {
     }
 }
 
+simple_command!(
+    BlendCrv,
+    "BlendCrv",
+    &["Blend"],
+    "BlendCrv #curve1 <point near an end> #curve2 <point near an end> [tangency|curvature] — smooth curve joining the two nearest ends"
+);
+impl Command for BlendCrv {
+    impl_meta!(BlendCrv);
+    fn run(&self, ctx: &mut Context, args: &mut Args) -> CommandResult {
+        let a = object_arg(ctx, args, "first curve")?;
+        let pa = args.point("point near the end of the first curve", ctx.last_point)?;
+        let b = object_arg(ctx, args, "second curve")?;
+        let pb = args.point("point near the end of the second curve", Some(pa))?;
+        let curvature = match args.next_token().map(str::to_lowercase).as_deref() {
+            None | Some("tangency" | "g1" | "tangent") => false,
+            Some("curvature" | "g2") => true,
+            Some(o) => return Err(CommandError::BadInput(o.to_string())),
+        };
+        let chain = |id: ObjectId| {
+            ctx.doc
+                .object(id)
+                .and_then(|o| o.geometry.to_chain())
+                .filter(|c| !c.segs.is_empty())
+                .ok_or_else(|| CommandError::Invalid(format!("#{} is not a curve", id.0)))
+        };
+        let (ca, cb) = (chain(a)?, chain(b)?);
+        let near_end = |c: &Chain, p: Point3| c.end().distance_to(p) < c.start().distance_to(p);
+        let blend =
+            forma_geom::blend_curves(&ca, near_end(&ca, pa), &cb, near_end(&cb, pb), curvature)
+                .ok_or_else(|| CommandError::Invalid("the ends touch: nothing to blend".into()))?;
+        let mut t = ctx.doc.begin();
+        let id = t.add(Geometry::Nurbs(blend));
+        t.commit();
+        Ok(format!("added #{} blend", id.0))
+    }
+}
+
+/// The arc through `pts` (start, middle, end) when every point is within `tol`.
+fn fit_arc(pts: &[Point3], tol: f64) -> Option<forma_geom::CircleArc> {
+    if pts.len() < 3 {
+        return None;
+    }
+    let arc = forma_geom::arc_3pt(pts[0], pts[pts.len() - 1], pts[pts.len() / 2])?;
+    let c = arc.center();
+    let n = arc.plane.z;
+    pts.iter()
+        .all(|p| ((*p - c).dot(n)).abs() <= tol && (p.distance_to(c) - arc.radius).abs() <= tol)
+        .then_some(arc)
+}
+
+/// Simpler form of a curve, or `None` when it cannot be simplified.
+fn simplified(g: &Geometry, tol: f64) -> Option<Geometry> {
+    let line_or_poly = |p: Vec<Point3>| {
+        if p.len() == 2 {
+            Geometry::Line(LineCurve::new(p[0], p[1]))
+        } else {
+            Geometry::Polyline(p)
+        }
+    };
+    match g {
+        Geometry::Polyline(p) => {
+            let m = merge_collinear(p, tol);
+            (m.len() < p.len()).then(|| line_or_poly(m))
+        }
+        Geometry::PolyCurve(segs) => {
+            // Merge runs of collinear lines and of arcs on the same circle.
+            let mut out: Vec<Seg> = Vec::new();
+            for s in segs {
+                let merged = match (out.last(), s) {
+                    (Some(Seg::Line(a, b)), Seg::Line(_, d))
+                        if off_line(*a, *b, *d) <= tol && (*b - *a).dot(*d - *b) > 0.0 =>
+                    {
+                        Some(Seg::Line(*a, *d))
+                    }
+                    (Some(Seg::Arc(x)), Seg::Arc(y))
+                        if x.center().distance_to(y.center()) <= tol
+                            && (x.radius - y.radius).abs() <= tol
+                            && x.plane.z.dot(y.plane.z) > 0.999 =>
+                    {
+                        forma_geom::CircleArc::from_center_start_end(
+                            x.center(),
+                            x.start(),
+                            y.end(),
+                            x.plane.z,
+                        )
+                        .filter(|m| (m.sweep - (x.sweep + y.sweep)).abs() < 1e-6)
+                        .map(Seg::Arc)
+                    }
+                    _ => None,
+                };
+                match merged {
+                    Some(m) => *out.last_mut().expect("some") = m,
+                    None => out.push(*s),
+                }
+            }
+            if out.len() == segs.len() {
+                return None;
+            }
+            Some(match out.as_slice() {
+                [Seg::Line(a, b)] => Geometry::Line(LineCurve::new(*a, *b)),
+                [Seg::Arc(a)] => Geometry::Arc(*a),
+                _ => Geometry::PolyCurve(out),
+            })
+        }
+        Geometry::Nurbs(n) => {
+            let pts = n.sample(16);
+            let m = merge_collinear(&pts, tol);
+            if m.len() == 2 {
+                return Some(Geometry::Line(LineCurve::new(m[0], m[1])));
+            }
+            if n.degree == 1 {
+                return Some(line_or_poly(merge_collinear(&n.points, tol)));
+            }
+            fit_arc(&pts, tol).map(Geometry::Arc)
+        }
+        _ => None,
+    }
+}
+
+simple_command!(
+    SimplifyCrv,
+    "SimplifyCrv",
+    &[],
+    "SimplifyCrv — replace the selected curves by simpler ones: straight runs become lines, arcs on one circle merge, NURBS that are lines or arcs become them"
+);
+impl Command for SimplifyCrv {
+    impl_meta!(SimplifyCrv);
+    fn run(&self, ctx: &mut Context, _args: &mut Args) -> CommandResult {
+        let ids = ctx.selected("SimplifyCrv")?;
+        let tol = ctx.tolerance.absolute;
+        let mut t = ctx.doc.begin();
+        let mut n = 0;
+        for id in ids {
+            let g = t.doc().object(id).expect("selected").geometry.clone();
+            if let Some(s) = simplified(&g, tol) {
+                t.replace(id, s);
+                n += 1;
+            }
+        }
+        t.commit();
+        Ok(format!("{n} curve(s) simplified"))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::Engine;
@@ -1135,6 +1279,45 @@ mod tests {
             panic!()
         };
         assert!((a.radius - 10.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn blend_between_two_lines() {
+        let mut e = Engine::new();
+        e.run_line("Line 0,0 100,0").unwrap();
+        e.run_line("Line 0,50 100,50").unwrap();
+        e.run_line("BlendCrv #1 95,0 #2 95,50 curvature").unwrap();
+        let g = &e.doc().objects().last().unwrap().geometry;
+        let Geometry::Nurbs(n) = g else { panic!() };
+        assert_eq!(n.degree, 5);
+        assert!(
+            n.start()
+                .distance_to(forma_geom::Point3::new(100.0, 0.0, 0.0))
+                < 1e-9
+        );
+        assert!(
+            n.end()
+                .distance_to(forma_geom::Point3::new(100.0, 50.0, 0.0))
+                < 1e-9
+        );
+        e.run_line("BlendCrv #1 5,0 #2 5,50").unwrap();
+        assert!(e.run_line("BlendCrv #1 5,0 #2 5,50 wobbly").is_err());
+    }
+
+    #[test]
+    fn simplify_curves() {
+        let mut e = Engine::new();
+        e.run_line("Polyline 0,0 5,0 10,0 10,10").unwrap();
+        e.run_line("Polyline 0,20 5,20 10,20").unwrap();
+        e.run_line("SelAll").unwrap();
+        assert_eq!(e.run_line("SimplifyCrv").unwrap(), "2 curve(s) simplified");
+        let kinds: Vec<&str> = e.doc().objects().map(|o| o.geometry.kind()).collect();
+        assert_eq!(kinds, vec!["polyline", "line"]);
+        let Geometry::Polyline(p) = &e.doc().objects().next().unwrap().geometry else {
+            panic!()
+        };
+        assert_eq!(p.len(), 3);
+        assert_eq!(e.run_line("SimplifyCrv").unwrap(), "0 curve(s) simplified");
     }
 
     #[test]

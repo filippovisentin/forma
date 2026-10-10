@@ -1682,8 +1682,31 @@ pub static ARC_DIRECTION: Seq = Seq {
     },
 };
 
+pub static BLEND_CRV: Seq = Seq {
+    name: "BlendCrv",
+    tip: "BlendCrv — smooth curve between the ends of two curves",
+    sel: false,
+    steps: &[
+        In::CurveNear("First curve (click near the end to blend)"),
+        In::CurveNear("Second curve (near its end)"),
+        In::Choice("Continuity", &["Tangency", "Curvature"]),
+    ],
+    emit: |v, _| {
+        format!(
+            "BlendCrv #{} {} #{} {} {}",
+            v[0].o(),
+            fmt_p(v[0].p()),
+            v[1].o(),
+            fmt_p(v[1].p()),
+            v[2].t().to_lowercase()
+        )
+    },
+    preview: none,
+};
+
 /// Every sequence tool (for typed names, help and tests).
 pub static ALL: &[&Seq] = &[
+    &BLEND_CRV,
     &CIRCLE_TTR,
     &ARC_DIRECTION,
     &MAKE2D,

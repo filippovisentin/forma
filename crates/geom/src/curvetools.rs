@@ -2,7 +2,7 @@
 //! polyline simplification, helices and spirals, chaining loose segments, and
 //! boolean operations on planar regions bounded by closed polylines.
 
-use crate::{point_in_polygon, Chain, CircleArc, Plane, Point3, Seg, Vec3};
+use crate::{point_in_polygon, Chain, CircleArc, NurbsCurve, Plane, Point3, Seg, Vec3};
 use std::f64::consts::TAU;
 
 /// Circle through three points (`None` when they are collinear).
@@ -639,6 +639,67 @@ pub fn arc_start_dir_end(start: Point3, dir: Vec3, end: Point3) -> Option<Circle
     CircleArc::from_center_start_end(center, start, end, n)
 }
 
+/// End of a chain for a blend: the point, the direction pointing away from the
+/// curve, and the curvature vector there (towards the centre, length 1/r).
+fn blend_end(c: &Chain, at_end: bool) -> (Point3, Vec3, Vec3) {
+    let seg = if at_end {
+        c.segs.last().expect("non-empty")
+    } else {
+        c.segs.first().expect("non-empty")
+    };
+    let (p, t) = if at_end {
+        (seg.end(), seg.tangent_at(1.0))
+    } else {
+        (seg.start(), -seg.tangent_at(0.0))
+    };
+    let t = t.normalized().unwrap_or(Vec3::X);
+    let k = match seg {
+        Seg::Arc(a) => (a.center() - p)
+            .normalized()
+            .map_or(Vec3::new(0.0, 0.0, 0.0), |n| n * (1.0 / a.radius)),
+        Seg::Line(..) => Vec3::new(0.0, 0.0, 0.0),
+    };
+    (p, t, k)
+}
+
+/// Blend curve between an end of `a` and an end of `b` (Rhino's BlendCrv):
+/// tangent continuous (cubic), or also curvature continuous (quintic).
+pub fn blend_curves(
+    a: &Chain,
+    a_end: bool,
+    b: &Chain,
+    b_end: bool,
+    curvature: bool,
+) -> Option<NurbsCurve> {
+    if a.segs.is_empty() || b.segs.is_empty() {
+        return None;
+    }
+    let (p0, ta, ka) = blend_end(a, a_end);
+    let (p3, tb, kb) = blend_end(b, b_end);
+    let chord = p0.distance_to(p3);
+    if chord < 1e-12 {
+        return None;
+    }
+    let pts = if curvature {
+        // Degree 5: P1, P2 fix tangent and curvature at the start, P4, P3 at the end.
+        let d = chord / 5.0 * 1.6;
+        let h = |k: Vec3| k * (5.0 * d * d / 4.0);
+        let p1 = p0 + ta * d;
+        let p2 = p1 + (p1 - p0) + h(ka);
+        let p4 = p3 + tb * d;
+        let p3b = p4 + (p4 - p3) + h(kb);
+        vec![p0, p1, p2, p3b, p4, p3]
+    } else {
+        let d = chord / 3.0;
+        vec![p0, p0 + ta * d, p3 + tb * d, p3]
+    };
+    let n = pts.len();
+    let deg = n - 1;
+    let mut knots = vec![0.0; deg];
+    knots.extend(vec![1.0; deg]);
+    NurbsCurve::new(deg, pts, vec![1.0; n], knots)
+}
+
 #[cfg(test)]
 mod tangent_tests {
     use super::*;
@@ -693,6 +754,23 @@ mod tangent_tests {
         assert!((arc.radius - 10.0).abs() < 1e-9);
         assert!(arc.center().distance_to(p(0.0, 10.0)) < 1e-9);
         assert!((arc.sweep - std::f64::consts::FRAC_PI_2).abs() < 1e-9);
+    }
+
+    #[test]
+    fn blend_two_parallel_lines() {
+        let p = |x: f64, y: f64| Point3::new(x, y, 0.0);
+        let a = Chain::new(vec![Seg::Line(p(0.0, 0.0), p(10.0, 0.0))]);
+        let b = Chain::new(vec![Seg::Line(p(10.0, 10.0), p(0.0, 10.0))]);
+        for curvature in [false, true] {
+            let c = blend_curves(&a, true, &b, false, curvature).unwrap();
+            assert!(c.start().distance_to(p(10.0, 0.0)) < 1e-12);
+            assert!(c.end().distance_to(p(10.0, 10.0)) < 1e-12);
+            // Leaves along +x, arrives going -x (into b).
+            let pts = &c.points;
+            assert!((pts[1].y).abs() < 1e-12 && pts[1].x > 10.0);
+            let n = pts.len();
+            assert!((pts[n - 2].y - 10.0).abs() < 1e-12 && pts[n - 2].x > 10.0);
+        }
     }
 }
 

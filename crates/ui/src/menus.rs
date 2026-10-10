@@ -339,6 +339,8 @@ impl FormaApp {
                 tool(ui, &mut act, "Curve Boolean", K::Seq(&q::CURVE_BOOLEAN));
                 ui.separator();
                 ui.menu_button("Curve Edit Tools", |ui| {
+                    tool(ui, &mut act, "Blend Curves", K::Seq(&q::BLEND_CRV));
+                    tool(ui, &mut act, "Simplify", K::OnSel("SimplifyCrv"));
                     tool(ui, &mut act, "Join", K::Join);
                     tool(ui, &mut act, "Explode", K::Explode);
                     tool(ui, &mut act, "Trim", K::Trim);
