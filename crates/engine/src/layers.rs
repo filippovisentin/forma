@@ -462,6 +462,35 @@ impl Command for OneLayerOn {
 }
 
 simple_command!(
+    OneLayerOff,
+    "OneLayerOff",
+    &[],
+    "OneLayerOff <layer> — hide one layer (and its sub-layers); not the current layer"
+);
+impl Command for OneLayerOff {
+    impl_meta!(OneLayerOff);
+    fn run(&self, ctx: &mut Context, args: &mut Args) -> CommandResult {
+        let name = name_arg(args, "layer name")?;
+        let ids = layers_under(ctx, &name);
+        if ids.is_empty() {
+            return Err(CommandError::Invalid(format!("no layer {name}")));
+        }
+        if ids.contains(&ctx.doc.current_layer) {
+            return Err(CommandError::Invalid(
+                "the current layer cannot be turned off".into(),
+            ));
+        }
+        for id in &ids {
+            ctx.doc.edit_layer(*id, |l| l.visible = false);
+        }
+        let doc = &ctx.doc;
+        ctx.selection
+            .retain(|o| doc.object(*o).is_some_and(|o| doc.is_selectable(o)));
+        Ok(format!("{} layer(s) off", ids.len()))
+    }
+}
+
+simple_command!(
     AllLayersOn,
     "AllLayersOn",
     &[],
@@ -529,6 +558,19 @@ impl Command for CopyObjectsToLayer {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn one_layer_off() {
+        let mut e = crate::Engine::new();
+        e.run_line("Layer muri").unwrap();
+        e.run_line("Line 0,0 1,0").unwrap();
+        e.run_line("Layer Default").unwrap();
+        assert!(e.run_line("OneLayerOff Default").is_err());
+        e.run_line("OneLayerOff muri").unwrap();
+        let l = e.doc().find_layer("muri").unwrap();
+        assert!(!e.doc().layer(l).visible);
+        assert!(e.run_line("OneLayerOff nessuno").is_err());
+    }
+
     #[test]
     fn sel_small_closed_open_meshes() {
         let mut e = crate::Engine::new();

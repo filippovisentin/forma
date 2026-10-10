@@ -430,6 +430,75 @@ impl Command for ExtrudeCrvTapered {
 }
 
 simple_command!(
+    ExtrudeCrvToPoint,
+    "ExtrudeCrvToPoint",
+    &[],
+    "ExtrudeCrvToPoint <apex> — extrude the selected curves to a point (closed planar curves give capped solids)"
+);
+impl Command for ExtrudeCrvToPoint {
+    impl_meta!(ExtrudeCrvToPoint);
+    fn run(&self, ctx: &mut Context, args: &mut Args) -> CommandResult {
+        let apex = args.point("point to extrude to", ctx.last_point)?;
+        let curves = crate::surfaces::selected_curves(ctx, "ExtrudeCrvToPoint")?;
+        let tol = ctx.doc.absolute_tolerance.max(1e-9);
+        let mut out = Vec::new();
+        for c in curves {
+            let closed = c.geometry.is_closed_curve();
+            let mut pts = if closed {
+                loop_points(&c.geometry)
+            } else {
+                c.geometry.curve_points()
+            };
+            if pts.len() < 2 {
+                continue;
+            }
+            let plane = closed_plane(&c.geometry, tol);
+            if let Some((pl, _)) = &plane {
+                // Loop counter-clockwise seen from the apex side: sides face out.
+                let n = forma_geom::newell_area(&pts);
+                if n.dot(apex - pts[0]) < 0.0 {
+                    pts.reverse();
+                }
+                if pl.coords(apex).2.abs() <= tol {
+                    return Err(CommandError::Invalid(
+                        "ExtrudeCrvToPoint: the point lies in the curve's plane".into(),
+                    ));
+                }
+            }
+            let mut m = Mesh::default();
+            let count = if closed { pts.len() } else { pts.len() - 1 };
+            for i in 0..count {
+                let (a, b) = (pts[i], pts[(i + 1) % pts.len()]);
+                if (b - a).cross(apex - a).length() <= 1e-12 {
+                    continue;
+                }
+                let k = m.positions.len() as u32;
+                m.positions.extend([a, b, apex]);
+                m.triangles.push([k, k + 1, k + 2]);
+            }
+            if let (true, Some(_)) = (closed, &plane) {
+                let d = forma_geom::newell_area(&pts);
+                let mut cap = planar_mesh(&pts, &[], -d);
+                cap.normals.clear();
+                m.append(&cap);
+            }
+            if !m.triangles.is_empty() {
+                out.push((Geometry::Mesh(m), c));
+            }
+        }
+        if out.is_empty() {
+            return Err(CommandError::Invalid(
+                "ExtrudeCrvToPoint: select curves".into(),
+            ));
+        }
+        let n = out.len();
+        ctx.last_point = Some(apex);
+        add_selected(ctx, out);
+        Ok(format!("extruded {n} curve(s) to a point"))
+    }
+}
+
+simple_command!(
     Slab,
     "Slab",
     &[],
@@ -635,6 +704,37 @@ mod tests {
         assert!((v - PI * 36.0 * 100.0).abs() / v < 5e-3, "{v}");
         assert!(e.run_line("Tube 0,0 10 10 100").is_err());
         assert_eq!(e.doc().len(), 6);
+    }
+
+    #[test]
+    fn extrude_to_a_point() {
+        let mut e = Engine::new();
+        e.run_line("Rectangle 0,0 10,10").unwrap();
+        e.run_line("SelAll").unwrap();
+        e.run_line("ExtrudeCrvToPoint 5,5,30").unwrap();
+        let Geometry::Mesh(m) = &e.doc().objects().last().unwrap().geometry else {
+            panic!()
+        };
+        assert!(m.is_closed(1e-6));
+        assert!((m.volume() - 1000.0).abs() < 1e-6, "{}", m.volume());
+        // Apex below: still a positive volume.
+        e.run_line("SelNone").unwrap();
+        e.run_line("Select #1").unwrap();
+        e.run_line("ExtrudeCrvToPoint 5,5,-30").unwrap();
+        let Geometry::Mesh(m) = &e.doc().objects().last().unwrap().geometry else {
+            panic!()
+        };
+        assert!((m.volume() - 1000.0).abs() < 1e-6, "{}", m.volume());
+        assert!(e.run_line("ExtrudeCrvToPoint 20,20,0").is_err());
+        // An open curve: a fan surface.
+        e.run_line("SelNone").unwrap();
+        e.run_line("Line 0,0 10,0").unwrap();
+        e.run_line("SelLast").unwrap();
+        e.run_line("ExtrudeCrvToPoint 0,0,10").unwrap();
+        let Geometry::Mesh(m) = &e.doc().objects().last().unwrap().geometry else {
+            panic!()
+        };
+        assert!((m.area() - 50.0).abs() < 1e-9);
     }
 
     #[test]

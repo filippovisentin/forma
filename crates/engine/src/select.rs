@@ -155,6 +155,75 @@ impl Command for Unlock {
 }
 
 simple_command!(
+    HideSwap,
+    "HideSwap",
+    &[],
+    "HideSwap — show the hidden objects and hide the visible ones"
+);
+impl Command for HideSwap {
+    impl_meta!(HideSwap);
+    fn run(&self, ctx: &mut Context, _args: &mut Args) -> CommandResult {
+        let all: Vec<(ObjectId, bool)> = ctx.doc.objects().map(|o| (o.id, o.hidden)).collect();
+        let mut t = ctx.doc.begin();
+        for (id, hidden) in &all {
+            t.set_hidden(*id, !hidden);
+        }
+        t.commit();
+        let shown = all.iter().filter(|(_, h)| *h).count();
+        ctx.selection.clear();
+        Ok(format!(
+            "{shown} object(s) shown, {} hidden",
+            all.len() - shown
+        ))
+    }
+}
+
+simple_command!(
+    LockSwap,
+    "LockSwap",
+    &[],
+    "LockSwap — unlock the locked objects and lock the others"
+);
+impl Command for LockSwap {
+    impl_meta!(LockSwap);
+    fn run(&self, ctx: &mut Context, _args: &mut Args) -> CommandResult {
+        let all: Vec<(ObjectId, bool)> = ctx.doc.objects().map(|o| (o.id, o.locked)).collect();
+        let mut t = ctx.doc.begin();
+        for (id, locked) in &all {
+            t.set_locked(*id, !locked);
+        }
+        t.commit();
+        let unlocked = all.iter().filter(|(_, l)| *l).count();
+        ctx.selection.clear();
+        Ok(format!(
+            "{unlocked} object(s) unlocked, {} locked",
+            all.len() - unlocked
+        ))
+    }
+}
+
+simple_command!(
+    SelVisible,
+    "SelVisible",
+    &[],
+    "SelVisible — select every visible, unlocked object"
+);
+impl Command for SelVisible {
+    impl_meta!(SelVisible);
+    fn run(&self, ctx: &mut Context, _args: &mut Args) -> CommandResult {
+        let doc = &ctx.doc;
+        let ids: Vec<ObjectId> = doc
+            .objects()
+            .filter(|o| doc.is_selectable(o))
+            .map(|o| o.id)
+            .collect();
+        let n = ids.len();
+        ctx.selection.extend(ids);
+        Ok(format!("{n} object(s) selected"))
+    }
+}
+
+simple_command!(
     Group,
     "Group",
     &["G"],
@@ -308,6 +377,37 @@ impl Command for Invert {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn hide_swap_lock_swap_sel_visible() {
+        let mut e = crate::Engine::new();
+        e.run_line("Line 0,0 1,0").unwrap();
+        e.run_line("Line 0,1 1,1").unwrap();
+        e.run_line("Line 0,2 1,2").unwrap();
+        e.run_line("Hide #1").unwrap();
+        e.run_line("HideSwap").unwrap();
+        let hidden: Vec<u64> = e
+            .doc()
+            .objects()
+            .filter(|o| o.hidden)
+            .map(|o| o.id.0)
+            .collect();
+        assert_eq!(hidden, vec![2, 3]);
+        e.run_line("Show").unwrap();
+        e.run_line("Lock #2").unwrap();
+        e.run_line("LockSwap").unwrap();
+        let locked: Vec<u64> = e
+            .doc()
+            .objects()
+            .filter(|o| o.locked)
+            .map(|o| o.id.0)
+            .collect();
+        assert_eq!(locked, vec![1, 3]);
+        e.run_line("SelVisible").unwrap();
+        assert_eq!(e.ctx.selection.len(), 1);
+        e.run_line("Undo").unwrap(); // the selection is not undoable, LockSwap is
+        e.run_line("SelVisible").unwrap();
+        assert_eq!(e.ctx.selection.len(), 2);
+    }
     use crate::Engine;
     use forma_doc::ObjectId;
 

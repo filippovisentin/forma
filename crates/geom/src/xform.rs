@@ -232,6 +232,44 @@ impl Xform {
             .then(&Self::translation(b1.to_vec()));
         Some(x)
     }
+
+    /// Rigid map taking `from` onto `to` (origin to origin, axes to axes).
+    pub fn plane_to_plane(from: &Plane, to: &Plane) -> Xform {
+        let a = [from.x, from.y, from.z];
+        let b = [to.x, to.y, to.z];
+        let comp = |v: Vec3, i: usize| [v.x, v.y, v.z][i];
+        let mut m = [[0.0; 3]; 3];
+        for (i, row) in m.iter_mut().enumerate() {
+            for (j, v) in row.iter_mut().enumerate() {
+                *v = (0..3).map(|k| comp(b[k], i) * comp(a[k], j)).sum();
+            }
+        }
+        let lin = Xform {
+            m,
+            t: Vec3::new(0.0, 0.0, 0.0),
+        };
+        Xform {
+            m,
+            t: to.origin.to_vec() - lin.vector(from.origin.to_vec()),
+        }
+    }
+
+    /// Three-point orient: `a1 → b1`, the direction `a1→a2` onto `b1→b2`, and the
+    /// plane of the three reference points onto the plane of the three targets
+    /// (no scaling). `None` when either triple is collinear.
+    pub fn orient3(a: [Point3; 3], b: [Point3; 3]) -> Option<Xform> {
+        let frame = |p: [Point3; 3]| {
+            let x = (p[1] - p[0]).normalized()?;
+            let z = x.cross(p[2] - p[0]).normalized()?;
+            Some(Plane {
+                origin: p[0],
+                x,
+                y: z.cross(x),
+                z,
+            })
+        };
+        Some(Self::plane_to_plane(&frame(a)?, &frame(b)?))
+    }
 }
 
 #[cfg(test)]
@@ -315,6 +353,26 @@ mod tests {
         // A face normal pointing +X at x=12 becomes a face at x=8 pointing −X.
         let n = m.normal(Vec3::X);
         assert!((n - Vec3::new(-1.0, 0.0, 0.0)).length() < 1e-9, "{n:?}");
+    }
+
+    #[test]
+    fn three_point_orient() {
+        let p = |x: f64, y: f64, z: f64| Point3::new(x, y, z);
+        // A unit square in XY stood up in the XZ plane at (10, 0, 0).
+        let x = Xform::orient3(
+            [p(0.0, 0.0, 0.0), p(1.0, 0.0, 0.0), p(0.0, 1.0, 0.0)],
+            [p(10.0, 0.0, 0.0), p(10.0, 2.0, 0.0), p(10.0, 0.0, 5.0)],
+        )
+        .unwrap();
+        assert!(close(x.point(p(0.0, 0.0, 0.0)), p(10.0, 0.0, 0.0)));
+        assert!(close(x.point(p(1.0, 0.0, 0.0)), p(10.0, 1.0, 0.0)));
+        assert!(close(x.point(p(0.0, 1.0, 0.0)), p(10.0, 0.0, 1.0)));
+        assert!(x.is_similarity() && !x.flips());
+        assert!(Xform::orient3(
+            [p(0.0, 0.0, 0.0), p(1.0, 0.0, 0.0), p(2.0, 0.0, 0.0)],
+            [p(0.0, 0.0, 0.0), p(1.0, 0.0, 0.0), p(0.0, 1.0, 0.0)],
+        )
+        .is_none());
     }
 
     #[test]

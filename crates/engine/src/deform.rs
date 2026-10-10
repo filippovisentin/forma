@@ -377,6 +377,29 @@ impl Command for Mirror3Pt {
     }
 }
 
+simple_command!(
+    Orient3Pt,
+    "Orient3Pt",
+    &[],
+    "Orient3Pt <ref1> <ref2> <ref3> <target1> <target2> <target3> [copy] — move and turn the selection so the reference points land on the target points' plane"
+);
+impl Command for Orient3Pt {
+    impl_meta!(Orient3Pt);
+    fn run(&self, ctx: &mut Context, args: &mut Args) -> CommandResult {
+        let a1 = args.point("reference point 1", ctx.last_point)?;
+        let a2 = args.point("reference point 2", Some(a1))?;
+        let a3 = args.point("reference point 3", Some(a2))?;
+        let b1 = args.point("target point 1", Some(a3))?;
+        let b2 = args.point("target point 2", Some(b1))?;
+        let b3 = args.point("target point 3", Some(b2))?;
+        let copy = args.keyword("copy");
+        let x = Xform::orient3([a1, a2, a3], [b1, b2, b3]).ok_or_else(|| {
+            CommandError::Invalid("reference or target points are collinear".into())
+        })?;
+        transform_selection(ctx, "Orient3Pt", &x, copy)
+    }
+}
+
 /// `x=`, `y=`, `z=` style option value.
 fn keyed<'a>(tok: &'a str, key: &str) -> Option<&'a str> {
     let (k, v) = tok.split_once('=')?;
@@ -702,6 +725,19 @@ mod tests {
             "{cx:?}"
         );
         assert!(e.run_line("Distribute w").is_err());
+    }
+
+    #[test]
+    fn orient_three_points() {
+        let mut e = Engine::new();
+        e.run_line("Rectangle 0,0 10,5").unwrap();
+        e.run_line("SelAll").unwrap();
+        e.run_line("Orient3Pt 0,0 10,0 0,5 100,0,0 100,10,0 100,0,5")
+            .unwrap();
+        let b = e.doc().objects().next().unwrap().geometry.bounding_box();
+        assert!((b.min.x - 100.0).abs() < TOL && (b.max.x - 100.0).abs() < TOL);
+        assert!((b.max.y - 10.0).abs() < TOL && (b.max.z - 5.0).abs() < TOL);
+        assert!(e.run_line("Orient3Pt 0,0 1,0 2,0 0,0 1,0 0,1").is_err());
     }
 
     #[test]

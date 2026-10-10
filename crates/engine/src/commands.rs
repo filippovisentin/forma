@@ -74,6 +74,9 @@ pub fn builtin() -> Vec<Box<dyn Command>> {
         Box::new(crate::select::SelMesh),
         Box::new(crate::select::SelPt),
         Box::new(crate::select::Invert),
+        Box::new(crate::select::HideSwap),
+        Box::new(crate::select::LockSwap),
+        Box::new(crate::select::SelVisible),
         Box::new(crate::surfaces::PlanarSrf),
         Box::new(crate::surfaces::ExtrudeSrf),
         Box::new(crate::surfaces::Cap),
@@ -130,6 +133,7 @@ pub fn builtin() -> Vec<Box<dyn Command>> {
         Box::new(crate::solids2::ExtrudeCrvAlongCrv),
         Box::new(crate::solids2::ExtrudeCrvTapered),
         Box::new(crate::solids2::Slab),
+        Box::new(crate::solids2::ExtrudeCrvToPoint),
         Box::new(crate::solids2::Weld),
         Box::new(crate::solids2::Unweld),
         // Transforms
@@ -144,6 +148,7 @@ pub fn builtin() -> Vec<Box<dyn Command>> {
         Box::new(crate::deform::Mirror3Pt),
         Box::new(crate::deform::BoxEdit),
         Box::new(crate::deform::Distribute),
+        Box::new(crate::deform::Orient3Pt),
         // Attributes, selection, layers
         Box::new(crate::layers::SetObjectName),
         Box::new(crate::layers::SelName),
@@ -164,6 +169,7 @@ pub fn builtin() -> Vec<Box<dyn Command>> {
         Box::new(crate::layers::DeleteLayer),
         Box::new(crate::layers::OneLayerOn),
         Box::new(crate::layers::AllLayersOn),
+        Box::new(crate::layers::OneLayerOff),
         Box::new(crate::layers::ChangeToCurrentLayer),
         Box::new(crate::layers::CopyObjectsToLayer),
         // Analysis
