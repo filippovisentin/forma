@@ -31,6 +31,9 @@ pub enum DisplayGeometry {
     Brep(forma_geom::Brep),
     Polyline(Vec<Point3>),
     Point(Point3),
+    /// A curve read exactly: line, arc / circle, polyline, polycurve of lines
+    /// and arcs, or NURBS curve.
+    Curve(forma_doc::Geometry),
     /// Text (`dot` = text dot): plane origin and axes, height (0 for dots).
     Text {
         origin: Point3,
@@ -99,24 +102,18 @@ pub fn import_display(path: impl AsRef<Path>) -> Result<Import, Error> {
             // SAFETY (all calls below): model valid for this scope, obj in range.
             let geometry = match info.kind {
                 ObjectKind::Brep | ObjectKind::Extrusion | ObjectKind::Surface => {
-                    let (mesh, face_ends) = unsafe { brep_mesh_faces(m, obj) };
-                    if mesh.triangles.is_empty() {
+                    let mut len = 0usize;
+                    let p = unsafe { ffi::f3dm_object_bytes(m, obj, &mut len) };
+                    let data = unsafe { crate::exact::take_bytes(p, len) }.unwrap_or_default();
+                    let mut raw = ffi::Object::default();
+                    unsafe { ffi::f3dm_object(m, obj, &mut raw) };
+                    let b = unsafe { brep_of_object(m, obj, &raw, data) };
+                    if b.mesh.triangles.is_empty() {
                         None
+                    } else if b.data.is_empty() {
+                        Some(DisplayGeometry::Mesh(b.mesh))
                     } else {
-                        let mut len = 0usize;
-                        let p = unsafe { ffi::f3dm_object_bytes(m, obj, &mut len) };
-                        match unsafe { crate::exact::take_bytes(p, len) } {
-                            Some(data) => Some(DisplayGeometry::Brep(forma_geom::Brep {
-                                data: std::sync::Arc::new(data),
-                                xform: forma_geom::Xform::IDENTITY,
-                                mesh,
-                                faces: info.brep_faces.unwrap_or(1),
-                                solid: info.is_solid,
-                                planar: info.all_planar,
-                                face_ends,
-                            })),
-                            None => Some(DisplayGeometry::Mesh(mesh)),
-                        }
+                        Some(DisplayGeometry::Brep(b))
                     }
                 }
                 ObjectKind::Mesh => unsafe { mesh_object(m, obj) }.map(DisplayGeometry::Mesh),
@@ -125,8 +122,23 @@ pub fn import_display(path: impl AsRef<Path>) -> Result<Import, Error> {
                 | ObjectKind::PolyCurve
                 | ObjectKind::NurbsCurve
                 | ObjectKind::Arc => {
-                    let pts = unsafe { curve_points(m, obj) };
-                    (pts.len() >= 2).then_some(DisplayGeometry::Polyline(pts))
+                    let mut n = 0usize;
+                    let p = unsafe { ffi::f3dm_curve_exact(m, obj, &mut n) };
+                    let exact = (!p.is_null())
+                        .then(|| {
+                            // SAFETY: n doubles from the shim, freed right after.
+                            let s = unsafe { std::slice::from_raw_parts(p, n) }.to_vec();
+                            unsafe { ffi::f3dm_bytes_free(p.cast()) };
+                            crate::exact::curve_from_stream(&s)
+                        })
+                        .flatten();
+                    match exact {
+                        Some(g) => Some(DisplayGeometry::Curve(g)),
+                        None => {
+                            let pts = unsafe { curve_points(m, obj) };
+                            (pts.len() >= 2).then_some(DisplayGeometry::Polyline(pts))
+                        }
+                    }
                 }
                 ObjectKind::Point => {
                     let mut xyz = [0.0; 3];
@@ -230,6 +242,37 @@ unsafe fn mesh_object(m: *mut ffi::Model, obj: c_int) -> Option<Mesh> {
         normals: Vec::new(),
         triangles: t.chunks(3).map(|c| [c[0], c[1], c[2]]).collect(),
     })
+}
+
+/// A [`Brep`](forma_geom::Brep) for brep object `obj` of the model: display
+/// mesh, face data and snap points, carrying `data` (its serialized form).
+pub(crate) unsafe fn brep_of_object(
+    m: *mut ffi::Model,
+    obj: c_int,
+    info: &ffi::Object,
+    data: Vec<u8>,
+) -> forma_geom::Brep {
+    let (mesh, face_ends) = brep_mesh_faces(m, obj);
+    let mut nverts: c_int = 0;
+    let n = ffi::f3dm_brep_points(m, obj, &mut nverts);
+    let mut buf = vec![0.0; n.max(0) as usize * 3];
+    ffi::f3dm_points_copy(m, buf.as_mut_ptr(), n);
+    let mut pts: Vec<Point3> = buf
+        .chunks(3)
+        .map(|c| Point3::new(c[0], c[1], c[2]))
+        .collect();
+    let edge_mids = pts.split_off((nverts.max(0) as usize).min(pts.len()));
+    forma_geom::Brep {
+        data: std::sync::Arc::new(data),
+        xform: forma_geom::Xform::IDENTITY,
+        mesh,
+        faces: usize::try_from(info.brep_faces).unwrap_or(0),
+        solid: info.is_solid != 0,
+        planar: info.all_planar != 0,
+        face_ends,
+        vertices: pts,
+        edge_mids,
+    }
 }
 
 /// Display mesh of a brep and, per face, the end of its triangles.

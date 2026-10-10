@@ -128,10 +128,12 @@ impl FormaApp {
         let doc = self.engine.doc();
         let mut shown = 0;
         let mut too_many = 0;
+        let mut curved = 0;
         for id in sel {
             let g = &doc.object(id).expect("selected").geometry;
             if g.grips().is_empty() {
                 too_many += usize::from(matches!(g, Geometry::Mesh(_)));
+                curved += usize::from(matches!(g, Geometry::Brep(_)));
                 continue;
             }
             self.grips.on.insert(id);
@@ -147,6 +149,11 @@ impl FormaApp {
             msg.push_str(&format!(
                 " ({too_many} mesh(es) have more than {} vertices: no points shown)",
                 forma_doc::MAX_MESH_GRIPS
+            ));
+        }
+        if curved > 0 {
+            msg.push_str(&format!(
+                " ({curved} curved surface(s): editing their control points is not available yet)"
             ));
         }
         self.log(LogKind::Normal, msg);

@@ -367,7 +367,7 @@ simple_command!(
     Revolve,
     "Revolve",
     &["Rev"],
-    "Revolve <axis start> <axis end> [angle=360] — revolve the selected curves into mesh surfaces"
+    "Revolve <axis start> <axis end> [angle=360] — revolve the selected curves into surfaces (closed on the axis: solids)"
 );
 impl Command for Revolve {
     impl_meta!(Revolve);
@@ -384,7 +384,17 @@ impl Command for Revolve {
         let curves = selected_curves(ctx, "Revolve")?;
         let tol = ctx.tolerance.absolute.max(1e-9);
         let mut out = Vec::new();
+        // Exact surfaces of revolution (a negative angle turns the other way).
+        let (axis, turn) = if angle < 0.0 {
+            (a - b, (-angle).min(360.0).to_radians())
+        } else {
+            (b - a, angle.min(360.0).to_radians())
+        };
         for c in curves {
+            if let Some(s) = forma_io_3dm::exact::make_revolved(&c.geometry, a, axis, turn, tol) {
+                out.push((Geometry::Brep(s), c));
+                continue;
+            }
             let m = revolve_mesh(
                 &c.geometry.curve_points(),
                 a,

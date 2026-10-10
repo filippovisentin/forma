@@ -18,18 +18,10 @@ pub(crate) unsafe fn take_bytes(p: *mut u8, len: usize) -> Option<Vec<u8>> {
     (!v.is_empty()).then_some(v)
 }
 
-/// Display mesh, face count and closedness of serialized exact geometry, with
-/// `xform` applied (None = as stored).
-pub fn mesh_bytes(data: &[u8], xform: Option<&Xform>) -> Option<(Mesh, usize, bool, bool)> {
-    mesh_bytes_faces(data, xform).map(|(m, f, s, p, _)| (m, f, s, p))
-}
-
-/// [`mesh_bytes`] with the end of each face's triangles.
-#[allow(clippy::type_complexity)]
-fn mesh_bytes_faces(
-    data: &[u8],
-    xform: Option<&Xform>,
-) -> Option<(Mesh, usize, bool, bool, Vec<u32>)> {
+/// The object stored in `data` read back as a [`Brep`] (display mesh, faces,
+/// snap points), with `xform` applied to it first (None = as stored). The
+/// returned brep carries the bytes as given (and no pending transform).
+fn read_bytes(data: Vec<u8>, xform: Option<&Xform>) -> Option<Brep> {
     let x16 = xform.map(xform16);
     let xp = x16.as_ref().map_or(std::ptr::null(), |x| x.as_ptr());
     // SAFETY: data/xform buffers outlive the call; the model is owned below.
@@ -42,9 +34,13 @@ fn mesh_bytes_faces(
     // SAFETY: valid model with one object.
     unsafe { ffi::f3dm_object(model.ptr(), 0, &mut info) };
     // SAFETY: valid model, object 0 exists.
-    let (mesh, ends) = unsafe { display::brep_mesh_faces(model.ptr(), 0) };
-    let faces = usize::try_from(info.brep_faces).unwrap_or(0);
-    Some((mesh, faces, info.is_solid != 0, info.all_planar != 0, ends))
+    Some(unsafe { display::brep_of_object(model.ptr(), 0, &info, data) })
+}
+
+/// Display mesh, face count, closedness and flatness of serialized exact
+/// geometry, with `xform` applied (None = as stored).
+pub fn mesh_bytes(data: &[u8], xform: Option<&Xform>) -> Option<(Mesh, usize, bool, bool)> {
+    read_bytes(data.to_vec(), xform).map(|b| (b.mesh, b.faces, b.solid, b.planar))
 }
 
 /// Signed volume enclosed by a closed mesh (positive when it faces outwards).
@@ -62,36 +58,25 @@ fn signed_volume(m: &Mesh) -> f64 {
 /// Closed solids are turned outward-facing when they come inside out (mirrors,
 /// some constructions).
 pub fn brep_from_bytes(data: Vec<u8>) -> Option<Brep> {
-    let (mut mesh, faces, solid, planar, mut face_ends) = mesh_bytes_faces(&data, None)?;
-    if mesh.triangles.is_empty() {
+    let b = read_bytes(data, None)?;
+    if b.mesh.triangles.is_empty() {
         return None;
     }
-    let mut data = data;
-    if solid && signed_volume(&mesh) < 0.0 {
+    if b.solid && signed_volume(&b.mesh) < 0.0 {
         let mut len = 0;
         // SAFETY: buffer outlives the call; result freed by take_bytes.
         if let Some(flipped) = unsafe {
             take_bytes(
-                ffi::f3dm_bytes_flipped(data.as_ptr(), data.len(), &mut len),
+                ffi::f3dm_bytes_flipped(b.data.as_ptr(), b.data.len(), &mut len),
                 len,
             )
         } {
-            if let Some((m, _, _, _, ends)) = mesh_bytes_faces(&flipped, None) {
-                mesh = m;
-                face_ends = ends;
-                data = flipped;
+            if let Some(f) = read_bytes(flipped, None) {
+                return Some(f);
             }
         }
     }
-    Some(Brep {
-        data: Arc::new(data),
-        xform: Xform::IDENTITY,
-        mesh,
-        faces,
-        solid,
-        planar,
-        face_ends,
-    })
+    Some(b)
 }
 
 /// The exact geometry with its pending transform applied (identity transform,
@@ -159,6 +144,8 @@ pub fn xform16(x: &Xform) -> [f64; 16] {
         solid: false,
         planar: false,
         face_ends: Vec::new(),
+        vertices: Vec::new(),
+        edge_mids: Vec::new(),
     }
     .xform16()
 }
@@ -384,6 +371,29 @@ unsafe fn take_stream(p: *mut f64, n: usize) -> Option<Vec<f64>> {
     Some(v)
 }
 
+/// A curve stream (count, then segments) as one Forma curve: line, arc,
+/// polyline or polycurve of lines and arcs, or a NURBS curve.
+pub(crate) fn curve_from_stream(s: &[f64]) -> Option<Geometry> {
+    let count = *s.first()? as usize;
+    let mut k = 1;
+    let mut parts = Vec::with_capacity(count);
+    for _ in 0..count {
+        parts.push(read_segment(s, &mut k)?);
+    }
+    if let [g @ Geometry::Nurbs(_)] = parts.as_slice() {
+        return Some(g.clone());
+    }
+    let segs: Vec<Seg> = parts
+        .iter()
+        .filter_map(Geometry::to_chain)
+        .flat_map(|c| c.segs)
+        .collect();
+    if segs.len() != parts.len() {
+        return None;
+    }
+    Geometry::from_chain(forma_geom::Chain::new(segs))
+}
+
 /// Edge curves of an exact surface (with its pending transform): all edges, or
 /// only the naked (border) ones. Lines, arcs and NURBS curves, as in the model.
 pub fn edges(b: &Brep, naked_only: bool) -> Vec<Geometry> {
@@ -471,6 +481,77 @@ pub fn faces(b: &Brep) -> Vec<Brep> {
         .collect()
 }
 
+/// Breps joined where their naked edges meet (Rhino's Join): the joined
+/// polysurfaces (one per connected piece) and the number of edges joined.
+pub fn join(breps: &[&Brep], tol: f64) -> Option<(Vec<Brep>, usize)> {
+    let baked: Vec<Brep> = breps.iter().map(|b| baked(b)).collect::<Option<_>>()?;
+    let ptrs: Vec<*const u8> = baked.iter().map(|b| b.data.as_ptr()).collect();
+    let lens: Vec<usize> = baked.iter().map(|b| b.data.len()).collect();
+    let mut joined: c_int = 0;
+    let mut len = 0;
+    // SAFETY: buffers outlive the call; owned bytes out.
+    let packed = unsafe {
+        take_bytes(
+            ffi::f3dm_bytes_join(
+                ptrs.as_ptr(),
+                lens.as_ptr(),
+                c_int::try_from(ptrs.len()).ok()?,
+                tol,
+                &mut joined,
+                &mut len,
+            ),
+            len,
+        )
+    }?;
+    let word = |at: usize| -> Option<usize> {
+        let b: [u8; 8] = packed.get(at..at + 8)?.try_into().ok()?;
+        usize::try_from(u64::from_ne_bytes(b)).ok()
+    };
+    let count = word(0)?;
+    let mut at = 8;
+    let mut out = Vec::with_capacity(count);
+    for _ in 0..count {
+        let l = word(at)?;
+        at += 8;
+        out.push(brep_from_bytes(packed.get(at..at + l)?.to_vec())?);
+        at += l;
+    }
+    Some((out, usize::try_from(joined).unwrap_or(0)))
+}
+
+/// Surface of revolution of `profile` around the axis through `origin` along
+/// `axis`, by `angle` radians (2π: full turn). One face per segment of the
+/// profile, joined; a profile closing on the axis gives a closed solid.
+pub fn make_revolved(
+    profile: &Geometry,
+    origin: Point3,
+    axis: Vec3,
+    angle: f64,
+    tol: f64,
+) -> Option<Brep> {
+    let mut stream = Vec::new();
+    if !push_loop(&mut stream, profile) {
+        return None;
+    }
+    let (o, a) = ([origin.x, origin.y, origin.z], [axis.x, axis.y, axis.z]);
+    let mut len = 0;
+    // SAFETY: buffers outlive the call; owned bytes out.
+    made(
+        unsafe {
+            ffi::f3dm_make_revolved(
+                stream.as_ptr(),
+                stream.len(),
+                o.as_ptr(),
+                a.as_ptr(),
+                angle,
+                tol,
+                &mut len,
+            )
+        },
+        len,
+    )
+}
+
 /// Exact polysurface with the flat faces of `mesh` (see
 /// [`Mesh::polyhedron`]); `None` when the mesh is not a clean polyhedron of at
 /// most `max_faces` faces.
@@ -556,8 +637,23 @@ mod tests {
             bb.min.distance_to(Point3::new(-110.0, 0.0, 0.0)) < 1e-9,
             "{bb:?}"
         );
-        // Still outward-facing after the mirror.
+        // Still outward-facing after the mirror, without any fixing up.
         assert!((volume(&baked.mesh) - 1000.0).abs() < 1e-6);
+        let (m, ..) = mesh_bytes(&b.data, Some(&mirrored.xform)).expect("mesh");
+        assert!((volume(&m) - 1000.0).abs() < 1e-6, "{}", volume(&m));
+        // A mirrored extrusion too.
+        let p = |x, y| Point3::new(x, y, 0.0);
+        let sq = Geometry::Polyline(vec![
+            p(0.0, 0.0),
+            p(4.0, 0.0),
+            p(4.0, 4.0),
+            p(0.0, 4.0),
+            p(0.0, 0.0),
+        ]);
+        let e = make_planar(&sq, &[], Vec3::Z, Some(Vec3::Z)).expect("solid");
+        let x = Xform::mirror(Point3::ORIGIN, Vec3::X);
+        let (m, ..) = mesh_bytes(&e.data, Some(&x)).expect("mesh");
+        assert!((volume(&m) - 16.0).abs() < 1e-9, "{}", volume(&m));
         // Non-uniform scale works too.
         let s = Xform::scale_axes(&Plane::from_normal(Point3::ORIGIN, Vec3::Z), 2.0, 1.0, 1.0);
         let stretched = super::baked(&b.transformed(&s)).expect("stretched");
@@ -710,6 +806,95 @@ mod tests {
         let exact = std::f64::consts::PI * 4.0 * 3.0;
         assert!((v - exact).abs() / exact < 0.02, "{v} vs {exact}");
         assert!(super::capped(&capped, 1e-6).is_none());
+    }
+
+    #[test]
+    fn join_exploded_faces_back_into_solids() {
+        let base = Plane::from_normal(Point3::ORIGIN, Vec3::Z);
+        for (name, b) in [
+            ("box", make_box(&corners(3.0, 4.0, 5.0)).unwrap()),
+            ("cylinder", make_cylinder(&base, 2.0, 5.0).unwrap()),
+        ] {
+            let parts = faces(&b);
+            let refs: Vec<&Brep> = parts.iter().collect();
+            let (joined, n) = join(&refs, 1e-6).expect("join");
+            assert_eq!(joined.len(), 1, "{name}");
+            assert!(joined[0].solid, "{name} joined into a solid ({n} edges)");
+            assert_eq!(joined[0].faces, b.faces, "{name}");
+            assert!(
+                (volume(&joined[0].mesh) - volume(&b.mesh)).abs() < 1e-6,
+                "{name}"
+            );
+        }
+        // Two separate boxes stay two pieces.
+        let a = make_box(&corners(1.0, 1.0, 1.0)).unwrap();
+        let b = a.transformed(&Xform::translation(Vec3::new(5.0, 0.0, 0.0)));
+        let (pieces, _) = join(&[&a, &b], 1e-6).unwrap();
+        assert_eq!(pieces.len(), 2);
+    }
+
+    #[test]
+    fn revolve_profiles_into_solids_and_surfaces() {
+        let p = |x, z| Point3::new(x, 0.0, z);
+        // Truncated cone: bottom disc, slanted side, top disc.
+        let profile = Geometry::Polyline(vec![p(0.0, 0.0), p(4.0, 0.0), p(2.0, 3.0), p(0.0, 3.0)]);
+        let tc = make_revolved(
+            &profile,
+            Point3::ORIGIN,
+            Vec3::Z,
+            std::f64::consts::TAU,
+            1e-6,
+        )
+        .expect("tcone");
+        assert_eq!(tc.faces, 3);
+        assert!(tc.solid, "closed on the axis");
+        let exact = std::f64::consts::PI * 3.0 / 3.0 * (16.0 + 8.0 + 4.0);
+        let v = volume(&tc.mesh);
+        assert!((v - exact).abs() / exact < 0.02, "{v} vs {exact}");
+        assert!(tc.mesh.is_closed(1e-9));
+        // A quarter turn of a line: an open surface.
+        let l = Geometry::Line(forma_geom::LineCurve::new(p(5.0, 0.0), p(5.0, 2.0)));
+        let s = make_revolved(
+            &l,
+            Point3::ORIGIN,
+            Vec3::Z,
+            std::f64::consts::FRAC_PI_2,
+            1e-6,
+        )
+        .expect("quarter");
+        assert_eq!(s.faces, 1);
+        assert!(!s.solid);
+    }
+
+    #[test]
+    fn stretched_and_mirrored_round_solids_stay_exact_and_outward() {
+        let base = Plane::from_normal(Point3::ORIGIN, Vec3::Z);
+        let stretch = Xform::scale_axes(&base, 1.0, 2.0, 3.0);
+        let s = make_sphere(Point3::ORIGIN, 10.0).unwrap();
+        let e = baked(&s.transformed(&stretch)).expect("ellipsoid");
+        let bb = e.mesh.bounding_box().unwrap();
+        assert!((bb.max.z - 30.0).abs() < 1e-6, "{bb:?}");
+        assert!((bb.max.y - 20.0).abs() < 0.5, "{bb:?}");
+        assert!((bb.max.x - 10.0).abs() < 0.5, "{bb:?}");
+        let exact = 4.0 / 3.0 * std::f64::consts::PI * 6000.0;
+        assert!((volume(&e.mesh) - exact).abs() / exact < 0.03);
+        for (name, b) in [
+            ("cylinder", make_cylinder(&base, 2.0, 5.0).unwrap()),
+            ("cone", make_cone(&base, 2.0, 5.0).unwrap()),
+            ("sphere", s.clone()),
+            ("torus", make_torus(&base, 6.0, 1.0).unwrap()),
+        ] {
+            let v = volume(&b.mesh);
+            let x = Xform::mirror(Point3::ORIGIN, Vec3::X);
+            let (m, ..) = mesh_bytes(&b.data, Some(&x)).expect(name);
+            assert!(
+                (volume(&m) - v).abs() / v < 1e-6,
+                "{name} mirrored: {}",
+                volume(&m)
+            );
+            let (m, ..) = mesh_bytes(&b.data, Some(&stretch)).expect(name);
+            assert!((volume(&m) - 6.0 * v).abs() / v < 0.2, "{name} stretched");
+        }
     }
 
     #[test]

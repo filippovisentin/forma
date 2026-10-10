@@ -147,6 +147,14 @@ fn build_entry(o: &forma_doc::Object) -> Entry {
                 points.extend(m.positions.iter().map(|p| (*p, SnapKind::Vertex)));
             }
         }
+        Geometry::Brep(b) => {
+            // The exact corners and edge midpoints, whatever the size.
+            points.extend(b.vertices.iter().map(|p| (*p, SnapKind::End)));
+            points.extend(b.edge_mids.iter().map(|p| (*p, SnapKind::Mid)));
+            if b.mesh.positions.len() <= MAX_VERTEX_SNAPS && b.planar {
+                points.extend(b.mesh.positions.iter().map(|p| (*p, SnapKind::Vertex)));
+            }
+        }
         #[allow(unreachable_patterns)] // geometry kinds added later: no snaps yet
         _ => {}
     }

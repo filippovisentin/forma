@@ -4,7 +4,7 @@
 //! only records the transform, applied to the exact object when it is written,
 //! so a polysurface stays a polysurface when it goes back to Rhino.
 
-use crate::{Mesh, Xform};
+use crate::{Mesh, Point3, Xform};
 use std::sync::Arc;
 
 #[derive(Clone, PartialEq)]
@@ -25,6 +25,9 @@ pub struct Brep {
     /// For each face, the end of its triangles in `mesh.triangles` (faces are
     /// meshed one after the other). Empty when unknown.
     pub face_ends: Vec<u32>,
+    /// Corners of the exact object and the midpoints of its edges (snapping).
+    pub vertices: Vec<Point3>,
+    pub edge_mids: Vec<Point3>,
 }
 
 impl std::fmt::Debug for Brep {
@@ -64,6 +67,8 @@ impl Brep {
             solid: self.solid,
             planar: self.planar,
             face_ends: self.face_ends.clone(),
+            vertices: self.vertices.iter().map(|p| x.point(*p)).collect(),
+            edge_mids: self.edge_mids.iter().map(|p| x.point(*p)).collect(),
         }
     }
 }
@@ -95,7 +100,7 @@ impl Brep {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Point3, Vec3};
+    use crate::Vec3;
 
     #[test]
     fn transforms_accumulate_and_flip_triangles() {
@@ -116,6 +121,8 @@ mod tests {
             solid: false,
             planar: true,
             face_ends: vec![1],
+            vertices: Vec::new(),
+            edge_mids: Vec::new(),
         };
         assert_eq!(b.face_of_triangle(0), Some(0));
         assert_eq!(b.face_of_triangle(1), None);

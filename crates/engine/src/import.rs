@@ -52,6 +52,7 @@ pub fn open_3dm(path: &str) -> Result<Document, CommandError> {
                 Some(DisplayGeometry::Mesh(m)) => Geometry::Mesh(m),
                 Some(DisplayGeometry::Brep(b)) => Geometry::Brep(b),
                 Some(DisplayGeometry::Polyline(p)) => Geometry::Polyline(p),
+                Some(DisplayGeometry::Curve(g)) => g,
                 Some(DisplayGeometry::Point(p)) => Geometry::Point(p),
                 Some(DisplayGeometry::Text {
                     origin,

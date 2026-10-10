@@ -631,13 +631,10 @@ impl FormaApp {
             .map(|o| format!("#{}", o.id.0))
             .collect();
         let tol = doc.absolute_tolerance.max(1e-6);
-        let is_solid =
-            |g: &forma_doc::Geometry| matches!(g, forma_doc::Geometry::Mesh(m) if m.is_closed(tol));
+        let is_solid = |g: &forma_doc::Geometry| g.is_surface() && g.is_closed_solid(tol);
         let surfaces: Vec<String> = sel
             .iter()
-            .filter(|o| {
-                matches!(o.geometry, forma_doc::Geometry::Mesh(_)) && !is_solid(&o.geometry)
-            })
+            .filter(|o| o.geometry.is_surface() && !is_solid(&o.geometry))
             .map(|o| format!("#{}", o.id.0))
             .collect();
         let solids: Vec<String> = sel
@@ -680,11 +677,12 @@ impl FormaApp {
             .selection
             .iter()
             .filter_map(|id| doc.object(*id))
-            .filter_map(|o| match &o.geometry {
-                forma_doc::Geometry::Mesh(m) if m.is_closed(tol) => {
-                    m.extreme_face(dir, tol).map(|f| m.face_outline(&f, tol))
-                }
-                _ => None,
+            .filter_map(|o| {
+                let m = o
+                    .geometry
+                    .as_mesh()
+                    .filter(|_| o.geometry.is_closed_solid(tol))?;
+                m.extreme_face(dir, tol).map(|f| m.face_outline(&f, tol))
             })
             .collect()
     }
@@ -697,7 +695,7 @@ impl FormaApp {
         else {
             return false;
         };
-        let Some(forma_doc::Geometry::Mesh(m)) = doc.object(id).map(|o| &o.geometry) else {
+        let Some(m) = doc.object(id).and_then(|o| o.geometry.as_mesh()) else {
             return false;
         };
         let tol = doc.absolute_tolerance.max(1e-6);
@@ -725,7 +723,7 @@ impl FormaApp {
         };
         let doc = self.engine.doc();
         let tol = doc.absolute_tolerance.max(1e-6);
-        let Some(forma_doc::Geometry::Mesh(m)) = doc.object(f.id).map(|o| &o.geometry) else {
+        let Some(m) = doc.object(f.id).and_then(|o| o.geometry.as_mesh()) else {
             self.face_sel = None;
             return;
         };

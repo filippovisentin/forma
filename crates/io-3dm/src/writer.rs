@@ -248,20 +248,16 @@ pub fn write_document(path: impl AsRef<Path>, doc: &Document) -> Result<(), Erro
                 }
                 Geometry::Mesh(m) => write_mesh(&w, layer, m),
                 Geometry::Brep(b) => {
-                    // Apply a pending transform first (and keep solids outward).
-                    let baked = crate::exact::baked(b);
-                    let data = baked.as_ref().map_or(&b.data, |x| &x.data);
-                    match baked.is_some().then(|| {
-                        ffi::f3dm_writer_bytes(
-                            w.0,
-                            layer,
-                            data.as_ptr(),
-                            data.len(),
-                            std::ptr::null(),
-                        )
-                    }) {
-                        Some(ok) if ok != 0 => ok,
-                        _ => write_mesh(&w, layer, &b.mesh),
+                    // The exact object, with its pending transform applied.
+                    let x = b.xform16();
+                    let xp = if b.is_moved() {
+                        x.as_ptr()
+                    } else {
+                        std::ptr::null()
+                    };
+                    match ffi::f3dm_writer_bytes(w.0, layer, b.data.as_ptr(), b.data.len(), xp) {
+                        0 => write_mesh(&w, layer, &b.mesh),
+                        ok => ok,
                     }
                 }
             }

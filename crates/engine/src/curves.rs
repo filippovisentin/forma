@@ -348,9 +348,31 @@ impl Command for Join {
                 }
             }
         }
-        if meshes.len() > 1 {
-            // Flat-faced polysurfaces join into an exact polysurface; anything
-            // else (meshes, curved surfaces) into a mesh for now.
+        let breps: Vec<&forma_geom::Brep> = meshes
+            .iter()
+            .filter_map(|o| match &o.geometry {
+                Geometry::Brep(b) => Some(b),
+                _ => None,
+            })
+            .collect();
+        let exact_join = (meshes.len() > 1 && breps.len() == meshes.len())
+            .then(|| forma_io_3dm::exact::join(&breps, tol))
+            .flatten();
+        if let Some((pieces, _)) = exact_join {
+            // Surfaces and polysurfaces join exactly where their edges meet.
+            if pieces.len() < meshes.len() {
+                before += meshes.len();
+                after += pieces.len();
+                for o in &meshes {
+                    t.remove(o.id);
+                }
+                for b in pieces {
+                    result.push(t.add_like(Geometry::Brep(b), meshes[0]));
+                }
+            }
+        } else if meshes.len() > 1 {
+            // Meshes join into one mesh (flat-faced polysurfaces mixed with
+            // meshes become an exact polysurface when the result allows).
             let exact = meshes
                 .iter()
                 .all(|o| crate::exact::is_planar_brep(&o.geometry));

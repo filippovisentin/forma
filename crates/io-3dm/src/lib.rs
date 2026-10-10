@@ -93,6 +93,8 @@ pub(crate) mod ffi {
             nrm: *mut f64,
         ) -> c_int;
         pub fn f3dm_curve_points(m: *mut Model, obj: c_int) -> c_int;
+        pub fn f3dm_curve_exact(m: *const Model, obj: c_int, n: *mut usize) -> *mut f64;
+        pub fn f3dm_brep_points(m: *mut Model, obj: c_int, nverts: *mut c_int) -> c_int;
         pub fn f3dm_points_copy(m: *const Model, xyz: *mut f64, cap_points: c_int) -> c_int;
         pub fn f3dm_mesh_data(m: *mut Model, obj: c_int, nv: *mut c_int, nt: *mut c_int) -> c_int;
         pub fn f3dm_mesh_copy(m: *const Model, xyz: *mut f64, tri: *mut u32);
@@ -227,6 +229,23 @@ pub(crate) mod ffi {
             tol: f64,
             caps: *mut c_int,
             out: *mut usize,
+        ) -> *mut u8;
+        pub fn f3dm_bytes_join(
+            datas: *const *const u8,
+            lens: *const usize,
+            n: c_int,
+            tol: f64,
+            joined: *mut c_int,
+            out_len: *mut usize,
+        ) -> *mut u8;
+        pub fn f3dm_make_revolved(
+            stream: *const f64,
+            n: usize,
+            origin: *const f64,
+            axis: *const f64,
+            angle: f64,
+            tol: f64,
+            len: *mut usize,
         ) -> *mut u8;
         pub fn f3dm_make_polyhedron(
             pts: *const f64,

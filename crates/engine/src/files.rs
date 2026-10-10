@@ -590,12 +590,18 @@ mod tests {
             2,
             "{kinds:?}"
         );
+        // NURBS curves come back as the same exact NURBS curves.
         assert_eq!(
-            kinds.iter().filter(|k| **k == "polyline").count(),
+            kinds.iter().filter(|k| **k == "nurbs").count(),
             2,
             "{kinds:?}"
         );
-        // The reader imports curves as display polylines: the ellipse keeps its size.
+        let first = &f.doc().objects().next().unwrap().geometry;
+        let forma_doc::Geometry::Nurbs(n) = first else {
+            panic!("{first:?}")
+        };
+        assert_eq!(n.degree, 2);
+        assert!(n.weights.iter().any(|w| (w - 1.0).abs() > 1e-6), "rational");
         let b = f.doc().objects().next().unwrap().geometry.bounding_box();
         assert!(
             (b.max.x - 100.0).abs() < 1e-3 && (b.max.y - 40.0).abs() < 1e-3,

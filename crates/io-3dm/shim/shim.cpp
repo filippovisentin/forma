@@ -562,6 +562,28 @@ int f3dm_face_eval(const F3dmModel* m, int obj, int face, int n, const double* u
   return 1;
 }
 
+// Vertices then edge midpoints of a brep (for snapping), into the points
+// scratch buffer (fetch with f3dm_points_copy). Returns the total count;
+// *nverts gets the number of vertices.
+int f3dm_brep_points(F3dmModel* m, int obj, int* nverts) {
+  m->scratch_points.clear();
+  *nverts = 0;
+  const ON_Brep* b = brep_of(m, obj);
+  if (!b) return 0;
+  for (int i = 0; i < b->m_V.Count(); i++) {
+    const ON_3dPoint p = b->m_V[i].point;
+    m->scratch_points.insert(m->scratch_points.end(), {p.x, p.y, p.z});
+  }
+  *nverts = b->m_V.Count();
+  for (int i = 0; i < b->m_E.Count(); i++) {
+    const ON_BrepEdge& e = b->m_E[i];
+    if (!e.EdgeCurveOf()) continue;
+    const ON_3dPoint p = e.PointAt(e.Domain().Mid());
+    m->scratch_points.insert(m->scratch_points.end(), {p.x, p.y, p.z});
+  }
+  return static_cast<int>(m->scratch_points.size() / 3);
+}
+
 // Sample a curve object into a polyline. Returns the point count; fetch with
 // f3dm_points_copy.
 int f3dm_curve_points(F3dmModel* m, int obj) {
@@ -944,6 +966,76 @@ static ON_Geometry* from_bytes(const unsigned char* data, size_t len) {
   return g;
 }
 
+// Turns every surface and edge curve of a brep into NURBS so a shear or a
+// non-uniform scale can be applied exactly. Surfaces whose NURBS form has
+// another parameterization (surfaces of revolution) are accepted when all
+// their trims are straight in (u, v): the trims are mapped onto the NURBS
+// parameters. Returns false when some face cannot be converted.
+static bool nurbify(ON_Brep* b) {
+  for (int si = 0; si < b->m_S.Count(); si++) {
+    ON_Surface* s = b->m_S[si];
+    if (!s || ON_NurbsSurface::Cast(s)) continue;
+    ON_NurbsSurface* ns = ON_NurbsSurface::New();
+    const int rc = s->GetNurbForm(*ns);
+    if (rc == 0) {
+      delete ns;
+      return false;
+    }
+    std::vector<int> faces;
+    for (int fi = 0; fi < b->m_F.Count(); fi++) {
+      if (b->m_F[fi].m_si == si) faces.push_back(fi);
+    }
+    if (rc == 2) {
+      // Map the straight trims onto the new parameters.
+      for (int fi : faces) {
+        const ON_BrepFace& f = b->m_F[fi];
+        for (int li = 0; li < f.m_li.Count(); li++) {
+          const ON_BrepLoop& l = b->m_L[f.m_li[li]];
+          for (int ti = 0; ti < l.m_ti.Count(); ti++) {
+            ON_BrepTrim& t = b->m_T[l.m_ti[ti]];
+            if (!t.IsLinear(1e-9)) {
+              delete ns;
+              return false;
+            }
+            const ON_3dPoint a = t.PointAtStart(), c = t.PointAtEnd();
+            double au = 0, av = 0, cu = 0, cv = 0;
+            if (!s->GetNurbFormParameterFromSurfaceParameter(a.x, a.y, &au, &av) ||
+                !s->GetNurbFormParameterFromSurfaceParameter(c.x, c.y, &cu, &cv)) {
+              delete ns;
+              return false;
+            }
+            ON_LineCurve* line = new ON_LineCurve(ON_2dPoint(au, av), ON_2dPoint(cu, cv));
+            line->SetDomain(t.Domain()[0], t.Domain()[1]);
+            const int c2 = b->AddTrimCurve(line);
+            t.ChangeTrimCurve(c2);
+          }
+        }
+      }
+    }
+    delete s;
+    b->m_S[si] = ns;
+    for (int fi : faces) b->m_F[fi].SetProxySurface(ns);
+  }
+  for (int ci = 0; ci < b->m_C3.Count(); ci++) {
+    ON_Curve* c = b->m_C3[ci];
+    if (!c || ON_NurbsCurve::Cast(c)) continue;
+    ON_NurbsCurve* nc = ON_NurbsCurve::New();
+    if (!c->GetNurbForm(*nc)) {
+      delete nc;
+      return false;
+    }
+    nc->SetDomain(c->Domain()[0], c->Domain()[1]);
+    delete c;
+    b->m_C3[ci] = nc;
+    for (int ei = 0; ei < b->m_E.Count(); ei++) {
+      if (b->m_E[ei].m_c3i == ci) b->m_E[ei].ChangeEdgeCurve(ci);
+    }
+  }
+  b->Compact();
+  b->SetTolerancesBoxesAndFlags(false, false, false, false, true, true, true, true);
+  return true;
+}
+
 // Applies a row-major 4x4 transform (null = none). Takes ownership of `g` and
 // returns the result (possibly another object), or nullptr on failure.
 static ON_Geometry* apply_xform(ON_Geometry* g, const double* x16) {
@@ -952,7 +1044,8 @@ static ON_Geometry* apply_xform(ON_Geometry* g, const double* x16) {
   for (int i = 0; i < 4; i++)
     for (int j = 0; j < 4; j++) x.m_xform[i][j] = x16[4 * i + j];
   if (x.IsIdentity()) return g;
-  if (x.IsSimilarity() == 0) {
+  const bool mirror = x.Determinant() < 0.0;
+  if (x.IsSimilarity() == 0 || (mirror && ON_Extrusion::Cast(g))) {
     // Shears and non-uniform scales: extrusions and special surfaces must become
     // NURBS breps first.
     if (ON_Extrusion::Cast(g) || ON_Surface::Cast(g)) {
@@ -964,14 +1057,23 @@ static ON_Geometry* apply_xform(ON_Geometry* g, const double* x16) {
       delete g;
       g = b;
     }
+    if (x.IsSimilarity() == 0) {
+      ON_Brep* b = ON_Brep::Cast(g);
+      if (b && !nurbify(b)) {
+        delete g;
+        return nullptr;
+      }
+    }
     g->MakeDeformable();
   }
   if (!g->Transform(x)) {
     delete g;
     return nullptr;
   }
+  // A mirror turns every face inside out: flip them back so solids keep
+  // facing outwards (and surfaces keep their side).
   if (ON_Brep* b = ON_Brep::Cast(g)) {
-    if (b->IsSolid() && b->SolidOrientation() == -1) b->Flip();
+    if (mirror) b->Flip();
   }
   return g;
 }
@@ -1251,7 +1353,7 @@ unsigned char* f3dm_make_polyhedron(const double* pts, int npts, const int* data
       box.Set(ON_3dPoint(u, w, 0), true);
     }
     ON_PlaneSurface* srf = new ON_PlaneSurface(plane);
-    const double pad = 1e-3 * (1.0 + box.Diagonal().Length());
+    const double pad = 0.0;  // the face fits its outline exactly (tight bounding box)
     srf->SetExtents(0, ON_Interval(box.m_min.x - pad, box.m_max.x + pad), true);
     srf->SetExtents(1, ON_Interval(box.m_min.y - pad, box.m_max.y + pad), true);
     ON_BrepFace& face = b->NewFace(b->AddSurface(srf));
@@ -1593,7 +1695,7 @@ unsigned char* f3dm_bytes_capped(const unsigned char* data, size_t len, double t
       box.Set(ON_3dPoint(u, w, 0), true);
     }
     ON_PlaneSurface* srf = new ON_PlaneSurface(plane);
-    const double pad = 1e-3 * (1.0 + box.Diagonal().Length());
+    const double pad = 0.0;  // the face fits its outline exactly (tight bounding box)
     srf->SetExtents(0, ON_Interval(box.m_min.x - pad, box.m_max.x + pad), true);
     srf->SetExtents(1, ON_Interval(box.m_min.y - pad, box.m_max.y + pad), true);
     ON_BrepFace& face = b->NewFace(b->AddSurface(srf));
@@ -1620,6 +1722,253 @@ unsigned char* f3dm_bytes_capped(const unsigned char* data, size_t len, double t
   }
   b->SetTolerancesBoxesAndFlags(false, false, false, false, true, true, true, true);
   return brep_bytes(b, out_len);
+}
+
+}  // extern "C"
+
+extern "C" {
+
+static bool line_or_arc(const ON_Curve& c) {
+  ON_Arc arc;
+  return c.IsLinear(1e-9) || (c.IsArc(nullptr, &arc, 1e-9) && arc.Radius() > 0.0);
+}
+
+// Segments of a curve: lines and arcs as they are, anything else one NURBS.
+static void curve_segments(const ON_Curve& c, std::vector<const ON_Curve*>& out, bool* all) {
+  if (const ON_PolyCurve* pc = ON_PolyCurve::Cast(&c)) {
+    for (int i = 0; i < pc->Count(); i++) {
+      if (const ON_Curve* s = pc->SegmentCurve(i)) curve_segments(*s, out, all);
+    }
+    return;
+  }
+  if (!line_or_arc(c) && !ON_PolylineCurve::Cast(&c)) *all = false;
+  out.push_back(&c);
+}
+
+// A curve object as a segment stream (count, then segments; see read_loop):
+// lines and arcs exactly, polylines as lines, other curves as one NURBS curve.
+double* f3dm_curve_exact(const F3dmModel* m, int obj, size_t* n) {
+  *n = 0;
+  if (obj < 0 || static_cast<size_t>(obj) >= m->geometry.size()) return nullptr;
+  const ON_Curve* c = ON_Curve::Cast(m->geometry[obj]);
+  if (!c) return nullptr;
+  std::vector<const ON_Curve*> segs;
+  bool all = true;
+  curve_segments(*c, segs, &all);
+  std::vector<double> out{0.0};
+  int count = 0;
+  if (!all) {
+    push_curve(*c, out);  // not a line or an arc: its NURBS form
+    count = out.size() > 1 ? 1 : 0;
+  } else {
+    for (const ON_Curve* s : segs) {
+      if (const ON_PolylineCurve* pl = ON_PolylineCurve::Cast(s)) {
+        for (int i = 0; i + 1 < pl->m_pline.Count(); i++) {
+          const ON_3dPoint a = pl->m_pline[i], b = pl->m_pline[i + 1];
+          if (a.DistanceTo(b) <= 0.0) continue;
+          out.insert(out.end(), {0.0, a.x, a.y, a.z, b.x, b.y, b.z});
+          count++;
+        }
+        continue;
+      }
+      const size_t before = out.size();
+      push_curve(*s, out);
+      if (out.size() > before) count++;
+    }
+  }
+  out[0] = count;
+  double* r = static_cast<double*>(std::malloc(out.size() * sizeof(double)));
+  if (!r) return nullptr;
+  std::memcpy(r, out.data(), out.size() * sizeof(double));
+  *n = out.size();
+  return r;
+}
+
+}  // extern "C"
+
+extern "C" {
+
+// True when the curves coincide within `tol` (b sampled densely, a checked
+// against it), ignoring direction.
+static bool same_place(const ON_Curve& a, const ON_Curve& b, double tol) {
+  std::vector<ON_3dPoint> pts;
+  const ON_Interval db = b.Domain();
+  for (int i = 0; i <= 64; i++) pts.push_back(b.PointAt(db.ParameterAt(i / 64.0)));
+  double chord = 0.0;
+  for (size_t i = 1; i < pts.size(); i++) chord = (std::max)(chord, pts[i].DistanceTo(pts[i - 1]));
+  const ON_Interval da = a.Domain();
+  for (double k : {0.2, 0.5, 0.8}) {
+    const ON_3dPoint p = a.PointAt(da.ParameterAt(k));
+    double best = 1e300;
+    for (size_t i = 1; i < pts.size(); i++) {
+      const ON_Line l(pts[i - 1], pts[i]);
+      double t = 0;
+      l.ClosestPointTo(p, &t);
+      t = (std::max)(0.0, (std::min)(1.0, t));
+      best = (std::min)(best, p.DistanceTo(l.PointAt(t)));
+    }
+    if (best > tol + 0.02 * chord) return false;
+  }
+  return true;
+}
+
+// Reverses edge `ei` (a new edge with the reversed curve takes its trims).
+// Returns the index of the new edge.
+static int reverse_edge(ON_Brep* b, int ei) {
+  ON_Curve* c = b->m_E[ei].DuplicateCurve();
+  if (!c) return -1;
+  c->Reverse();
+  const int v0 = b->m_E[ei].m_vi[1], v1 = b->m_E[ei].m_vi[0];
+  const int c3 = b->AddEdgeCurve(c);
+  ON_BrepEdge& ne = b->NewEdge(b->m_V[v0], b->m_V[v1], c3);
+  ne.m_tolerance = b->m_E[ei].m_tolerance;
+  const int ni = ne.m_edge_index;
+  ON_SimpleArray<int> trims = b->m_E[ei].m_ti;
+  for (int k = 0; k < trims.Count(); k++) {
+    ON_BrepTrim& t = b->m_T[trims[k]];
+    t.m_ei = ni;
+    t.m_bRev3d = !t.m_bRev3d;
+    t.SetProxyCurve(t.ProxyCurve());  // unchanged 2D curve
+    b->m_E[ni].m_ti.Append(trims[k]);
+  }
+  b->m_E[ei].m_ti.Empty();
+  b->DeleteEdge(b->m_E[ei], false);
+  return ni;
+}
+
+// Joins coincident naked edges of a brep (Rhino's Join): coincident vertices
+// are merged, then naked edges lying on top of each other become one edge.
+// Returns the number of edges joined.
+static int join_naked_edges(ON_Brep* b, double tol) {
+  for (int i = 0; i < b->m_V.Count(); i++) {
+    if (b->m_V[i].m_vertex_index < 0) continue;
+    for (int j = i + 1; j < b->m_V.Count(); j++) {
+      if (b->m_V[j].m_vertex_index < 0) continue;
+      if (b->m_V[i].point.DistanceTo(b->m_V[j].point) <= tol) {
+        b->CombineCoincidentVertices(b->m_V[i], b->m_V[j]);
+      }
+    }
+  }
+  int joined = 0;
+  for (int i = 0; i < b->m_E.Count(); i++) {
+    if (b->m_E[i].m_edge_index < 0 || b->m_E[i].m_ti.Count() != 1) continue;
+    for (int j = i + 1; j < b->m_E.Count(); j++) {
+      if (b->m_E[j].m_edge_index < 0 || b->m_E[j].m_ti.Count() != 1) continue;
+      const int a0 = b->m_E[i].m_vi[0], a1 = b->m_E[i].m_vi[1];
+      const int b0 = b->m_E[j].m_vi[0], b1 = b->m_E[j].m_vi[1];
+      const bool same = a0 == b0 && a1 == b1;
+      const bool opposite = a0 == b1 && a1 == b0;
+      if (!same && !opposite) continue;
+      if (!same_place(b->m_E[i], b->m_E[j], tol)) continue;
+      // Direction: compare the points a quarter along each edge.
+      const ON_3dPoint pi = b->m_E[i].PointAt(b->m_E[i].Domain().ParameterAt(0.25));
+      const ON_3dPoint pj = b->m_E[j].PointAt(b->m_E[j].Domain().ParameterAt(0.25));
+      const ON_3dPoint qj = b->m_E[j].PointAt(b->m_E[j].Domain().ParameterAt(0.75));
+      const bool closed = a0 == a1;
+      const bool same_dir = closed ? pi.DistanceTo(pj) <= pi.DistanceTo(qj) : same;
+      int jj = j;
+      if (!same_dir) {
+        jj = reverse_edge(b, j);
+        if (jj < 0) continue;
+      }
+      if (b->CombineCoincidentEdges(b->m_E[i], b->m_E[jj])) {
+        joined++;
+        break;
+      }
+    }
+  }
+  for (int i = 0; i < b->m_E.Count(); i++) {
+    if (!(b->m_E[i].m_tolerance >= 0.0)) b->m_E[i].m_tolerance = tol;
+  }
+  for (int i = 0; i < b->m_V.Count(); i++) {
+    if (!(b->m_V[i].m_tolerance >= 0.0)) b->m_V[i].m_tolerance = tol;
+  }
+  b->Compact();
+  b->SetTolerancesBoxesAndFlags(false, false, false, false, true, true, true, true);
+  return joined;
+}
+
+// Breps from bytes joined into polysurfaces where their naked edges meet.
+// Output: count (u64), then per piece its length (u64) and bytes.
+unsigned char* f3dm_bytes_join(const unsigned char* const* datas, const size_t* lens, int n,
+                               double tol, int* joined, size_t* out_len) {
+  *out_len = 0;
+  *joined = 0;
+  ON_Brep all;
+  for (int i = 0; i < n; i++) {
+    ON_Brep* b = brep_from_bytes(datas[i], lens[i]);
+    if (!b) continue;
+    all.Append(*b);
+    delete b;
+  }
+  if (all.m_F.Count() == 0) return nullptr;
+  *joined = join_naked_edges(&all, tol);
+  ON_SimpleArray<ON_Brep*> parts;
+  if (all.GetConnectedComponents(parts, false) == 0) parts.Append(all.Duplicate());
+  std::vector<unsigned char> out(8, 0);
+  uint64_t count = 0;
+  for (int i = 0; i < parts.Count(); i++) {
+    size_t len = 0;
+    unsigned char* bytes = brep_bytes(parts[i], &len);  // deletes the part
+    if (!bytes) continue;
+    const uint64_t l = len;
+    out.insert(out.end(), reinterpret_cast<const unsigned char*>(&l),
+               reinterpret_cast<const unsigned char*>(&l) + 8);
+    out.insert(out.end(), bytes, bytes + len);
+    std::free(bytes);
+    count++;
+  }
+  std::memcpy(out.data(), &count, 8);
+  unsigned char* r = static_cast<unsigned char*>(std::malloc(out.size()));
+  if (!r) return nullptr;
+  std::memcpy(r, out.data(), out.size());
+  *out_len = out.size();
+  return r;
+}
+
+// Surface of revolution of a profile (segment stream, see read_loop) around
+// the axis through `origin` along `axis`, by `angle` radians: one face per
+// segment, joined (closed solid when the profile closes on the axis).
+unsigned char* f3dm_make_revolved(const double* stream, size_t n, const double* origin,
+                                  const double* axis, double angle, double tol, size_t* len) {
+  *len = 0;
+  size_t k = 0;
+  ON_SimpleArray<ON_Curve*> curves;
+  if (!read_loop(stream, n, &k, curves)) {
+    for (int i = 0; i < curves.Count(); i++) delete curves[i];
+    return nullptr;
+  }
+  const ON_3dPoint o(origin);
+  const ON_Line ax(o, o + ON_3dVector(axis));
+  ON_Brep* all = new ON_Brep();
+  for (int i = 0; i < curves.Count(); i++) {
+    // Segments lying on the axis sweep nothing.
+    if (ax.DistanceTo(curves[i]->PointAtStart()) <= tol &&
+        ax.DistanceTo(curves[i]->PointAtEnd()) <= tol &&
+        ax.DistanceTo(curves[i]->PointAt(curves[i]->Domain().Mid())) <= tol) {
+      delete curves[i];
+      continue;
+    }
+    ON_RevSurface* rs = ON_RevSurface::New();
+    rs->m_curve = curves[i];
+    rs->m_axis = ax;
+    rs->m_angle = ON_Interval(0.0, angle);
+    rs->m_t = rs->m_angle;
+    rs->BoundingBox();
+    ON_Surface* s = rs;
+    ON_Brep f;
+    if (!f.Create(s)) {
+      delete s;
+      continue;
+    }
+    all->Append(f);
+  }
+  if (all->m_F.Count() == 0) {
+    delete all;
+    return nullptr;
+  }
+  join_naked_edges(all, tol);
+  return brep_bytes(all, len);
 }
 
 }  // extern "C"

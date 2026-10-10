@@ -9,7 +9,7 @@
 //! - `CPlane` alone starts the three-point tool.
 
 use crate::{tools, FormaApp, LogKind};
-use forma_doc::{Geometry, ObjectId};
+use forma_doc::ObjectId;
 use forma_engine::parse_point;
 use forma_geom::{Plane, Point3, Vec3};
 use forma_render::glam::DVec3;
@@ -104,7 +104,7 @@ impl FormaApp {
             .map_err(|_| format!("not an object id: {id}"))?;
         let p = parse_point(p, None).map_err(|e| e.to_string())?;
         let doc = self.engine.doc();
-        let Some(Geometry::Mesh(m)) = doc.object(ObjectId(id)).map(|o| &o.geometry) else {
+        let Some(m) = doc.object(ObjectId(id)).and_then(|o| o.geometry.as_mesh()) else {
             return Err(format!("#{id} is not a solid or mesh"));
         };
         let tol = self.engine.ctx.tolerance.absolute;

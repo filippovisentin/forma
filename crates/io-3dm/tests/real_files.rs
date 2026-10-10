@@ -37,8 +37,9 @@ fn binario() {
     assert_eq!(s.layers.len(), 9);
     assert_eq!(s.material_count, 4);
     assert_eq!(s.block_count, 3);
+    // Every brep and the 5 extrusions are closed solids.
     let solids = s.objects.iter().filter(|o| o.is_solid).count();
-    assert_eq!(solids, 256);
+    assert_eq!(solids, 256 + 5);
 }
 
 #[test]
@@ -82,12 +83,24 @@ fn gggg_display() {
     let imp = import_display(p).unwrap();
     let elapsed = t.elapsed();
     let mut meshes = 0;
+    let mut breps = 0;
     let mut tris = 0;
     let mut lines = 0;
     let mut texts = 0;
     let mut missing = std::collections::BTreeMap::new();
     for o in &imp.objects {
         match &o.geometry {
+            Some(DisplayGeometry::Brep(b)) => {
+                breps += 1;
+                meshes += 1;
+                tris += b.mesh.triangles.len();
+                assert!(!b.data.is_empty());
+                assert!(b
+                    .mesh
+                    .positions
+                    .iter()
+                    .all(|p| p.x.is_finite() && p.y.is_finite() && p.z.is_finite()));
+            }
             Some(DisplayGeometry::Mesh(m)) => {
                 meshes += 1;
                 tris += m.triangles.len();
@@ -96,12 +109,18 @@ fn gggg_display() {
                     .iter()
                     .all(|p| p.x.is_finite() && p.y.is_finite() && p.z.is_finite()));
             }
-            Some(DisplayGeometry::Polyline(_) | DisplayGeometry::Point(_)) => lines += 1,
+            Some(
+                DisplayGeometry::Polyline(_)
+                | DisplayGeometry::Point(_)
+                | DisplayGeometry::Curve(_),
+            ) => lines += 1,
             Some(DisplayGeometry::Text { .. }) => texts += 1,
             None => *missing.entry(format!("{:?}", o.kind)).or_insert(0) += 1,
         }
     }
-    eprintln!("gggg: {meshes} meshes ({tris} triangles), {lines} polylines, not displayed: {missing:?}, {elapsed:?}");
+    eprintln!("gggg: {meshes} meshes ({breps} exact, {tris} triangles), {lines} polylines, not displayed: {missing:?}, {elapsed:?}");
+    // Breps and extrusions stay exact (only real meshes are meshes).
+    assert_eq!(breps, 262 + 368);
     assert_eq!(imp.layers.len(), 14);
     assert_eq!(
         meshes + lines + texts + missing.values().sum::<usize>(),

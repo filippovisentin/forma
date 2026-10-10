@@ -19,6 +19,16 @@ fn main() {
                     o.layer.map_or("?", |l| imp.layers[l].name.as_str())
                 ),
             )),
+            Some(DisplayGeometry::Brep(b)) => Some((
+                b.mesh.triangles.len(),
+                i,
+                format!(
+                    "{:?} ({} faces) on {}",
+                    o.kind,
+                    b.faces,
+                    o.layer.map_or("?", |l| imp.layers[l].name.as_str())
+                ),
+            )),
             _ => None,
         })
         .collect();

@@ -13,6 +13,22 @@ use forma_geom::{
     torus_mesh, tube_mesh, Chain, Mesh, Plane, Point3, Vec3, Xform,
 };
 
+/// Adds an exact surface / solid, or the mesh when it could not be made.
+fn added_exact(
+    ctx: &mut Context,
+    exact: Option<forma_geom::Brep>,
+    mesh: impl FnOnce() -> Mesh,
+    what: &str,
+) -> CommandResult {
+    match exact {
+        Some(b) => {
+            let ids = finish(ctx, vec![Geometry::Brep(b)], false)?;
+            Ok(format!("added #{} {what}", ids[0].0))
+        }
+        None => added(ctx, mesh(), what),
+    }
+}
+
 fn added(ctx: &mut Context, m: Mesh, what: &str) -> CommandResult {
     if m.triangles.is_empty() {
         return Err(CommandError::Invalid(format!("{what}: degenerate result")));
@@ -47,7 +63,11 @@ impl Command for PlaneSrf {
             pts.reverse();
         }
         ctx.last_point = Some(b);
-        added(ctx, planar_mesh(&pts, &[], plane.z), "plane")
+        let mut outline = pts.clone();
+        outline.push(pts[0]);
+        let exact =
+            forma_io_3dm::exact::make_planar(&Geometry::Polyline(outline), &[], plane.z, None);
+        added_exact(ctx, exact, || planar_mesh(&pts, &[], plane.z), "plane")
     }
 }
 
@@ -146,9 +166,13 @@ impl Command for Cone {
         let r = positive(args.number("radius")?, "radius", ctx)?.abs();
         let h = positive(args.number("height")?, "height", ctx)?;
         let n = args.optional_vector().unwrap_or(Vec3::Z);
-        added(
+        // Apex above the base (below for a negative height).
+        let base = Plane::from_normal(c, if h < 0.0 { -n } else { n });
+        let exact = forma_io_3dm::exact::make_cone(&base, r, h.abs());
+        added_exact(
             ctx,
-            cone_mesh(&Plane::from_normal(c, n), r, 0.0, h, 64),
+            exact,
+            || cone_mesh(&Plane::from_normal(c, n), r, 0.0, h, 64),
             "cone",
         )
     }
@@ -168,9 +192,25 @@ impl Command for TCone {
         let r1 = args.number("top radius")?.abs();
         let h = positive(args.number("height")?, "height", ctx)?;
         let n = args.optional_vector().unwrap_or(Vec3::Z);
-        added(
+        let plane = Plane::from_normal(c, n);
+        // Exact: the profile (axis, base radius, slanted side, top radius)
+        // revolved around the axis.
+        let top = c + plane.z * h;
+        let mut profile = vec![c, c + plane.x * r0, top + plane.x * r1];
+        if r1 > ctx.tolerance.absolute {
+            profile.push(top);
+        }
+        let exact = forma_io_3dm::exact::make_revolved(
+            &Geometry::Polyline(profile),
+            c,
+            plane.z,
+            std::f64::consts::TAU,
+            ctx.doc.absolute_tolerance.max(1e-9),
+        );
+        added_exact(
             ctx,
-            cone_mesh(&Plane::from_normal(c, n), r0, r1, h, 64),
+            exact,
+            || cone_mesh(&plane, r0, r1, h, 64),
             "truncated cone",
         )
     }
@@ -194,11 +234,9 @@ impl Command for Torus {
             ));
         }
         let n = args.optional_vector().unwrap_or(Vec3::Z);
-        added(
-            ctx,
-            torus_mesh(&Plane::from_normal(c, n), r, s, 64),
-            "torus",
-        )
+        let plane = Plane::from_normal(c, n);
+        let exact = forma_io_3dm::exact::make_torus(&plane, r, s);
+        added_exact(ctx, exact, || torus_mesh(&plane, r, s, 64), "torus")
     }
 }
 
@@ -216,9 +254,15 @@ impl Command for Ellipsoid {
         let ry = positive(args.number("y radius")?, "y radius", ctx)?.abs();
         let rz = positive(args.number("z radius")?, "z radius", ctx)?.abs();
         let n = args.optional_vector().unwrap_or(Vec3::Z);
-        added(
+        let plane = Plane::from_normal(c, n);
+        // A unit sphere stretched along the plane axes (exact NURBS).
+        let stretch = Xform::scale_axes(&plane, rx, ry, rz);
+        let exact = forma_io_3dm::exact::make_sphere(c, 1.0)
+            .and_then(|s| forma_io_3dm::exact::baked(&s.transformed(&stretch)));
+        added_exact(
             ctx,
-            ellipsoid_mesh(&Plane::from_normal(c, n), rx, ry, rz, 48),
+            exact,
+            || ellipsoid_mesh(&plane, rx, ry, rz, 48),
             "ellipsoid",
         )
     }
@@ -253,7 +297,10 @@ impl Command for Pyramid {
                     .point(start)
             })
             .collect();
-        added(ctx, pyramid_mesh(&base, c + plane.z * h), "pyramid")
+        let m = pyramid_mesh(&base, c + plane.z * h);
+        let tol = ctx.doc.absolute_tolerance.max(1e-9);
+        let exact = forma_io_3dm::exact::polyhedron_brep(&m, tol, 2000);
+        added_exact(ctx, exact, || m, "pyramid")
     }
 }
 
@@ -274,11 +321,22 @@ impl Command for Tube {
         }
         let h = positive(args.number("height")?, "height", ctx)?;
         let n = args.optional_vector().unwrap_or(Vec3::Z);
-        added(
-            ctx,
-            tube_mesh(&Plane::from_normal(c, n), r0, r1, h, 64),
-            "tube",
-        )
+        let plane = Plane::from_normal(c, n);
+        // Exact: the ring between the two circles, extruded.
+        let base = if h < 0.0 {
+            Plane::from_normal(c + plane.z * h, n)
+        } else {
+            plane
+        };
+        let (outer, inner) = (r0.max(r1), r0.min(r1));
+        let circle = |r| Geometry::Arc(forma_geom::CircleArc::circle(base, r));
+        let exact = forma_io_3dm::exact::make_planar(
+            &circle(outer),
+            &[&circle(inner)],
+            base.z,
+            Some(base.z * h.abs()),
+        );
+        added_exact(ctx, exact, || tube_mesh(&plane, r0, r1, h, 64), "tube")
     }
 }
 
@@ -547,6 +605,45 @@ impl Command for Slab {
             let (Some(a), Some(b)) = (side_chain(d_a), side_chain(d_b)) else {
                 continue;
             };
+            // Exact: the outline of the slab (a ring for closed curves) extruded.
+            let exact = if c.geometry.is_closed_curve() {
+                let (ga, gb) = (
+                    Geometry::from_chain(a.clone()),
+                    Geometry::from_chain(b.clone()),
+                );
+                match (ga, gb) {
+                    (Some(ga), Some(gb)) => {
+                        let (pa, pb) = (strip_closing(a.points()), strip_closing(b.points()));
+                        let (outer, inner) = if forma_geom::newell_area(&pa).length()
+                            >= forma_geom::newell_area(&pb).length()
+                        {
+                            (ga, gb)
+                        } else {
+                            (gb, ga)
+                        };
+                        forma_io_3dm::exact::make_planar(
+                            &outer,
+                            &[&inner],
+                            plane.z,
+                            Some(plane.z * h),
+                        )
+                    }
+                    _ => None,
+                }
+            } else {
+                let mut segs = a.segs.clone();
+                let back = b.reversed();
+                segs.push(forma_geom::Seg::Line(a.end(), back.start()));
+                segs.extend(back.segs.iter().copied());
+                segs.push(forma_geom::Seg::Line(back.end(), a.start()));
+                Geometry::from_chain(Chain::new(segs)).and_then(|outline| {
+                    forma_io_3dm::exact::make_planar(&outline, &[], plane.z, Some(plane.z * h))
+                })
+            };
+            if let Some(s) = exact {
+                out.push((Geometry::Brep(s), c));
+                continue;
+            }
             let mesh = if c.geometry.is_closed_curve() {
                 // A ring between the two closed offsets.
                 let (pa, pb) = (strip_closing(a.points()), strip_closing(b.points()));
@@ -641,9 +738,9 @@ mod tests {
     use std::f64::consts::PI;
 
     fn last_mesh(e: &Engine) -> forma_geom::Mesh {
-        match &e.doc().objects().last().unwrap().geometry {
-            Geometry::Mesh(m) => m.clone(),
-            g => panic!("{g:?}"),
+        match e.doc().objects().last().unwrap().geometry.as_mesh() {
+            Some(m) => m.clone(),
+            None => panic!("no faces"),
         }
     }
 
@@ -686,22 +783,33 @@ mod tests {
     fn round_solids() {
         let mut e = Engine::new();
         e.run_line("Cone 0,0 10 30").unwrap();
+        // Exact solids; their display meshes are within 1% of the volume.
+        let kind = |e: &Engine| e.doc().objects().last().unwrap().geometry.kind();
+        assert_eq!(kind(&e), "polysurface");
         let v = last_mesh(&e).volume();
-        assert!((v - PI * 100.0 * 10.0).abs() / v < 5e-3, "{v}");
+        assert!((v - PI * 100.0 * 10.0).abs() / v < 1e-2, "{v}");
         e.run_line("TCone 0,0 10 5 30").unwrap();
+        assert_eq!(kind(&e), "polysurface");
         assert!(last_mesh(&e).is_closed(1e-6));
+        let v = last_mesh(&e).volume();
+        let exact = PI * 30.0 / 3.0 * (100.0 + 50.0 + 25.0);
+        assert!((v - exact).abs() / exact < 1e-2, "{v}");
         e.run_line("Torus 0,0 20 5").unwrap();
         assert!(last_mesh(&e).is_closed(1e-6));
         assert!(e.run_line("Torus 0,0 5 20").is_err());
         e.run_line("Ellipsoid 0,0 10 20 30").unwrap();
         let b = last_mesh(&e).bounding_box().unwrap();
-        assert!((b.max.z - 30.0).abs() < 1e-6 && (b.max.y - 20.0).abs() < 1e-3);
+        assert!(
+            (b.max.z - 30.0).abs() < 1e-3 && (b.max.y - 20.0).abs() < 0.5,
+            "{b:?}"
+        );
         e.run_line("Pyramid 0,0 10,0 4 30").unwrap();
         let v = last_mesh(&e).volume();
         assert!((v - 200.0 * 30.0 / 3.0).abs() < 1e-6, "{v}");
         e.run_line("Tube 0,0 10 8 100").unwrap();
+        assert_eq!(kind(&e), "polysurface");
         let v = last_mesh(&e).volume();
-        assert!((v - PI * 36.0 * 100.0).abs() / v < 5e-3, "{v}");
+        assert!((v - PI * 36.0 * 100.0).abs() / v < 1e-2, "{v}");
         assert!(e.run_line("Tube 0,0 10 10 100").is_err());
         assert_eq!(e.doc().len(), 6);
     }

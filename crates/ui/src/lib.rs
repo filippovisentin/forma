@@ -246,7 +246,7 @@ impl SelFilter {
     fn accepts(self, g: &forma_doc::Geometry) -> bool {
         match g {
             forma_doc::Geometry::Point(_) => self.points,
-            forma_doc::Geometry::Mesh(_) => self.surfaces,
+            forma_doc::Geometry::Mesh(_) | forma_doc::Geometry::Brep(_) => self.surfaces,
             _ => self.curves,
         }
     }
