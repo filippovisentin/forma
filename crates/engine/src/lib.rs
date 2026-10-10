@@ -37,6 +37,7 @@ mod curves;
 mod edit;
 mod files;
 mod import;
+mod kernel;
 mod select;
 mod solid;
 mod surfaces;

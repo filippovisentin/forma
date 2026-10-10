@@ -103,6 +103,10 @@ enum SidePanel {
     Help,
 }
 
+/// Usage shown when FilletEdge is started from a menu or toolbar.
+const FILLET_USAGE: &str =
+    "FilletEdge: select the solid, type the radius and points near the edges (x,y,z …), Enter";
+
 /// A menu / toolbar action, applied after the UI pass.
 #[derive(Clone, Copy)]
 enum Act {
@@ -2705,16 +2709,17 @@ impl FormaApp {
                 }
                 if self.tab == 8 {
                     ui.separator();
-                    for b in [
-                        "BooleanUnion",
-                        "BooleanDifference",
-                        "BooleanIntersection",
-                        "FilletEdge",
-                    ] {
-                        ui.add_enabled(false, egui::Button::new(b))
-                            .on_disabled_hover_text(
-                                "Needs the solid kernel (OpenCascade), planned for a next version",
-                            );
+                    for b in ["BooleanUnion", "BooleanDifference", "BooleanIntersection"] {
+                        if ui
+                            .button(b)
+                            .on_hover_text("Runs on the selected solids (lowest id = base)")
+                            .clicked()
+                        {
+                            act = Some(Act::Tool(ToolKind::OnSel(b)));
+                        }
+                    }
+                    if ui.button("FilletEdge").clicked() {
+                        act = Some(Act::Prefill("FilletEdge ", FILLET_USAGE));
                     }
                 }
                 if self.tab == 5 {
@@ -2757,12 +2762,6 @@ impl FormaApp {
                 *act = Some(Act::Tool(k));
                 ui.close();
             }
-        };
-        let kernel = |ui: &mut egui::Ui, label: &str| {
-            ui.add_enabled(false, egui::Button::new(label))
-                .on_disabled_hover_text(
-                    "Needs the solid kernel (OpenCascade), planned for a next version",
-                );
         };
         use ToolKind as K;
         egui::MenuBar::new().ui(ui, |ui| {
@@ -2967,7 +2966,13 @@ impl FormaApp {
                 tool(ui, &mut act, "Revolve", K::Revolve);
                 tool(ui, &mut act, "Sweep 1 Rail", K::Sweep1);
                 ui.separator();
-                kernel(ui, "Offset Surface");
+                if ui.button("Offset Surface (solids)").clicked() {
+                    act = Some(Act::Prefill(
+                        "OffsetSrf ",
+                        "OffsetSrf: type the distance (positive = outwards) for the selected solids, Enter",
+                    ));
+                    ui.close();
+                }
                 ui.label(
                     egui::RichText::new("Surfaces are meshes until the NURBS kernel lands")
                         .small()
@@ -2996,10 +3001,13 @@ impl FormaApp {
                 }
                 tool(ui, &mut act, "Cap Planar Holes", K::OnSel("Cap"));
                 ui.separator();
-                kernel(ui, "Union");
-                kernel(ui, "Difference");
-                kernel(ui, "Intersection");
-                kernel(ui, "Fillet Edge");
+                tool(ui, &mut act, "Union", K::OnSel("BooleanUnion"));
+                tool(ui, &mut act, "Difference", K::OnSel("BooleanDifference"));
+                tool(ui, &mut act, "Intersection", K::OnSel("BooleanIntersection"));
+                if ui.button("Fillet Edge").clicked() {
+                    act = Some(Act::Prefill("FilletEdge ", FILLET_USAGE));
+                    ui.close();
+                }
             });
             ui.menu_button("Transform", |ui| {
                 tool(ui, &mut act, "Move", K::Move);

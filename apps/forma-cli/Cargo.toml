@@ -4,8 +4,14 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[features]
+# Solid kernel (BooleanUnion, FilletEdge, Shell…). Release builds turn it on; see
+# docs/adr/0004-occt-crates.md for build times and FORMA_OCCT_DIR.
+occt = ["forma-geom/occt"]
+
 [dependencies]
 forma-engine.workspace = true
+forma-geom.workspace = true
 forma-doc.workspace = true
 forma-io-3dm.workspace = true
 forma-render.workspace = true

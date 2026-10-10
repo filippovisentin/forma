@@ -1,6 +1,8 @@
 //! Dev automation. `cargo xtask ci` is the gate every agent must pass.
 //!
 //! - `cargo xtask ci`        fmt check, clippy -D warnings, tests, layering
+//! - `cargo xtask ci --occt` the same with the OpenCascade solid kernel
+//!   (`forma-geom/occt`; set `FORMA_OCCT_DIR` to reuse an OCCT build)
 //! - `cargo xtask layering`  check that crates only depend on lower layers
 
 use std::path::Path;
@@ -97,17 +99,20 @@ fn cargo(args: &[&str]) -> Result<(), String> {
     }
 }
 
-fn ci() -> Result<(), String> {
+fn ci(occt: bool) -> Result<(), String> {
+    let features: &[&str] = if occt {
+        &["--features", "forma-geom/occt"]
+    } else {
+        &[]
+    };
     cargo(&["fmt", "--all", "--check"])?;
-    cargo(&[
-        "clippy",
-        "--workspace",
-        "--all-targets",
-        "--",
-        "-D",
-        "warnings",
-    ])?;
-    cargo(&["test", "--workspace"])?;
+    let mut clippy = vec!["clippy", "--workspace", "--all-targets"];
+    clippy.extend_from_slice(features);
+    clippy.extend_from_slice(&["--", "-D", "warnings"]);
+    cargo(&clippy)?;
+    let mut test = vec!["test", "--workspace"];
+    test.extend_from_slice(features);
+    cargo(&test)?;
     layering()
 }
 
@@ -118,10 +123,11 @@ fn main() -> ExitCode {
         .expect("workspace root");
     std::env::set_current_dir(root).expect("chdir to workspace root");
 
+    let occt = std::env::args().skip(2).any(|a| a == "--occt");
     let result = match std::env::args().nth(1).as_deref() {
-        Some("ci") => ci(),
+        Some("ci") => ci(occt),
         Some("layering") => layering(),
-        _ => Err("usage: cargo xtask <ci|layering>".into()),
+        _ => Err("usage: cargo xtask <ci [--occt]|layering>".into()),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,

@@ -42,6 +42,9 @@ agents, with Filippo as architect, reviewer and only user. Read `ARCHITECTURE.md
 
 - After cloning: `git submodule update --init --depth 1` (openNURBS, see ADR 0002).
 - A C++ toolchain and CMake are required; the first build of `forma-io-3dm` takes ~2 min.
+- The solid kernel (OpenCascade) is behind feature `occt` (`cargo xtask ci --occt`,
+  `cargo run -p forma --features occt`). Its first build takes ~1 h; set `FORMA_OCCT_DIR` to
+  an existing OCCT build (`include/` + `lib/`) to reuse it (ADR 0004).
 - Filippo's real models live in `tests/data/private/` (git-ignored). Tests that need them
   skip themselves when the files are missing; never commit them.
 - `cargo run -p forma-cli -- info model.3dm` prints a summary of any `.3dm` file.

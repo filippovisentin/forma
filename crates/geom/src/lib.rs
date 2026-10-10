@@ -7,6 +7,7 @@
 mod arc;
 mod curve;
 mod faces;
+mod kernel;
 mod nurbs;
 mod plane;
 mod solids;
@@ -19,6 +20,10 @@ pub use curve::{
     offset, side_of, split, trim, Chain, CurveError, ExtendTo, Seg,
 };
 pub use faces::MeshFace;
+pub use kernel::{
+    fillet_edges, offset_solid, rebuild_solid, shell_solid, solid_boolean, solid_info, BooleanOp,
+    KernelError, SolidInfo, SolidOptions, KERNEL_AVAILABLE,
+};
 pub use nurbs::{Bezier2, NurbsCurve};
 pub use plane::Plane;
 pub use solids::{box_mesh, cylinder_mesh, extrude_mesh, sphere_mesh, triangulate_polygon};

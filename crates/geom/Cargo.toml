@@ -4,4 +4,14 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[features]
+# OpenCascade solid kernel (booleans, fillets, shells). Builds OCCT from source the
+# first time (~1 h on 2 cores) unless FORMA_OCCT_DIR points at an existing build.
+# See docs/adr/0001-geometry-kernel.md and docs/adr/0004-occt-crates.md.
+occt = ["dep:occt-sys", "dep:cc"]
+
 [dependencies]
+
+[build-dependencies]
+occt-sys = { version = "=7.8.1", optional = true }
+cc = { version = "1", optional = true }
