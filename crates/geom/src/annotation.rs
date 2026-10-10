@@ -31,13 +31,16 @@ pub enum DimKind {
     Radius,
     Diameter,
     Angle,
+    /// Leader: an arrow polyline with a text at its last point.
+    Leader,
 }
 
 /// A dimension. Point meaning by kind:
 /// - `Linear`, `Aligned`: `[first point, second point, point on dimension line]`,
 ///   measured along `plane.x`;
 /// - `Radius`, `Diameter`: `[centre, point on the circle, leader end]`;
-/// - `Angle`: `[vertex, point on first ray, point on second ray, point on arc]`.
+/// - `Angle`: `[vertex, point on first ray, point on second ray, point on arc]`;
+/// - `Leader`: the polyline from the arrow tip to the text (text in `text`).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Dimension {
     pub kind: DimKind,
@@ -225,6 +228,18 @@ impl Dimension {
         })
     }
 
+    /// Leader through `points` (arrow at the first one) with `text` at the end.
+    pub fn leader(plane: &Plane, points: Vec<Point3>, text: &str, height: f64) -> Dimension {
+        Dimension {
+            kind: DimKind::Leader,
+            plane: plane.moved_to(points[0]),
+            points,
+            text: Some(text.to_string()),
+            height,
+            decimals: 0,
+        }
+    }
+
     /// The measured value: a length, or degrees for angles.
     pub fn value(&self) -> f64 {
         let p = &self.points;
@@ -233,12 +248,16 @@ impl Dimension {
             DimKind::Radius => p[0].distance_to(p[1]),
             DimKind::Diameter => 2.0 * p[0].distance_to(p[1]),
             DimKind::Angle => self.angle_arc().map_or(0.0, |(_, s, _)| s.to_degrees()),
+            DimKind::Leader => 0.0,
         }
     }
 
     /// Displayed text: the override (with `<>` replaced) or the formatted value
     /// with its prefix (R, Ø, °).
     pub fn text(&self) -> String {
+        if self.kind == DimKind::Leader {
+            return self.text.clone().unwrap_or_default();
+        }
         let v = format_value(self.value(), self.decimals);
         let measured = match self.kind {
             DimKind::Radius => format!("R{v}"),
@@ -356,6 +375,17 @@ impl Dimension {
                 let a1 = a0 + sweep;
                 arrow(&mut out, arc[n], -tangent(a1), radial(a1));
             }
+            DimKind::Leader => {
+                for w in p.windows(2) {
+                    out.push([w[0], w[1]]);
+                }
+                if p.len() >= 2 {
+                    if let Some(dir) = (p[1] - p[0]).normalized() {
+                        let side = pl.z.cross(dir).normalized().unwrap_or(pl.y);
+                        arrow(&mut out, p[0], dir, side);
+                    }
+                }
+            }
         }
         out
     }
@@ -385,6 +415,7 @@ impl Dimension {
                 v.extend(self.lines().iter().map(|l| l[0]));
                 v
             }
+            DimKind::Leader => p.clone(),
         }
     }
 
@@ -417,6 +448,21 @@ impl Dimension {
                 }
                 None => (self.points[0], pl.x, pl.y),
             },
+            DimKind::Leader => {
+                let n = self.points.len();
+                let end = self.points[n - 1];
+                // Text after the last segment: to its right when it points right.
+                let back = if n >= 2 { self.points[n - 2] } else { end };
+                let right = (end - back).dot(pl.x) >= 0.0;
+                let w = text_width(&self.text(), h);
+                let gap = h * 0.4;
+                let off = if right {
+                    gap + w / 2.0
+                } else {
+                    -(gap + w / 2.0)
+                };
+                (end + pl.x * off - pl.y * (h / 2.0), pl.x, pl.y)
+            }
         };
         Label {
             position,
@@ -533,6 +579,25 @@ mod tests {
         assert!((s.height - 10.0).abs() < 1e-9);
         let r = d.transformed(&Xform::rotation(Point3::ORIGIN, Vec3::Z, 1.0));
         assert!((r.value() - 100.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn leader_lines_and_label() {
+        let l = Dimension::leader(
+            &Plane::TOP,
+            vec![p(0.0, 0.0), p(10.0, 10.0), p(20.0, 10.0)],
+            "Rovere",
+            2.0,
+        );
+        assert_eq!(l.text(), "Rovere");
+        // 2 segments + 2 arrow lines.
+        assert_eq!(l.lines().len(), 4);
+        let lb = l.label();
+        assert!(lb.centered);
+        let w = text_width("Rovere", 2.0);
+        assert!(lb.position.distance_to(p(20.0 + 0.8 + w / 2.0, 9.0)) < TOL);
+        let r = l.transformed(&Xform::translation(Vec3::new(5.0, 0.0, 0.0)));
+        assert!(r.points[0].distance_to(p(5.0, 0.0)) < TOL);
     }
 
     #[test]

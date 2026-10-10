@@ -1,4 +1,5 @@
-//! More transforms: Shear, Rotate3D, ScaleNU, SetPt, ArrayCrv, Twist, Taper.
+//! More transforms: Shear, Rotate3D, ScaleNU, SetPt, ArrayCrv, Twist, Taper, Bend,
+//! Mirror3Pt, BoxEdit, Distribute.
 
 use crate::edit::{parse_ids, transform_selection};
 use crate::{Args, Command, CommandError, CommandResult, Context};
@@ -322,6 +323,254 @@ impl Command for Taper {
     }
 }
 
+simple_command!(
+    Bend,
+    "Bend",
+    &[],
+    "Bend <spine start> <spine end> <point to bend through> — bend the selection along the spine into an arc"
+);
+impl Command for Bend {
+    impl_meta!(Bend);
+    fn run(&self, ctx: &mut Context, args: &mut Args) -> CommandResult {
+        let a = args.point("start of spine", ctx.last_point)?;
+        let b = args.point("end of spine", Some(a))?;
+        let p = args.point("point to bend through", Some(b))?;
+        let len = crate::create::positive(a.distance_to(b), "spine length", ctx)?;
+        let t = p - a;
+        let dir = (b - a) * (1.0 / len);
+        if (t - dir * t.dot(dir)).length() <= ctx.tolerance.absolute {
+            return Err(CommandError::Invalid(
+                "the point to bend through is on the spine".into(),
+            ));
+        }
+        deform(
+            ctx,
+            "Bend",
+            &Deform::Bend {
+                start: a,
+                end: b,
+                through: p,
+            },
+            len,
+        )
+    }
+}
+
+simple_command!(
+    Mirror3Pt,
+    "Mirror3Pt",
+    &["Mirror3Point"],
+    "Mirror3Pt <p1> <p2> <p3> [nocopy] — mirrored copies across the plane through three points"
+);
+impl Command for Mirror3Pt {
+    impl_meta!(Mirror3Pt);
+    fn run(&self, ctx: &mut Context, args: &mut Args) -> CommandResult {
+        let a = args.point("first point of mirror plane", ctx.last_point)?;
+        let b = args.point("second point of mirror plane", Some(a))?;
+        let c = args.point("third point of mirror plane", Some(b))?;
+        let copy = !args.keyword("nocopy");
+        let n = (b - a)
+            .cross(c - a)
+            .normalized()
+            .ok_or_else(|| CommandError::Invalid("the three points are collinear".into()))?;
+        transform_selection(ctx, "Mirror3Pt", &Xform::mirror(a, n), copy)
+    }
+}
+
+/// `x=`, `y=`, `z=` style option value.
+fn keyed<'a>(tok: &'a str, key: &str) -> Option<&'a str> {
+    let (k, v) = tok.split_once('=')?;
+    k.eq_ignore_ascii_case(key).then_some(v)
+}
+
+simple_command!(
+    BoxEdit,
+    "BoxEdit",
+    &[],
+    "BoxEdit [x=<size>] [y=<size>] [z=<size>] [uniform] [center] [at=<x,y,z>] — set the bounding-box size (scaling about its minimum corner, or centre) and position of the selection"
+);
+impl Command for BoxEdit {
+    impl_meta!(BoxEdit);
+    fn run(&self, ctx: &mut Context, args: &mut Args) -> CommandResult {
+        let mut size: [Option<f64>; 3] = [None; 3];
+        let (mut uniform, mut center) = (false, false);
+        let mut at = None;
+        while let Some(tok) = args.next_token() {
+            if tok.eq_ignore_ascii_case("uniform") {
+                uniform = true;
+            } else if tok.eq_ignore_ascii_case("center") {
+                center = true;
+            } else if let Some(v) = keyed(tok, "at") {
+                at = Some(crate::parse_point(v, None)?);
+            } else if let Some((i, v)) = ["x", "y", "z"]
+                .iter()
+                .enumerate()
+                .find_map(|(i, k)| keyed(tok, k).map(|v| (i, v)))
+            {
+                let x: f64 = v
+                    .parse()
+                    .map_err(|_| CommandError::BadInput(tok.to_string()))?;
+                if x <= ctx.tolerance.absolute {
+                    return Err(CommandError::Invalid("sizes must be positive".into()));
+                }
+                size[i] = Some(x);
+            } else {
+                return Err(CommandError::BadInput(tok.to_string()));
+            }
+        }
+        let bb = crate::transform::selection_box(ctx, "BoxEdit")?;
+        let ext = [
+            bb.max.x - bb.min.x,
+            bb.max.y - bb.min.y,
+            bb.max.z - bb.min.z,
+        ];
+        let tol = ctx.tolerance.absolute;
+        let mut f = [1.0; 3];
+        for i in 0..3 {
+            if let Some(s) = size[i] {
+                if ext[i] <= tol {
+                    return Err(CommandError::Invalid(format!(
+                        "the selection is flat in {}",
+                        ["x", "y", "z"][i]
+                    )));
+                }
+                f[i] = s / ext[i];
+            }
+        }
+        if uniform {
+            let k = (0..3).find(|i| size[*i].is_some()).map_or(1.0, |i| f[i]);
+            f = [k; 3];
+        }
+        let origin = if center { bb.center() } else { bb.min };
+        let mut x = Xform::scale_axes(&Plane::TOP.moved_to(origin), f[0], f[1], f[2]);
+        if let Some(p) = at {
+            // Move the box's minimum corner (or centre) to the given point.
+            x = x.then(&Xform::translation(p - origin));
+        }
+        if f.iter().all(|k| (k - 1.0).abs() < 1e-12) && at.is_none() {
+            return Ok(format!(
+                "box {} x {} x {}",
+                forma_geom::format_value(ext[0], 4),
+                forma_geom::format_value(ext[1], 4),
+                forma_geom::format_value(ext[2], 4)
+            ));
+        }
+        transform_selection(ctx, "BoxEdit", &x, false)
+    }
+}
+
+simple_command!(
+    Distribute,
+    "Distribute",
+    &[],
+    "Distribute <x|y|z> [gap] — space the selected objects evenly along an axis between the first and last (centres, or a fixed gap between boxes)"
+);
+impl Command for Distribute {
+    impl_meta!(Distribute);
+    fn run(&self, ctx: &mut Context, args: &mut Args) -> CommandResult {
+        let axis = match args
+            .next_token()
+            .ok_or(CommandError::MissingInput("axis x, y or z"))?
+            .to_ascii_lowercase()
+            .as_str()
+        {
+            "x" => 0,
+            "y" => 1,
+            "z" => 2,
+            a => return Err(CommandError::BadInput(format!("axis {a}"))),
+        };
+        let gap = args.optional_number();
+        let ids = ctx.selected("Distribute")?;
+        // Objects of a group move together: distribute groups and loose objects.
+        let mut items: Vec<(Vec<forma_doc::ObjectId>, forma_geom::BoundingBox)> = Vec::new();
+        let mut seen = std::collections::BTreeSet::new();
+        for id in &ids {
+            if seen.contains(id) {
+                continue;
+            }
+            let o = ctx.doc.object(*id).expect("selected");
+            let members: Vec<_> = match o.group {
+                Some(g) => ids
+                    .iter()
+                    .copied()
+                    .filter(|i| ctx.doc.object(*i).is_some_and(|x| x.group == Some(g)))
+                    .collect(),
+                None => vec![*id],
+            };
+            let mut bb: Option<forma_geom::BoundingBox> = None;
+            for m in &members {
+                seen.insert(*m);
+                let b = ctx
+                    .doc
+                    .object(*m)
+                    .expect("selected")
+                    .geometry
+                    .bounding_box();
+                bb = Some(bb.map_or(b, |a| a.union(b)));
+            }
+            items.push((members, bb.expect("members")));
+        }
+        if items.len() < 3 && gap.is_none() {
+            return Err(CommandError::Invalid(
+                "Distribute: select three or more objects (or give a gap)".into(),
+            ));
+        }
+        if items.len() < 2 {
+            return Err(CommandError::Invalid(
+                "Distribute: select two or more objects".into(),
+            ));
+        }
+        let c = |b: &forma_geom::BoundingBox| b.center().to_vec();
+        let get = |v: forma_geom::Vec3| [v.x, v.y, v.z][axis];
+        items.sort_by(|a, b| get(c(&a.1)).total_cmp(&get(c(&b.1))));
+        let n = items.len();
+        let mut moves = Vec::new();
+        match gap {
+            None => {
+                let (first, last) = (get(c(&items[0].1)), get(c(&items[n - 1].1)));
+                for (i, it) in items.iter().enumerate() {
+                    let want = first + (last - first) * i as f64 / (n - 1) as f64;
+                    moves.push(want - get(c(&it.1)));
+                }
+            }
+            Some(g) => {
+                let lo = |b: &forma_geom::BoundingBox| get(b.min.to_vec());
+                let hi = |b: &forma_geom::BoundingBox| get(b.max.to_vec());
+                let mut at = hi(&items[0].1);
+                moves.push(0.0);
+                for it in &items[1..] {
+                    let start = at + g;
+                    moves.push(start - lo(&it.1));
+                    at = start + hi(&it.1) - lo(&it.1);
+                }
+            }
+        }
+        let mut t = ctx.doc.begin();
+        for ((members, _), d) in items.iter().zip(moves) {
+            if d.abs() < 1e-12 {
+                continue;
+            }
+            let mut v = [0.0; 3];
+            v[axis] = d;
+            let x = Xform::translation(Vec3::new(v[0], v[1], v[2]));
+            for id in members {
+                let g = t
+                    .doc()
+                    .object(*id)
+                    .expect("selected")
+                    .geometry
+                    .transformed(&x);
+                t.replace(*id, g);
+            }
+        }
+        t.commit();
+        Ok(format!(
+            "distributed {n} object(s) along {}",
+            ["x", "y", "z"][axis]
+        ))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::Engine;
@@ -389,6 +638,70 @@ mod tests {
         e.run_line("ArrayCrv #6 3 norotate").unwrap();
         assert_eq!(e.doc().len(), 8);
         assert!(e.run_line("ArrayCrv #6 1").is_err());
+    }
+
+    #[test]
+    fn bend_mirror3pt_boxedit_distribute() {
+        let mut e = Engine::new();
+        e.run_line("Line 0,0 100,0").unwrap();
+        e.run_line("SelAll").unwrap();
+        e.run_line("Bend 0,0 100,0 100,100").unwrap();
+        let g = e.doc().objects().next().unwrap().geometry.clone();
+        // Bent onto the circle of radius 100 around (0,100), length kept.
+        assert!(
+            (g.length().unwrap() - 100.0).abs() < 0.1,
+            "{:?}",
+            g.length()
+        );
+        assert!(g
+            .curve_points()
+            .iter()
+            .all(|p| (p.distance_to(Point3::new(0.0, 100.0, 0.0)) - 100.0).abs() < 1e-6));
+        assert!(e.run_line("Bend 0,0 100,0 50,0").is_err());
+        e.run_line("Undo").unwrap();
+        e.run_line("Mirror3Pt 0,0,10 1,0,10 0,1,10").unwrap();
+        assert_eq!(e.doc().len(), 2);
+        let b = e.doc().objects().last().unwrap().geometry.bounding_box();
+        assert!((b.min.z - 20.0).abs() < TOL);
+        assert!(e.run_line("Mirror3Pt 0,0 1,0 2,0").is_err());
+        e.run_line("SelNone").unwrap();
+        e.run_line("Box 0,0 10,20 30").unwrap();
+        e.run_line("SelLast").unwrap();
+        e.run_line("BoxEdit x=40 z=15").unwrap();
+        let b = e.doc().objects().last().unwrap().geometry.bounding_box();
+        assert!((b.max.x - 40.0).abs() < TOL && (b.max.y - 20.0).abs() < TOL);
+        assert!((b.max.z - 15.0).abs() < TOL && b.min.x.abs() < TOL);
+        e.run_line("BoxEdit y=10 uniform center at=100,100,0")
+            .unwrap();
+        let b = e.doc().objects().last().unwrap().geometry.bounding_box();
+        assert!((b.max.y - b.min.y - 10.0).abs() < TOL);
+        assert!((b.max.x - b.min.x - 20.0).abs() < TOL);
+        assert!(b.center().distance_to(Point3::new(100.0, 100.0, 0.0)) < TOL);
+        assert!(e.run_line("BoxEdit x=0").is_err());
+        assert!(e.run_line("BoxEdit w=3").is_err());
+        let mut e = Engine::new();
+        e.run_line("Circle 0,0 5").unwrap();
+        e.run_line("Circle 13,0 5").unwrap();
+        e.run_line("Circle 100,0 5").unwrap();
+        e.run_line("SelAll").unwrap();
+        e.run_line("Distribute x").unwrap();
+        let cx: Vec<f64> = e
+            .doc()
+            .objects()
+            .map(|o| o.geometry.bounding_box().center().x)
+            .collect();
+        assert!((cx[1] - 50.0).abs() < TOL, "{cx:?}");
+        e.run_line("Distribute x 2").unwrap();
+        let cx: Vec<f64> = e
+            .doc()
+            .objects()
+            .map(|o| o.geometry.bounding_box().center().x)
+            .collect();
+        assert!(
+            (cx[1] - 12.0).abs() < TOL && (cx[2] - 24.0).abs() < TOL,
+            "{cx:?}"
+        );
+        assert!(e.run_line("Distribute w").is_err());
     }
 
     #[test]

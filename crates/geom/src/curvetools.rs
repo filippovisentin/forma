@@ -487,6 +487,60 @@ fn in_poly(p: (f64, f64), poly: &[(f64, f64)]) -> bool {
     inside
 }
 
+/// Hatch lines: parallel segments `spacing` apart at `angle` (radians, from the
+/// plane's x axis) filling the region inside the closed loops (even-odd rule, so
+/// nested loops are holes). Lines run through the plane origin's grid, so
+/// neighbouring regions hatched alike line up.
+pub fn hatch_lines(
+    loops: &[Vec<Point3>],
+    plane: &Plane,
+    spacing: f64,
+    angle: f64,
+) -> Vec<[Point3; 2]> {
+    if spacing <= 0.0 {
+        return Vec::new();
+    }
+    let (sin, cos) = angle.sin_cos();
+    // Rotated 2D frame: x along the hatch direction.
+    let to2 = |p: Point3| {
+        let (u, v, _) = plane.coords(p);
+        (u * cos + v * sin, -u * sin + v * cos)
+    };
+    let from2 = |x: f64, y: f64| plane.point_at(x * cos - y * sin, x * sin + y * cos, 0.0);
+    let mut edges = Vec::new();
+    let (mut lo, mut hi) = (f64::MAX, f64::MIN);
+    for l in loops {
+        let pts: Vec<(f64, f64)> = l.iter().map(|p| to2(*p)).collect();
+        for i in 0..pts.len() {
+            let (a, b) = (pts[i], pts[(i + 1) % pts.len()]);
+            lo = lo.min(a.1);
+            hi = hi.max(a.1);
+            edges.push((a, b));
+        }
+    }
+    if edges.is_empty() || (hi - lo) / spacing > 100_000.0 {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    let k0 = (lo / spacing).floor() as i64;
+    let k1 = (hi / spacing).ceil() as i64;
+    for k in k0..=k1 {
+        let y = k as f64 * spacing;
+        let mut xs: Vec<f64> = edges
+            .iter()
+            .filter(|(a, b)| (a.1 > y) != (b.1 > y))
+            .map(|(a, b)| a.0 + (y - a.1) / (b.1 - a.1) * (b.0 - a.0))
+            .collect();
+        xs.sort_by(f64::total_cmp);
+        for w in xs.chunks_exact(2) {
+            if w[1] - w[0] > 1e-9 {
+                out.push([from2(w[0], y), from2(w[1], y)]);
+            }
+        }
+    }
+    out
+}
+
 /// True when every loop point lies inside `outer` (used to classify holes).
 pub fn loop_inside(inner: &[Point3], outer: &[Point3], plane: &Plane) -> bool {
     inner.iter().all(|p| point_in_polygon(*p, outer, plane))
@@ -583,6 +637,28 @@ mod tests {
         assert_eq!(c.len(), 2);
         assert_eq!(c[0].len(), 5);
         assert!(c[0][0].distance_to(c[0][4]) < TOL);
+    }
+
+    #[test]
+    fn hatch_a_room_with_a_column() {
+        let room = rect(0.0, 0.0, 10.0, 10.0);
+        let col = rect(4.0, 4.0, 6.0, 6.0);
+        let h = hatch_lines(std::slice::from_ref(&room), &Plane::TOP, 1.0, 0.0);
+        // y = 0..9 (a line on a border counts on its upper side only).
+        assert_eq!(h.len(), 10);
+        assert!(h
+            .iter()
+            .all(|s| (s[0].distance_to(s[1]) - 10.0).abs() < 1e-9));
+        let h = hatch_lines(&[room.clone(), col], &Plane::TOP, 1.0, 0.0);
+        let total: f64 = h.iter().map(|s| s[0].distance_to(s[1])).sum();
+        assert!((total - 96.0).abs() < 1e-9, "{total}"); // y = 4 and 5 lose 2
+        let d = hatch_lines(&[room], &Plane::TOP, 1.0, std::f64::consts::FRAC_PI_4);
+        assert!(d
+            .iter()
+            .all(|s| ((s[1] - s[0]).normalized().unwrap().x.abs()
+                - std::f64::consts::FRAC_1_SQRT_2)
+                .abs()
+                < 1e-9));
     }
 
     #[test]

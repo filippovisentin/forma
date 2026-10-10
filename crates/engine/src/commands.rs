@@ -114,6 +114,8 @@ pub fn builtin() -> Vec<Box<dyn Command>> {
         Box::new(crate::crvtools::Rebuild),
         Box::new(crate::crvtools::CloseCrv),
         Box::new(crate::crvtools::ExtractPt),
+        Box::new(crate::crvtools::Project),
+        Box::new(crate::crvtools::Pull),
         // Surfaces, solids, meshes
         Box::new(crate::solids2::PlaneSrf),
         Box::new(crate::solids2::SrfPt),
@@ -138,6 +140,10 @@ pub fn builtin() -> Vec<Box<dyn Command>> {
         Box::new(crate::deform::ArrayCrv),
         Box::new(crate::deform::Twist),
         Box::new(crate::deform::Taper),
+        Box::new(crate::deform::Bend),
+        Box::new(crate::deform::Mirror3Pt),
+        Box::new(crate::deform::BoxEdit),
+        Box::new(crate::deform::Distribute),
         // Attributes, selection, layers
         Box::new(crate::layers::SetObjectName),
         Box::new(crate::layers::SelName),
@@ -150,6 +156,9 @@ pub fn builtin() -> Vec<Box<dyn Command>> {
         Box::new(crate::layers::SelLine),
         Box::new(crate::layers::SelText),
         Box::new(crate::layers::SelDim),
+        Box::new(crate::layers::SelSmall),
+        Box::new(crate::layers::SelClosedMesh),
+        Box::new(crate::layers::SelOpenMesh),
         Box::new(crate::layers::Purge),
         Box::new(crate::layers::RenameLayer),
         Box::new(crate::layers::DeleteLayer),
@@ -172,6 +181,8 @@ pub fn builtin() -> Vec<Box<dyn Command>> {
         Box::new(crate::annotate::DimDiameter),
         Box::new(crate::annotate::DimAngle),
         Box::new(crate::annotate::DimStyle),
+        Box::new(crate::annotate::Leader),
+        Box::new(crate::annotate::Hatch),
     ]
 }
 

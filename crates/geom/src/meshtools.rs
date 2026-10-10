@@ -246,6 +246,14 @@ pub enum Deform {
         s0: f64,
         s1: f64,
     },
+    /// The spine `start → end` bent into a circular arc that passes through
+    /// `through` (Rhino's Bend). Points before the start stay; points past the end
+    /// follow the tangent at the end of the arc.
+    Bend {
+        start: Point3,
+        end: Point3,
+        through: Point3,
+    },
 }
 
 impl Deform {
@@ -267,7 +275,40 @@ impl Deform {
                 Some((_, f, foot)) => foot + (p - foot) * (s0 + (s1 - s0) * f),
                 None => p,
             },
+            Deform::Bend {
+                start,
+                end,
+                through,
+            } => Self::bend(start, end, through, p),
         }
+    }
+
+    fn bend(start: Point3, end: Point3, through: Point3, p: Point3) -> Point3 {
+        let Some(u) = (end - start).normalized() else {
+            return p;
+        };
+        let len = start.distance_to(end);
+        let t = through - start;
+        let Some(v) = (t - u * t.dot(u)).normalized() else {
+            return p; // through point on the spine: nothing to bend
+        };
+        let (tu, tv) = (t.dot(u), t.dot(v));
+        // Circle tangent to the spine at its start, through the through point.
+        let r = (tu * tu + tv * tv) / (2.0 * tv);
+        let d = p - start;
+        let (s, w) = (d.dot(u), d.dot(v));
+        let rest = d - u * s - v * w;
+        if s <= 0.0 {
+            return p;
+        }
+        let a = s.min(len) / r;
+        // Point at arc length min(s, len), offset by w towards the centre.
+        let (sin, cos) = a.sin_cos();
+        let mut q = start + u * ((r - w) * sin) + v * (r - (r - w) * cos);
+        if s > len {
+            q = q + (u * cos + v * sin) * (s - len);
+        }
+        q + rest
     }
 
     /// Deformed copy of a mesh (normals recomputed).
@@ -281,6 +322,37 @@ impl Deform {
             // Keep the original smoothing groups: recompute per-vertex normals.
             out.compute_smooth_normals();
         }
+        out
+    }
+}
+
+impl Mesh {
+    /// Parameters `t` (sorted) where the line `origin + t·dir` crosses the mesh.
+    pub fn ray_hits(&self, origin: Point3, dir: Vec3) -> Vec<f64> {
+        let mut out = Vec::new();
+        for tri in &self.triangles {
+            let [a, b, c] = tri.map(|i| self.positions[i as usize]);
+            // Möller–Trumbore.
+            let (e1, e2) = (b - a, c - a);
+            let h = dir.cross(e2);
+            let det = e1.dot(h);
+            if det.abs() < 1e-18 {
+                continue;
+            }
+            let f = 1.0 / det;
+            let s = origin - a;
+            let u = f * s.dot(h);
+            if !(-1e-12..=1.0 + 1e-12).contains(&u) {
+                continue;
+            }
+            let q = s.cross(e1);
+            let v = f * dir.dot(q);
+            if v < -1e-12 || u + v > 1.0 + 1e-12 {
+                continue;
+            }
+            out.push(f * e2.dot(q));
+        }
+        out.sort_by(f64::total_cmp);
         out
     }
 }
@@ -304,6 +376,45 @@ pub fn densify(points: &[Point3], max_len: f64) -> Vec<Point3> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bend_keeps_length_and_passes_through() {
+        let d = Deform::Bend {
+            start: Point3::ORIGIN,
+            end: Point3::new(100.0, 0.0, 0.0),
+            through: Point3::new(100.0, 100.0, 0.0),
+        };
+        // Through point at (100, 100): radius 100, a quarter turn for the spine
+        // length 100·π/2; a spine of 100 turns by 1 radian.
+        let e = d.point(Point3::new(100.0, 0.0, 0.0));
+        assert!(
+            e.distance_to(Point3::new(
+                100.0 * 1f64.sin(),
+                100.0 * (1.0 - 1f64.cos()),
+                0.0
+            )) < 1e-9
+        );
+        let q = d.point(Point3::new(50.0, 0.0, 0.0));
+        assert!((q.distance_to(Point3::new(0.0, 100.0, 0.0)) - 100.0).abs() < 1e-9);
+        // Points before the start do not move; z offsets are kept.
+        let b = Point3::new(-5.0, 3.0, 2.0);
+        assert!(d.point(b).distance_to(b) < 1e-12);
+        assert!((d.point(Point3::new(50.0, 0.0, 7.0)).z - 7.0).abs() < 1e-12);
+        // Beyond the end: along the end tangent.
+        let f = d.point(Point3::new(110.0, 0.0, 0.0));
+        assert!((f.distance_to(e) - 10.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn ray_hits_a_box() {
+        let m = crate::box_mesh(&Plane::TOP, 10.0, 10.0, 5.0);
+        let h = m.ray_hits(Point3::new(3.0, 4.0, 100.0), Vec3::new(0.0, 0.0, -1.0));
+        assert_eq!(h.len(), 2, "{h:?}");
+        assert!((h[0] - 95.0).abs() < 1e-9 && (h[1] - 100.0).abs() < 1e-9);
+        assert!(m
+            .ray_hits(Point3::new(30.0, 4.0, 100.0), Vec3::new(0.0, 0.0, -1.0))
+            .is_empty());
+    }
     use crate::box_mesh;
 
     const TOL: f64 = 1e-9;

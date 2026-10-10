@@ -249,6 +249,60 @@ impl Command for SelDim {
     }
 }
 
+simple_command!(
+    SelSmall,
+    "SelSmall",
+    &[],
+    "SelSmall <size> — select objects whose bounding box is smaller than size in every direction"
+);
+impl Command for SelSmall {
+    impl_meta!(SelSmall);
+    fn run(&self, ctx: &mut Context, args: &mut Args) -> CommandResult {
+        let size = args.number("maximum size")?;
+        if size <= 0.0 {
+            return Err(CommandError::Invalid("size must be positive".into()));
+        }
+        select_objects(ctx, |o| {
+            let b = o.geometry.bounding_box();
+            (b.max - b.min).x < size && (b.max - b.min).y < size && (b.max - b.min).z < size
+        })
+    }
+}
+
+simple_command!(
+    SelClosedMesh,
+    "SelClosedMesh",
+    &["SelClosedPolysrf", "SelSolid"],
+    "SelClosedMesh — select all closed meshes (solids)"
+);
+impl Command for SelClosedMesh {
+    impl_meta!(SelClosedMesh);
+    fn run(&self, ctx: &mut Context, _args: &mut Args) -> CommandResult {
+        let tol = ctx.doc.absolute_tolerance.max(1e-9);
+        select_objects(
+            ctx,
+            |o| matches!(&o.geometry, Geometry::Mesh(m) if m.is_closed(tol)),
+        )
+    }
+}
+
+simple_command!(
+    SelOpenMesh,
+    "SelOpenMesh",
+    &["SelOpenPolysrf"],
+    "SelOpenMesh — select all open meshes (surfaces)"
+);
+impl Command for SelOpenMesh {
+    impl_meta!(SelOpenMesh);
+    fn run(&self, ctx: &mut Context, _args: &mut Args) -> CommandResult {
+        let tol = ctx.doc.absolute_tolerance.max(1e-9);
+        select_objects(
+            ctx,
+            |o| matches!(&o.geometry, Geometry::Mesh(m) if !m.is_closed(tol)),
+        )
+    }
+}
+
 /// Layer ids of the layer path `name` and its sub-layers (the path itself need
 /// not be a layer: `arredi` finds `arredi::sedie`).
 fn layers_under(ctx: &Context, name: &str) -> Vec<LayerId> {
@@ -475,6 +529,25 @@ impl Command for CopyObjectsToLayer {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn sel_small_closed_open_meshes() {
+        let mut e = crate::Engine::new();
+        e.run_line("Box 0,0 10,10 10").unwrap();
+        e.run_line("Box 0,0 100,100 100").unwrap();
+        e.run_line("Rectangle 0,0 5,5").unwrap();
+        e.run_line("SelLast").unwrap();
+        e.run_line("PlanarSrf").unwrap();
+        e.run_line("SelNone").unwrap();
+        e.run_line("SelSmall 20").unwrap();
+        assert_eq!(e.ctx.selection.len(), 3); // small box, rectangle, its surface
+        e.run_line("SelNone").unwrap();
+        e.run_line("SelClosedMesh").unwrap();
+        assert_eq!(e.ctx.selection.len(), 2);
+        e.run_line("SelNone").unwrap();
+        e.run_line("SelOpenMesh").unwrap();
+        assert_eq!(e.ctx.selection.len(), 1);
+        assert!(e.run_line("SelSmall 0").is_err());
+    }
     use super::glob;
     use crate::Engine;
 

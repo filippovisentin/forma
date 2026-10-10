@@ -1,5 +1,5 @@
 //! Curve tools: Divide, DivideByLength, Contour, Section, DupBorder, DupEdge,
-//! CurveBoolean, Convert, Rebuild, CloseCrv, ExtractPt.
+//! CurveBoolean, Convert, Rebuild, CloseCrv, ExtractPt, Project, Pull.
 
 use crate::create::positive;
 use crate::surfaces::loop_points;
@@ -534,6 +534,141 @@ impl Command for ExtractPt {
     }
 }
 
+/// Selected curves and meshes, split (both must be present).
+#[allow(clippy::type_complexity)]
+fn curves_and_meshes(
+    ctx: &Context,
+    cmd: &str,
+) -> Result<(Vec<Geometry>, Vec<forma_geom::Mesh>), CommandError> {
+    let mut crvs = Vec::new();
+    let mut ms = Vec::new();
+    for id in ctx.selected(cmd)? {
+        match &ctx.doc.object(id).expect("selected").geometry {
+            Geometry::Mesh(m) => ms.push(m.clone()),
+            g if g.is_curve() => crvs.push(g.clone()),
+            Geometry::Point(p) => crvs.push(Geometry::Point(*p)),
+            _ => {}
+        }
+    }
+    if crvs.is_empty() || ms.is_empty() {
+        return Err(CommandError::Invalid(format!(
+            "{cmd}: select the curves (or points) and the meshes / surfaces to put them on"
+        )));
+    }
+    Ok((crvs, ms))
+}
+
+/// Sample points of a curve fine enough to follow a surface (about 1/200 of its
+/// length, at least the curve's own vertices).
+fn follow_points(g: &Geometry) -> Vec<Point3> {
+    if let Geometry::Point(p) = g {
+        return vec![*p];
+    }
+    let pts = dense_points(g);
+    let len = g.length().unwrap_or(0.0);
+    forma_geom::densify(&pts, (len / 200.0).max(1e-6))
+}
+
+/// Polylines from runs of `Some` points (a `None` breaks the run); single
+/// points become point objects.
+fn runs(points: Vec<Option<Point3>>, tol: f64) -> Vec<Geometry> {
+    let mut out = Vec::new();
+    let mut cur: Vec<Point3> = Vec::new();
+    let flush = |cur: &mut Vec<Point3>, out: &mut Vec<Geometry>| {
+        cur.dedup_by(|a, b| a.distance_to(*b) <= tol);
+        if cur.len() >= 2 {
+            let simple = simplify_polyline(cur, tol * 0.5);
+            out.push(Geometry::Polyline(simple));
+        } else if cur.len() == 1 {
+            out.push(Geometry::Point(cur[0]));
+        }
+        cur.clear();
+    };
+    for p in points {
+        match p {
+            Some(p) => cur.push(p),
+            None => flush(&mut cur, &mut out),
+        }
+    }
+    flush(&mut cur, &mut out);
+    out
+}
+
+simple_command!(
+    Project,
+    "Project",
+    &[],
+    "Project [direction=0,0,-1] — project the selected curves and points onto the selected meshes / surfaces (the first one met along the direction)"
+);
+impl Command for Project {
+    impl_meta!(Project);
+    fn run(&self, ctx: &mut Context, args: &mut Args) -> CommandResult {
+        let dir = args
+            .optional_vector()
+            .unwrap_or(Vec3::new(0.0, 0.0, -1.0))
+            .normalized()
+            .ok_or_else(|| CommandError::Invalid("direction is zero".into()))?;
+        let (crvs, ms) = curves_and_meshes(ctx, "Project")?;
+        let tol = ctx.doc.absolute_tolerance.max(1e-9);
+        // Start every ray far behind everything.
+        let bb = crate::transform::selection_box(ctx, "Project")?;
+        let far = bb.min.distance_to(bb.max) + 1.0;
+        let mut out = Vec::new();
+        for g in &crvs {
+            let hits: Vec<Option<Point3>> = follow_points(g)
+                .into_iter()
+                .map(|p| {
+                    let o = p - dir * far;
+                    ms.iter()
+                        .flat_map(|m| m.ray_hits(o, dir))
+                        .filter(|t| *t >= 0.0)
+                        .min_by(f64::total_cmp)
+                        .map(|t| o + dir * t)
+                })
+                .collect();
+            out.extend(runs(hits, tol));
+        }
+        if out.is_empty() {
+            return Err(CommandError::Invalid(
+                "Project: nothing lands on the meshes".into(),
+            ));
+        }
+        let n = out.len();
+        add_and_select(ctx, out);
+        Ok(format!("{n} projected object(s)"))
+    }
+}
+
+simple_command!(
+    Pull,
+    "Pull",
+    &[],
+    "Pull — pull the selected curves and points to the closest points of the selected meshes / surfaces"
+);
+impl Command for Pull {
+    impl_meta!(Pull);
+    fn run(&self, ctx: &mut Context, _args: &mut Args) -> CommandResult {
+        let (crvs, ms) = curves_and_meshes(ctx, "Pull")?;
+        let tol = ctx.doc.absolute_tolerance.max(1e-9);
+        let mut out = Vec::new();
+        for g in &crvs {
+            let pts: Vec<Option<Point3>> = follow_points(g)
+                .into_iter()
+                .map(|p| {
+                    ms.iter()
+                        .filter_map(|m| m.closest_triangle(p))
+                        .min_by(|a, b| a.2.total_cmp(&b.2))
+                        .map(|(_, q, _)| q)
+                })
+                .collect();
+            out.extend(runs(pts, tol));
+        }
+        let n = out.len();
+        add_and_select(ctx, out);
+        Ok(format!("{n} pulled object(s)"))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::Engine;
@@ -613,6 +748,51 @@ mod tests {
         e.run_line("DupBorder").unwrap();
         let g = &e.doc().objects().last().unwrap().geometry;
         assert!(g.is_closed_curve() && (g.length().unwrap() - 40.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn project_and_pull_onto_a_box() {
+        let mut e = Engine::new();
+        e.run_line("Box 0,0 100,100 50").unwrap(); // #1
+        e.run_line("Line -50,50,200 150,50,200").unwrap(); // #2, longer than the box
+        e.run_line("Point 20,20,300").unwrap(); // #3
+        e.run_line("SelAll").unwrap();
+        e.run_line("Project").unwrap();
+        let new: Vec<_> = e
+            .doc()
+            .objects()
+            .skip(3)
+            .map(|o| o.geometry.clone())
+            .collect();
+        assert_eq!(new.len(), 2, "{new:?}");
+        let b = new[0].bounding_box();
+        // Only the part over the box, on its top face.
+        assert!((b.min.z - 50.0).abs() < 1e-6 && (b.max.z - 50.0).abs() < 1e-6);
+        assert!(
+            b.min.x > -1.0 && b.min.x < 1.5 && b.max.x > 98.5 && b.max.x < 101.0,
+            "{b:?}"
+        );
+        let Geometry::Point(p) = new[1] else { panic!() };
+        assert!(p.distance_to(Point3::new(20.0, 20.0, 50.0)) < 1e-9);
+        e.run_line("Undo").unwrap();
+        e.run_line("SelAll").unwrap();
+        e.run_line("Pull").unwrap();
+        let new: Vec<_> = e
+            .doc()
+            .objects()
+            .skip(3)
+            .map(|o| o.geometry.clone())
+            .collect();
+        assert_eq!(new.len(), 2);
+        // The line ends beyond the box are pulled to its top edges.
+        let b = new[0].bounding_box();
+        assert!(
+            b.min.x.abs() < 1e-6 && (b.max.x - 100.0).abs() < 1e-6,
+            "{b:?}"
+        );
+        e.run_line("SelNone").unwrap();
+        e.run_line("Select #2").unwrap();
+        assert!(e.run_line("Project").is_err());
     }
 
     #[test]

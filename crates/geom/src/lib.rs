@@ -25,8 +25,8 @@ pub use curve::{
 };
 pub use curvetools::{
     arc_3pt, chain_points_at_lengths, chain_segments, circle_3pt, dist_to_segment,
-    division_lengths, in_plane, loop_inside, region_boolean, simplify_polyline, spiral_points,
-    step_lengths, RegionOp,
+    division_lengths, hatch_lines, in_plane, loop_inside, region_boolean, simplify_polyline,
+    spiral_points, step_lengths, RegionOp,
 };
 pub use faces::MeshFace;
 pub use meshtools::{

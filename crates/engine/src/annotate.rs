@@ -1,5 +1,6 @@
 //! Annotations: Text, TextDot, Dim (linear), DimAligned, DimRadius, DimDiameter,
-//! DimAngle, DimStyle. Heights and decimals come from the document's dim style.
+//! DimAngle, Leader, Hatch, DimStyle. Heights and decimals come from the
+//! document's dim style.
 
 use crate::create::{finish, positive};
 use crate::edit::parse_ids;
@@ -20,13 +21,17 @@ simple_command!(
     TextCmd,
     "Text",
     &["Txt"],
-    "Text <origin> <height> [normal] <text…> — single-line text in the construction plane (origin = bottom left)"
+    "Text <origin> <height|*> [normal] <text…> — single-line text in the construction plane (origin = bottom left; * = the DimStyle height)"
 );
 impl Command for TextCmd {
     impl_meta!(TextCmd);
     fn run(&self, ctx: &mut Context, args: &mut Args) -> CommandResult {
         let o = args.point("text location", ctx.last_point)?;
-        let h = positive(args.number("text height")?, "text height", ctx)?.abs();
+        let h = if args.keyword("*") {
+            ctx.doc.dim_style.text_height
+        } else {
+            positive(args.number("text height")?, "text height", ctx)?.abs()
+        };
         // An optional normal before the text: a token that parses as a vector.
         let n = match args.peek() {
             Some(t) if t.contains(',') && parse_point(t, None).is_ok() => {
@@ -223,14 +228,20 @@ simple_command!(
 impl Command for DimStyle {
     impl_meta!(DimStyle);
     fn run(&self, ctx: &mut Context, args: &mut Args) -> CommandResult {
-        if let Some(h) = args.optional_number() {
+        let h = args.optional_number();
+        let d = args.optional_number();
+        if let Some(h) = h {
             positive(h, "text height", ctx)?;
-            ctx.doc.dim_style.text_height = h.abs();
         }
-        if let Some(d) = args.optional_number() {
+        if let Some(d) = d {
             if !(0.0..=8.0).contains(&d) || d.fract().abs() > 1e-9 {
                 return Err(CommandError::Invalid("decimals must be 0 to 8".into()));
             }
+        }
+        if let Some(h) = h {
+            ctx.doc.dim_style.text_height = h.abs();
+        }
+        if let Some(d) = d {
             ctx.doc.dim_style.decimals = d as usize;
         }
         let s = ctx.doc.dim_style;
@@ -240,6 +251,122 @@ impl Command for DimStyle {
             ctx.doc.units.abbreviation(),
             s.decimals
         ))
+    }
+}
+
+simple_command!(
+    Leader,
+    "Leader",
+    &[],
+    "Leader <arrow point> <point> [point…] <text…> — arrow polyline with a text at its end (DimStyle height)"
+);
+impl Command for Leader {
+    impl_meta!(Leader);
+    fn run(&self, ctx: &mut Context, args: &mut Args) -> CommandResult {
+        let mut pts = vec![args.point("start of leader (arrow)", ctx.last_point)?];
+        while let Some(t) = args.peek() {
+            match parse_point(t, pts.last().copied()) {
+                Ok(p) => {
+                    args.next_token();
+                    pts.push(p);
+                }
+                Err(_) => break,
+            }
+        }
+        if pts.len() < 2 {
+            return Err(CommandError::MissingInput("next point of leader"));
+        }
+        let text = args.rest().join(" ");
+        if text.is_empty() {
+            return Err(CommandError::MissingInput("leader text"));
+        }
+        let tol = ctx.tolerance.absolute;
+        pts.dedup_by(|a, b| a.distance_to(*b) <= tol);
+        if pts.len() < 2 {
+            return Err(CommandError::Invalid("leader is degenerate".into()));
+        }
+        let n = forma_geom::newell_area(&pts)
+            .normalized()
+            .filter(|n| n.dot(Vec3::Z).abs() > 1e-9 || pts.len() > 2)
+            .map_or(Vec3::Z, |n| if n.dot(Vec3::Z) < 0.0 { -n } else { n });
+        let (h, _) = style(ctx);
+        ctx.last_point = pts.last().copied();
+        let d = Dimension::leader(&Plane::from_normal(pts[0], n), pts, &text, h);
+        add(ctx, Geometry::Dimension(d))
+    }
+}
+
+simple_command!(
+    Hatch,
+    "Hatch",
+    &[],
+    "Hatch <spacing> [angle°=45] — hatch lines (one group) inside the selected closed planar curves; curves inside others make holes"
+);
+impl Command for Hatch {
+    impl_meta!(Hatch);
+    fn run(&self, ctx: &mut Context, args: &mut Args) -> CommandResult {
+        let spacing = positive(args.number("hatch spacing")?, "spacing", ctx)?.abs();
+        let angle = args.optional_number().unwrap_or(45.0);
+        let tol = ctx.doc.absolute_tolerance.max(1e-9);
+        let ids = ctx.selected("Hatch")?;
+        let mut loops = Vec::new();
+        let mut plane: Option<Plane> = None;
+        for id in &ids {
+            let g = &ctx.doc.object(*id).expect("selected").geometry;
+            let Some((pl, _)) = crate::surfaces::closed_plane(g, tol) else {
+                continue;
+            };
+            let pts = crate::surfaces::loop_points(g);
+            let p = *plane.get_or_insert(pl);
+            if p.z.cross(pl.z).length() > 1e-6 || pts.iter().any(|q| p.coords(*q).2.abs() > tol) {
+                return Err(CommandError::Invalid(
+                    "Hatch: the curves are not in the same plane".into(),
+                ));
+            }
+            loops.push(pts);
+        }
+        let Some(plane) = plane else {
+            return Err(CommandError::Invalid(
+                "Hatch: select closed planar curves".into(),
+            ));
+        };
+        // Hatch lines run along the world x axis when the plane allows it.
+        let x = forma_geom::in_plane(Vec3::X, plane.z)
+            .or_else(|| forma_geom::in_plane(Vec3::Y, plane.z))
+            .unwrap_or(plane.x);
+        let frame = Plane {
+            origin: plane.project(forma_geom::Point3::ORIGIN),
+            x,
+            y: plane.z.cross(x),
+            z: plane.z,
+        };
+        let segs = forma_geom::hatch_lines(&loops, &frame, spacing, angle.to_radians());
+        if segs.is_empty() {
+            return Err(CommandError::Invalid("Hatch: no hatch lines".into()));
+        }
+        if segs.len() > 20_000 {
+            return Err(CommandError::Invalid(
+                "Hatch: too many lines, use a larger spacing".into(),
+            ));
+        }
+        let group = ctx
+            .doc
+            .objects()
+            .filter_map(|o| o.group)
+            .max()
+            .map_or(1, |m| m + 1);
+        let n = segs.len();
+        let mut t = ctx.doc.begin();
+        let new: Vec<_> = segs
+            .into_iter()
+            .map(|[a, b]| t.add(Geometry::Line(forma_geom::LineCurve::new(a, b))))
+            .collect();
+        for id in &new {
+            t.set_group(*id, Some(group));
+        }
+        t.commit();
+        ctx.selection = new.into_iter().collect();
+        Ok(format!("hatch: {n} line(s) in group {group}"))
     }
 }
 
@@ -315,6 +442,50 @@ mod tests {
             .doc()
             .dump()
             .contains("#1 dimension [Default] Linear \"240\""));
+    }
+
+    #[test]
+    fn leader_hatch_and_default_text_height() {
+        let mut e = Engine::new();
+        e.run_line("New cm").unwrap();
+        e.run_line("Leader 0,0 50,50 80,50 Rovere naturale")
+            .unwrap();
+        let Geometry::Dimension(d) = last(&e) else {
+            panic!()
+        };
+        assert_eq!(d.kind, DimKind::Leader);
+        assert_eq!(d.points.len(), 3);
+        assert_eq!(d.text(), "Rovere naturale");
+        assert!(e.run_line("Leader 0,0 Testo").is_err());
+        assert!(e.run_line("Leader 0,0 10,0").is_err());
+        e.run_line("Text 0,0 * Bagno").unwrap();
+        let Geometry::Text(t) = last(&e) else {
+            panic!()
+        };
+        assert!((t.height - 10.0).abs() < 1e-12);
+        // DimStyle leaves the style alone when one value is wrong.
+        assert!(e.run_line("DimStyle 3 1.5").is_err());
+        assert!((e.doc().dim_style.text_height - 10.0).abs() < 1e-12);
+        e.run_line("SelNone").unwrap();
+        e.run_line("Rectangle 0,0 100,100").unwrap();
+        e.run_line("Rectangle 40,40 60,60").unwrap();
+        e.run_line("SelLast").unwrap();
+        e.run_line("Select #3").unwrap();
+        e.run_line("Hatch 10 0").unwrap();
+        let lines: Vec<_> = e
+            .doc()
+            .objects()
+            .filter(|o| matches!(o.geometry, Geometry::Line(_)))
+            .collect();
+        // y = 0, 10, …, 90; y = 40 and 50 are cut by the hole.
+        assert_eq!(lines.len(), 12);
+        assert!(lines
+            .iter()
+            .all(|o| o.group == lines[0].group && o.group.is_some()));
+        let total: f64 = lines.iter().filter_map(|o| o.geometry.length()).sum();
+        assert!((total - 960.0).abs() < 1e-6, "{total}");
+        e.run_line("Undo").unwrap();
+        assert!(e.run_line("Hatch 0").is_err());
     }
 
     #[test]
