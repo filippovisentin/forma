@@ -12,7 +12,7 @@ is in `Help` and `forma-cli commands`.
 
 ## Summary
 
-279 Rhino commands: **163 ✓**, **54 partial**, **44 ✗**, **18 needs kernel**.
+279 Rhino commands: **164 ✓**, **54 partial**, **43 ✗**, **18 needs kernel**.
 
 ## Drawing: points and lines
 
@@ -75,7 +75,7 @@ is in `Help` and `forma-cli commands`.
 | Dir / Flip | ✓ | `Flip` (alias Dir) |
 | Seam / CrvSeam | ✗ |  |
 | CurveBoolean | partial | `CurveBoolean union|intersection|difference [delete]`; no region picking, result as polylines |
-| PointsOn / EditPtOn | ✗ | control-point editing not yet |
+| PointsOn / EditPtOn | ✓ | F10 / F11: click, window-select and drag control points and mesh vertices (snaps, grid, Ortho); `MoveGrips` |
 | InsertKnot / RemoveKnot | ✗ |  |
 
 ## Curves from objects

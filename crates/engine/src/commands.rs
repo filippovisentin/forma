@@ -88,6 +88,7 @@ pub fn builtin() -> Vec<Box<dyn Command>> {
         Box::new(crate::workflow::UnifyMeshNormals),
         Box::new(crate::workflow::Block),
         Box::new(crate::workflow::Insert),
+        Box::new(crate::workflow::MoveGrips),
         Box::new(crate::select::SelCrv),
         Box::new(crate::select::SelMesh),
         Box::new(crate::select::SelPt),

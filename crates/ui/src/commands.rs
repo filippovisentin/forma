@@ -9,7 +9,9 @@ use forma_geom::{Point3, Vec3};
 use forma_render::{DisplayMode, StandardView};
 
 /// Words handled by the UI itself (views, display modes, toggles).
-const UI_WORDS: [&str; 28] = [
+const UI_WORDS: [&str; 30] = [
+    "pointson",
+    "pointsoff",
     "zw",
     "zoomwindow",
     "bottom",
@@ -317,6 +319,11 @@ impl FormaApp {
         } else if !self.command.is_empty() {
             self.command.clear();
         } else if self.face_sel.take().is_some() {
+        } else if !self.grips.sel.is_empty() {
+            self.grips.sel.clear();
+            self.dirty_all();
+        } else if self.grips.active() {
+            self.points_off();
         } else {
             self.engine.ctx.selection.clear();
         }
@@ -505,6 +512,8 @@ impl FormaApp {
             "osnap" => self.snap.disabled = !self.snap.disabled,
             "gumball" => self.gumball_on = !self.gumball_on,
             "zs" | "zoomselected" => self.zoom_selected(),
+            "pointson" => self.points_on(),
+            "pointsoff" => self.points_off(),
             "zw" | "zoomwindow" => {
                 self.zoom_window = true;
                 self.log(LogKind::Normal, "Drag a window to zoom into");

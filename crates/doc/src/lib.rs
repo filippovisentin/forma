@@ -7,6 +7,9 @@ use forma_geom::{
     BoundingBox, Chain, CircleArc, Dimension, Label, LineCurve, Mesh, NurbsCurve, Point3, Seg,
     Text, Vec3, Xform,
 };
+mod grips;
+pub use grips::MAX_MESH_GRIPS;
+
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 

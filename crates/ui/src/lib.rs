@@ -14,6 +14,7 @@ mod cmdline;
 mod commands;
 mod complete;
 mod files;
+mod grips;
 mod gumball;
 mod icons;
 mod index;
@@ -238,6 +239,8 @@ struct FormaApp {
     /// The face arrow was clicked: the next typed number pushes / pulls it.
     face_typed: bool,
     face_hot: bool,
+    /// Control points shown with PointsOn, and the selected ones.
+    grips: grips::Grips,
     /// Tool values remembered between uses (Offset distance, Fillet radius…).
     offset_distance: f64,
     fillet_radius: f64,

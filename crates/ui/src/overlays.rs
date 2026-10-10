@@ -46,6 +46,11 @@ fn label_box(p: &Painter, at: Pos2, text: String, size: f32, style: Label) {
     p.galley(at + pad, galley, Color32::BLACK);
 }
 
+/// Live measurement next to a screen point (used by grip drags).
+pub(crate) fn measure_tag(p: &Painter, at: Pos2, text: String) {
+    label_box(p, at + egui::vec2(12.0, 8.0), text, 13.0, Label::Measure);
+}
+
 /// Osnap marker: a white square, with the snap name when `label` is given.
 fn snap_marker(p: &Painter, s: Pos2, label: Option<&str>) {
     let r = Rect::from_center_size(s, egui::vec2(10.0, 10.0));
@@ -75,6 +80,7 @@ impl FormaApp {
         let pr = vp.projector(self.origin());
         self.draw_point_objects(&p, &pr);
         self.draw_annotations(&p, &pr);
+        self.draw_grips(&p, &pr);
         if let (Some(t), Some(h)) = (self.tool.as_ref(), self.hover.as_ref()) {
             self.draw_tool(&p, &pr, vi, t, h);
         }

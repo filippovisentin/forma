@@ -45,6 +45,18 @@ impl FormaApp {
         if new {
             self.run_engine("New");
         }
+        let (f10, f11) = ctx.input_mut(|i| {
+            (
+                i.consume_key(Modifiers::NONE, Key::F10),
+                i.consume_key(Modifiers::NONE, Key::F11),
+            )
+        });
+        if f10 {
+            self.points_on();
+        }
+        if f11 {
+            self.points_off();
+        }
         let (f3, f7, f8, f9) = ctx.input_mut(|i| {
             (
                 i.consume_key(Modifiers::NONE, Key::F3),

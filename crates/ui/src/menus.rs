@@ -181,6 +181,10 @@ impl FormaApp {
                         Act::Tool(K::OnSel("SelGroup")),
                     );
                 });
+                ui.menu_button("Control Points", |ui| {
+                    item(ui, &mut act, "Points On", "F10", Act::Submit("pointson"));
+                    item(ui, &mut act, "Points Off", "F11", Act::Submit("pointsoff"));
+                });
                 ui.menu_button("Blocks", |ui| {
                     tool(ui, &mut act, "Create Block", K::Seq(&q::BLOCK));
                     tool(ui, &mut act, "Insert Block", K::Seq(&q::INSERT));

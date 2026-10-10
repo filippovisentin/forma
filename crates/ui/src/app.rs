@@ -106,6 +106,7 @@ impl FormaApp {
             gumball_drag: None,
             gumball_typed: None,
             face_sel: None,
+            grips: crate::grips::Grips::default(),
             face_drag: None,
             face_typed: false,
             face_hot: false,
@@ -218,6 +219,7 @@ impl FormaApp {
             renderer.set_scene(&rs.device, &scene, min_grid_extent(doc.units));
         }
         if doc_changed {
+            self.grips.refresh(doc);
             self.seen_version = doc.version();
             self.force_rebuild = false;
             self.seen_selection.clear();

@@ -230,7 +230,10 @@ impl FormaApp {
 
         self.navigate(ui, vi, resp, mods);
         self.update_hover(vi, resp, mods);
-        if self.face_input(ui, vi, resp) || self.gumball_input(ui, vi, resp, mods) {
+        if self.face_input(ui, vi, resp)
+            || self.grips_input(ui, vi, resp, mods)
+            || self.gumball_input(ui, vi, resp, mods)
+        {
             return;
         }
         let tool_wants_points = self.tool.as_ref().is_some_and(|t| !t.selecting);
@@ -238,7 +241,11 @@ impl FormaApp {
         // Window / crossing selection.
         if resp.drag_started_by(PointerButton::Primary) && (!tool_wants_points || self.zoom_window)
         {
-            if let Some(p) = resp.interact_pointer_pos() {
+            // Start where the button went down, not where the drag was detected.
+            let start = ui
+                .input(|i| i.pointer.press_origin())
+                .or(resp.interact_pointer_pos());
+            if let Some(p) = start {
                 self.drag = Some(DragSelect {
                     viewport: vi,
                     start: p,
@@ -251,6 +258,10 @@ impl FormaApp {
                     if self.zoom_window {
                         self.zoom_window = false;
                         self.viewports[vi].zoom_window(Rect::from_two_pos(d.start, end));
+                        return;
+                    }
+                    if self.grips.active() && !tool_wants_points && self.tool.is_none() {
+                        self.grips_window(vi, d.start, end, mods);
                         return;
                     }
                     self.window_select(vi, d.start, end, mods);

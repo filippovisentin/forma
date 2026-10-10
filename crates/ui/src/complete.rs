@@ -9,7 +9,12 @@ pub struct Entry {
 }
 
 /// Commands that only exist in the UI (views, display modes, toggles).
-pub const UI_COMMANDS: [(&str, &str); 23] = [
+pub const UI_COMMANDS: [(&str, &str); 25] = [
+    (
+        "PointsOn",
+        "Show control points of the selected objects (F10)",
+    ),
+    ("PointsOff", "Hide control points (F11)"),
     ("ZW", "Zoom window: drag a rectangle to zoom into"),
     ("ZoomWindow", "Zoom window: drag a rectangle to zoom into"),
     ("ZE", "Zoom extents in the active view"),

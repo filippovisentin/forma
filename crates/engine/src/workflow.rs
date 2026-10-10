@@ -574,10 +574,114 @@ impl Command for Insert {
     }
 }
 
+simple_command!(
+    MoveGrips,
+    "MoveGrips",
+    &["MovePts"],
+    "MoveGrips #id <i,j,…> [#id <i,…> …] <dx,dy,dz> — move control points / vertices (grips, see PointsOn) of objects by a vector"
+);
+impl Command for MoveGrips {
+    impl_meta!(MoveGrips);
+    fn run(&self, ctx: &mut Context, args: &mut Args) -> CommandResult {
+        let toks = args.rest();
+        let (vec_tok, pairs) = toks
+            .split_last()
+            .ok_or(CommandError::MissingInput("object id"))?;
+        let v = crate::args::parse_point(vec_tok, None)? - Point3::ORIGIN;
+        let mut edits: Vec<(ObjectId, Vec<usize>)> = Vec::new();
+        for t in pairs {
+            if let Some(id) = t.strip_prefix('#') {
+                let id: u64 = id
+                    .parse()
+                    .map_err(|_| CommandError::BadInput(t.to_string()))?;
+                edits.push((ObjectId(id), Vec::new()));
+            } else {
+                let last = edits
+                    .last_mut()
+                    .ok_or_else(|| CommandError::BadInput(format!("{t}: object id first")))?;
+                for i in t.split(',').filter(|s| !s.is_empty()) {
+                    last.1.push(
+                        i.parse()
+                            .map_err(|_| CommandError::BadInput(t.to_string()))?,
+                    );
+                }
+            }
+        }
+        if edits.is_empty() {
+            return Err(CommandError::MissingInput("object id"));
+        }
+        let mut t = ctx.doc.begin();
+        let mut moved = 0;
+        for (id, idx) in &edits {
+            let g = t
+                .doc()
+                .object(*id)
+                .ok_or_else(|| CommandError::Invalid(format!("no object #{}", id.0)))?
+                .geometry
+                .clone();
+            let n = g.grips().len();
+            if let Some(bad) = idx.iter().find(|i| **i >= n) {
+                return Err(CommandError::Invalid(format!(
+                    "#{} has {n} grip(s), no grip {bad}",
+                    id.0
+                )));
+            }
+            let moves: Vec<(usize, Vec3)> = idx.iter().map(|i| (*i, v)).collect();
+            t.replace(*id, g.with_grips_moved(&moves));
+            moved += idx.len();
+        }
+        t.commit();
+        Ok(format!("moved {moved} point(s)"))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::Engine;
     use forma_doc::Geometry;
+
+    #[test]
+    fn move_grips_of_a_polyline_and_a_box() {
+        let mut e = Engine::new();
+        e.run_line("Polyline 0,0 10,0 10,10").unwrap();
+        e.run_line("Box 20,0 30,10 10").unwrap();
+        e.run_line("MoveGrips #1 1 0,0,5").unwrap();
+        let Geometry::Polyline(p) = &e.doc().objects().next().unwrap().geometry else {
+            panic!()
+        };
+        assert!((p[1].z - 5.0).abs() < 1e-12 && p[0].z.abs() < 1e-12);
+        // Raise the four top corners of the box together with the first point.
+        let grips = e
+            .doc()
+            .object(forma_doc::ObjectId(2))
+            .unwrap()
+            .geometry
+            .grips();
+        let top: Vec<String> = grips
+            .iter()
+            .enumerate()
+            .filter(|(_, p)| p.z > 5.0)
+            .map(|(i, _)| i.to_string())
+            .collect();
+        e.run_line(&format!("MoveGrips #1 0 #2 {} 0,0,2", top.join(",")))
+            .unwrap();
+        let b = e
+            .doc()
+            .object(forma_doc::ObjectId(2))
+            .unwrap()
+            .geometry
+            .bounding_box();
+        assert!((b.max.z - 12.0).abs() < 1e-12);
+        assert!(e.run_line("MoveGrips #1 9 1,0,0").is_err());
+        e.run_line("Undo").unwrap();
+        let b = e
+            .doc()
+            .object(forma_doc::ObjectId(2))
+            .unwrap()
+            .geometry
+            .bounding_box();
+        assert!((b.max.z - 10.0).abs() < 1e-12);
+    }
 
     #[test]
     fn block_insert_explode() {
