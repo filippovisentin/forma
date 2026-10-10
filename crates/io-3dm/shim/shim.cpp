@@ -1363,7 +1363,7 @@ unsigned char* f3dm_make_polyhedron(const double* pts, int npts, const int* data
       for (size_t i = 0; i < l.size(); i++) {
         const int v0 = l[i], v1 = l[(i + 1) % l.size()];
         if (v0 == v1) return fail();
-        const std::pair<int, int> key(std::min(v0, v1), std::max(v0, v1));
+        const std::pair<int, int> key((std::min)(v0, v1), (std::max)(v0, v1));
         auto it = edges.find(key);
         if (it == edges.end()) {
           const int c3 = b->AddEdgeCurve(new ON_LineCurve(b->m_V[v0].point, b->m_V[v1].point));
