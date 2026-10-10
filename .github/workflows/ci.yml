@@ -62,7 +62,7 @@ jobs:
         run: |
           set -o pipefail
           if ! cargo build -p forma-geom --features occt 2>&1 | tee build.log; then
-            msg=$(grep -E "error|LNK[0-9]|fatal|failed" build.log | tail -40 | sed ':a;N;$!ba;s/%/%25/g;s/\r//g;s/\n/%0A/g')
+            msg=$(grep -E -A4 "error|Error|LNK[0-9]|fatal|failed" build.log | tail -60 | sed ':a;N;$!ba;s/%/%25/g;s/\r//g;s/\n/%0A/g')
             echo "::error title=occt build::${msg}"
             exit 1
           fi

@@ -51,6 +51,11 @@ mod occt {
     /// Where OCCT's `include/` and `lib/` are, building it when needed.
     fn occt_dir() -> PathBuf {
         println!("cargo:rerun-if-env-changed=FORMA_OCCT_DIR");
+        // OCCT 7.8 asks for CMake ≥ 3.1; CMake 4 refuses anything below 3.5 unless told
+        // the minimum policy version (CMake 4 is on the Windows runners).
+        if std::env::var_os("CMAKE_POLICY_VERSION_MINIMUM").is_none() {
+            std::env::set_var("CMAKE_POLICY_VERSION_MINIMUM", "3.5");
+        }
         match std::env::var_os("FORMA_OCCT_DIR").map(PathBuf::from) {
             Some(dir) if is_install(&dir) => dir,
             Some(dir) => {
