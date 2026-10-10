@@ -371,7 +371,7 @@ mod tests {
 
     #[test]
     fn export_obj_and_stl() {
-        let dir = std::env::temp_dir().join(format!("forma-export-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("forma-objstl-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let mut e = Engine::new();
         e.run_line("Box 0,0 10,10 10").unwrap();

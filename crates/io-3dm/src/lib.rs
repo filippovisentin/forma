@@ -319,13 +319,20 @@ pub(crate) struct ModelHandle(*mut ffi::Model);
 impl ModelHandle {
     pub(crate) fn open(path: &Path) -> Result<Self, Error> {
         let cpath = c_path(path)?;
-        // SAFETY: valid NUL-terminated path; ownership of the result moves into self.
-        let m = unsafe { ffi::f3dm_read(cpath.as_ptr()) };
-        if m.is_null() {
-            Err(Error::ReadFailed(path.display().to_string()))
-        } else {
-            Ok(Self(m))
+        // A file that was just written can be briefly locked on Windows (virus
+        // scanner, cloud sync): try a few times before giving up.
+        for attempt in 0..4 {
+            // SAFETY: valid NUL-terminated path; ownership of the result moves into self.
+            let m = unsafe { ffi::f3dm_read(cpath.as_ptr()) };
+            if !m.is_null() {
+                return Ok(Self(m));
+            }
+            if !path.exists() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50 << attempt));
         }
+        Err(Error::ReadFailed(path.display().to_string()))
     }
 
     pub(crate) fn ptr(&self) -> *mut ffi::Model {
