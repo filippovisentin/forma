@@ -106,6 +106,28 @@ struct Entry {
     max: DVec3,
 }
 
+/// Object ids per scene chunk.
+pub const CHUNK: u64 = 64;
+
+/// What changed in the chunked scene (see [`SceneCache::scene_chunks`]).
+#[derive(Debug, Default)]
+pub struct SceneUpdate {
+    pub origin: DVec3,
+    /// Every chunk with its signature.
+    pub chunks: Vec<(u64, u64)>,
+    /// The chunks to upload again.
+    pub changed: Vec<(u64, u64, Scene)>,
+    /// Bounds of everything visible, scene coordinates (zero when empty).
+    pub min: DVec3,
+    pub max: DVec3,
+}
+
+impl SceneUpdate {
+    pub fn is_empty(&self) -> bool {
+        self.chunks.is_empty()
+    }
+}
+
 /// Per-object tessellation cache. Keep one per document; call [`SceneCache::reset`]
 /// when a different document is loaded.
 #[derive(Debug, Default)]
@@ -149,6 +171,48 @@ impl SceneCache {
             })
             .collect();
         self.assemble(&ids, None)
+    }
+
+    /// The visible objects in chunks of [`CHUNK`] consecutive ids, with a
+    /// signature per chunk; only chunks whose signature is not in `known` are
+    /// assembled. After a command that touches a few objects, only their chunks
+    /// are rebuilt and uploaded.
+    pub fn scene_chunks(&mut self, doc: &Document, known: &HashMap<u64, u64>) -> SceneUpdate {
+        use std::hash::{Hash, Hasher};
+        self.entries.retain(|id, _| doc.object(*id).is_some());
+        let mut groups: std::collections::BTreeMap<u64, Vec<ObjectId>> = Default::default();
+        for o in doc.objects().filter(|o| doc.is_visible(o)) {
+            self.entry(o, doc.display_color(o));
+            groups.entry(o.id.0 / CHUNK).or_default().push(o.id);
+        }
+        let mut up = SceneUpdate {
+            origin: self.origin,
+            ..Default::default()
+        };
+        let (mut min, mut max) = (DVec3::splat(f64::INFINITY), DVec3::splat(f64::NEG_INFINITY));
+        for (key, ids) in &groups {
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            // A new origin (another document) changes every chunk.
+            self.origin.to_array().map(f64::to_bits).hash(&mut h);
+            for id in ids {
+                let e = &self.entries[id];
+                (id.0, e.rev, e.color).hash(&mut h);
+                if !(e.mesh_indices.is_empty() && e.lines.is_empty()) {
+                    min = min.min(e.min);
+                    max = max.max(e.max);
+                }
+            }
+            let sig = h.finish();
+            up.chunks.push((*key, sig));
+            if known.get(key) != Some(&sig) {
+                up.changed.push((*key, sig, self.assemble(ids, None)));
+            }
+        }
+        if min.x.is_finite() {
+            up.min = min;
+            up.max = max;
+        }
+        up
     }
 
     /// Build a highlight scene for the given objects (drawn over the scene in yellow).
@@ -527,6 +591,47 @@ mod tests {
         )));
         t.commit();
         d
+    }
+
+    #[test]
+    fn only_changed_chunks_are_rebuilt() {
+        use forma_doc::{Document, Geometry};
+        use forma_geom::{LineCurve, Point3};
+        let mut doc = Document::new();
+        let mut ids = Vec::new();
+        {
+            let mut t = doc.begin();
+            for i in 0..200 {
+                let y = f64::from(i);
+                ids.push(t.add(Geometry::Line(LineCurve::new(
+                    Point3::new(0.0, y, 0.0),
+                    Point3::new(10.0, y, 0.0),
+                ))));
+            }
+            t.commit();
+        }
+        let mut cache = SceneCache::default();
+        let first = cache.scene_chunks(&doc, &HashMap::new());
+        assert_eq!(first.chunks.len(), first.changed.len());
+        assert!(first.chunks.len() >= 3);
+        let known: HashMap<u64, u64> = first.chunks.iter().copied().collect();
+        let again = cache.scene_chunks(&doc, &known);
+        assert!(again.changed.is_empty());
+        // Move one line: one chunk changes.
+        {
+            let mut t = doc.begin();
+            t.replace(
+                ids[150],
+                Geometry::Line(LineCurve::new(
+                    Point3::new(0.0, 0.0, 5.0),
+                    Point3::new(1.0, 0.0, 5.0),
+                )),
+            );
+            t.commit();
+        }
+        let third = cache.scene_chunks(&doc, &known);
+        assert_eq!(third.changed.len(), 1);
+        assert!((third.max.z - 5.0).abs() < 1e-9 || third.max.z > 4.0);
     }
 
     #[test]

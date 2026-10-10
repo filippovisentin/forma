@@ -210,19 +210,20 @@ impl FormaApp {
         let renderer = frame.wgpu_render_state().zip(self.renderer.as_mut());
         if let (true, Some((rs, renderer))) = (doc_changed, renderer) {
             let t = perf::span("sync: scene build");
-            let scene = self.cache.scene(doc);
+            let known = renderer.chunk_signatures();
+            let update = self.cache.scene_chunks(doc, &known);
             drop(t);
             let origin = self.cache.origin();
-            if scene.is_empty() {
+            if update.min == update.max {
                 let e = min_grid_extent(doc.units) / 2.0;
                 self.scene_min = DVec3::new(-e, -e, 0.0) - origin;
                 self.scene_max = DVec3::new(e, e, 0.0) - origin;
             } else {
-                self.scene_min = scene.min;
-                self.scene_max = scene.max;
+                self.scene_min = update.min;
+                self.scene_max = update.max;
             }
             let _t = perf::span("sync: scene upload");
-            renderer.set_scene(&rs.device, &scene, min_grid_extent(doc.units));
+            renderer.set_scene_chunks(&rs.device, &update, min_grid_extent(doc.units));
         }
         if doc_changed {
             self.grips.refresh(doc);

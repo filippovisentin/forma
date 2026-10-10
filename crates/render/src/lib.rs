@@ -10,7 +10,7 @@ pub use camera::{Camera, StandardView};
 pub use glam;
 pub use scene::{
     grid_lines, grid_lines_on_plane, grid_spacing, model_center, GridBounds, GridPlane, LineVertex,
-    MeshVertex, Scene, SceneCache, EDGE_COLOR, HIGHLIGHT,
+    MeshVertex, Scene, SceneCache, SceneUpdate, EDGE_COLOR, HIGHLIGHT,
 };
 pub use wgpu;
 
@@ -134,6 +134,9 @@ pub struct Renderer {
     grid_pipeline: wgpu::RenderPipeline,
     bind_group_layout: wgpu::BindGroupLayout,
     scene: Buffers,
+    /// The document scene in chunks (see [`SceneCache::scene_chunks`]): only
+    /// the chunks that changed are uploaded again after a command.
+    chunks: std::collections::HashMap<u64, (u64, Buffers)>,
     highlight: Buffers,
     grids: [Buffers; 3],
     /// Grids of custom construction planes, by slot (viewport): plane and lines.
@@ -271,6 +274,7 @@ impl Renderer {
             grid_pipeline,
             bind_group_layout: bgl,
             scene: Buffers::default(),
+            chunks: std::collections::HashMap::new(),
             highlight: Buffers::default(),
             grids: Default::default(),
             custom_grids: std::collections::HashMap::new(),
@@ -304,10 +308,45 @@ impl Renderer {
         }
     }
 
+    /// Signatures of the uploaded scene chunks, to pass to
+    /// [`SceneCache::scene_chunks`].
+    pub fn chunk_signatures(&self) -> std::collections::HashMap<u64, u64> {
+        self.chunks.iter().map(|(k, (s, _))| (*k, *s)).collect()
+    }
+
+    /// Upload the changed chunks of the document scene, drop the chunks that are
+    /// gone, and rebuild the grids around the scene bounds. Returns the grid spacing.
+    pub fn set_scene_chunks(
+        &mut self,
+        device: &wgpu::Device,
+        update: &SceneUpdate,
+        min_grid_extent: f64,
+    ) -> f64 {
+        self.scene = Buffers::default();
+        self.chunks
+            .retain(|k, _| update.chunks.iter().any(|(key, _)| key == k));
+        for (key, sig, scene) in &update.changed {
+            self.chunks
+                .insert(*key, (*sig, Buffers::new(device, scene)));
+        }
+        let bounds = Scene {
+            origin: update.origin,
+            min: update.min,
+            max: update.max,
+            ..Default::default()
+        };
+        self.update_grids(device, &bounds, min_grid_extent)
+    }
+
     /// Upload the document scene and rebuild the grids around it. Returns the grid
     /// spacing (the same on all three planes).
     pub fn set_scene(&mut self, device: &wgpu::Device, scene: &Scene, min_grid_extent: f64) -> f64 {
         self.scene = Buffers::new(device, scene);
+        self.chunks.clear();
+        self.update_grids(device, scene, min_grid_extent)
+    }
+
+    fn update_grids(&mut self, device: &wgpu::Device, scene: &Scene, min_grid_extent: f64) -> f64 {
         let mut spacing = 1.0;
         for p in GridPlane::ALL {
             let (lines, s) = grid_lines(scene, p, min_grid_extent);
@@ -533,14 +572,23 @@ impl Renderer {
             let draw_mesh = |pass: &mut wgpu::RenderPass<'_>, b: &Buffers| {
                 draw_mesh_with(pass, b, &self.mesh_pipeline);
             };
+            let parts: Vec<&Buffers> = std::iter::once(&self.scene)
+                .chain(self.chunks.values().map(|c| &c.1))
+                .collect();
             match mode {
                 DisplayMode::Wireframe => {
-                    draw_lines(&mut pass, &self.scene);
+                    for b in &parts {
+                        draw_lines(&mut pass, b);
+                    }
                     draw_lines(&mut pass, &self.highlight);
                 }
                 DisplayMode::Shaded => {
-                    draw_mesh(&mut pass, &self.scene);
-                    draw_lines(&mut pass, &self.scene);
+                    for b in &parts {
+                        draw_mesh(&mut pass, b);
+                    }
+                    for b in &parts {
+                        draw_lines(&mut pass, b);
+                    }
                     // Same geometry drawn again: equal depth passes LessEqual, so it lands on top.
                     draw_mesh(&mut pass, &self.highlight);
                     draw_lines(&mut pass, &self.highlight);
