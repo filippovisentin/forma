@@ -140,35 +140,49 @@ impl SceneCache {
     /// Build the scene of all visible objects (visible layer, not hidden).
     pub fn scene(&mut self, doc: &Document) -> Scene {
         self.entries.retain(|id, _| doc.object(*id).is_some());
-        let mut s = Scene {
-            origin: self.origin,
-            ..Default::default()
-        };
-        let mut first = true;
-        for o in doc.objects() {
-            if !doc.is_visible(o) {
-                continue;
-            }
-            let e = self.entry(o, doc.display_color(o));
-            append(&mut s, e, None, &mut first);
-        }
-        s
+        let ids: Vec<ObjectId> = doc
+            .objects()
+            .filter(|o| doc.is_visible(o))
+            .map(|o| {
+                self.entry(o, doc.display_color(o));
+                o.id
+            })
+            .collect();
+        self.assemble(&ids, None)
     }
 
     /// Build a highlight scene for the given objects (drawn over the scene in yellow).
     pub fn highlight(&mut self, doc: &Document, ids: &BTreeSet<ObjectId>) -> Scene {
+        let ids: Vec<ObjectId> = ids
+            .iter()
+            .filter_map(|id| doc.object(*id))
+            .filter(|o| doc.is_visible(o))
+            .map(|o| {
+                self.entry(o, doc.display_color(o));
+                o.id
+            })
+            .collect();
+        self.assemble(&ids, Some(HIGHLIGHT))
+    }
+
+    /// Concatenate cached entries, allocating every array once (big models
+    /// have millions of vertices: growing the vectors step by step would copy
+    /// them several times).
+    fn assemble(&self, ids: &[ObjectId], highlight: Option<[f32; 4]>) -> Scene {
+        let entries: Vec<&Entry> = ids.iter().filter_map(|id| self.entries.get(id)).collect();
         let mut s = Scene {
             origin: self.origin,
             ..Default::default()
         };
+        s.mesh_vertices
+            .reserve_exact(entries.iter().map(|e| e.mesh_vertices.len()).sum());
+        s.mesh_indices
+            .reserve_exact(entries.iter().map(|e| e.mesh_indices.len()).sum());
+        s.line_vertices
+            .reserve_exact(entries.iter().map(|e| e.lines.len()).sum());
         let mut first = true;
-        for id in ids {
-            let Some(o) = doc.object(*id) else { continue };
-            if !doc.is_visible(o) {
-                continue;
-            }
-            let e = self.entry(o, doc.display_color(o));
-            append(&mut s, e, Some(HIGHLIGHT), &mut first);
+        for e in entries {
+            append(&mut s, e, highlight, &mut first);
         }
         s
     }

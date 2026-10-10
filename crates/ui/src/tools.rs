@@ -197,14 +197,14 @@ impl ToolKind {
         match self {
             Point => "Point — single points (Enter to finish)",
             Line => "Line — single segment",
-            Polyline => "Polyline — connected segments (C closes)",
+            Polyline => "Polyline — connected segments",
             Curve => "Curve — control-point curve (Enter to finish)",
             InterpCrv => "InterpCrv — curve through points (Enter to finish)",
             Rectangle => "Rectangle — two corners",
             Circle => "Circle — center, radius",
             Arc => "Arc — center, start, end",
             Ellipse => "Ellipse — center, end of first axis, second axis",
-            Polygon => "Polygon — center, corner (type a number for the sides)",
+            Polygon => "Polygon — center, corner (NumSides option)",
             Box => "Box — two corners and height",
             Cylinder => "Cylinder — center, radius, height",
             Sphere => "Sphere — center, radius",
@@ -301,6 +301,69 @@ impl ToolKind {
             "matchproperties" | "matchprop" | "ma" => MatchProperties,
             _ => return None,
         })
+    }
+
+    /// The short alias typed in the command line (Rhino-style), if any.
+    pub fn alias(self) -> Option<&'static str> {
+        use ToolKind::*;
+        Some(match self {
+            Point => "Pt",
+            Line => "L",
+            Polyline => "PL",
+            Curve => "Crv",
+            InterpCrv => "Interp",
+            Rectangle => "Rec",
+            Circle => "C",
+            Ellipse => "El",
+            Polygon => "Pol",
+            Extrude => "Ext",
+            Revolve => "Rev",
+            Move => "M",
+            Copy => "Co",
+            Rotate => "Ro",
+            Scale => "Sc",
+            Scale1D => "S1",
+            Scale2D => "S2",
+            Mirror => "Mi",
+            Orient => "Or",
+            Offset => "O",
+            Trim => "Tr",
+            Extend => "Ex",
+            Fillet => "F",
+            Chamfer => "Cha",
+            FilletCorners => "FC",
+            Join => "J",
+            Explode => "X",
+            ArrayLinear => "AL",
+            ArrayPolar => "AP",
+            Distance => "Dist",
+            MatchProperties => "Ma",
+            OnSel("Delete") => "Del",
+            OnSel("Flip") => "Dir",
+            OnSel("BoundingBox") => "BBox",
+            _ => return None,
+        })
+    }
+
+    /// Keyboard shortcut of the command, if any.
+    pub fn shortcut(self) -> Option<&'static str> {
+        Some(match self {
+            ToolKind::Join => "Ctrl+J",
+            ToolKind::OnSel("Hide") => "Ctrl+H",
+            ToolKind::OnSel("Lock") => "Ctrl+L",
+            ToolKind::OnSel("Group") => "Ctrl+G",
+            ToolKind::OnSel("Ungroup") => "Ctrl+Shift+G",
+            ToolKind::OnSel("Delete") => "Del",
+            ToolKind::OnSel("CopyToClipboard") => "Ctrl+C",
+            ToolKind::OnSel("Cut") => "Ctrl+X",
+            _ => return None,
+        })
+    }
+
+    /// The tooltip without the leading "Name — ".
+    pub fn description(self) -> &'static str {
+        let t = self.tooltip();
+        t.split_once(" — ").map_or(t, |(_, d)| d)
     }
 
     /// A selection command typed by name (exact names only).
@@ -401,6 +464,22 @@ pub enum Step {
     Cancel(String),
 }
 
+/// What clicking (or typing) an option does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OptAction {
+    /// Runs at once, like typing the word (`Close`, `Undo`).
+    Word(&'static str),
+    /// Asks for a new number (`Distance`, `Radius`, `NumSides`).
+    Value(&'static str),
+}
+
+/// A command option offered in the prompt.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ToolOption {
+    pub label: String,
+    pub action: OptAction,
+}
+
 pub struct Tool {
     pub kind: ToolKind,
     pub plane: Plane,
@@ -484,14 +563,12 @@ impl Tool {
             };
             return format!("{} — {what}, press Enter when done", self.kind.name());
         }
-        let d = round(self.distance);
         let n = self.pts.len();
         let p = match (self.kind, n) {
             (Line, 0) => "Start of line",
             (Line, _) => "End of line",
             (Polyline, 0) => "Start of polyline",
-            (Polyline, 1 | 2) => "Next point (Enter to finish)",
-            (Polyline, _) => "Next point (Enter to finish, C to close)",
+            (Polyline, _) => "Next point (Enter to finish)",
             (Rectangle, 0) => "First corner of rectangle",
             (Rectangle, _) => "Other corner (or length)",
             (Circle, 0) => "Center of circle",
@@ -520,14 +597,10 @@ impl Tool {
             (Scale, _) => "Second reference point",
             (Mirror, 0) => "Start of mirror plane",
             (Mirror, _) => "End of mirror plane",
-            (Offset, _) => {
-                return format!("Offset — side to offset (distance {d}; type a number to change)")
-            }
+            (Offset, _) => "Side to offset",
             (Trim, _) => "Click the part of a curve to cut away (Enter to finish)",
             (Extend, _) => "Click near the end of a curve to extend (Enter to finish)",
-            (Fillet, 0) => {
-                return format!("Fillet — first line (radius {d}; type a number to change)")
-            }
+            (Fillet, 0) => "First line to fillet",
             (Fillet, _) => "Second line",
             (FilletCorners, _) => "Fillet radius",
             (Join | Explode, _) => "press Enter",
@@ -538,21 +611,14 @@ impl Tool {
             (ArrayPolar, _) => "Number of elements (full turn)",
             (Point, _) => "Location of point (Enter to finish)",
             (Curve | InterpCrv, 0) => "Start of curve",
-            (Curve | InterpCrv, _) => "Next point (Enter to finish, U to undo)",
+            (Curve | InterpCrv, _) => "Next point (Enter to finish)",
             (Ellipse, 0) => "Ellipse center",
             (Ellipse, 1) => "End of first axis",
             (Ellipse, _) => "End of second axis (or radius)",
-            (Polygon, 0) => {
-                return format!(
-                    "Polygon — center ({} sides; type a number to change)",
-                    self.count.unwrap_or(5)
-                )
-            }
+            (Polygon, 0) => "Center of polygon",
             (Polygon, _) => "Corner of polygon",
             (Split, _) => "press Enter",
-            (Chamfer, 0) => {
-                return format!("Chamfer — first line (distance {d}; type a number to change)")
-            }
+            (Chamfer, 0) => "First line to chamfer",
             (Chamfer, _) => "Second line",
             (Scale1D | Scale2D, 0) => "Origin point",
             (Scale1D, 1) if self.factor.is_some() => "Direction of scaling",
@@ -976,7 +1042,8 @@ impl Tool {
         }
     }
 
-    /// Typed options: `C` closes a polyline.
+    /// Typed options: `C` / `Close` closes a polyline, `U` / `Undo` removes the
+    /// last point.
     pub fn option(&mut self, word: &str) -> Option<Step> {
         let w = word.to_lowercase();
         if self.kind == ToolKind::Polyline && (w == "c" || w == "close") && self.pts.len() >= 3 {
@@ -991,6 +1058,63 @@ impl Tool {
             return Some(Step::Continue);
         }
         None
+    }
+
+    /// Options of the current step, shown as clickable words in the prompt
+    /// (Rhino: `Next point ( Close Undo )`, `Side to offset ( Distance=10 )`).
+    pub fn options(&self) -> Vec<ToolOption> {
+        use ToolKind::*;
+        let mut v = Vec::new();
+        if self.selecting {
+            return v;
+        }
+        let n = self.pts.len();
+        let value = |name: &'static str, x: f64| ToolOption {
+            label: format!("{name}={}", round(x)),
+            action: OptAction::Value(name),
+        };
+        let word = |name: &'static str| ToolOption {
+            label: name.to_string(),
+            action: OptAction::Word(name),
+        };
+        match self.kind {
+            Polyline if n >= 3 => v.extend([word("Close"), word("Undo")]),
+            Polyline | Curve | InterpCrv if n >= 1 => v.push(word("Undo")),
+            Offset => v.push(value("Distance", self.distance)),
+            Chamfer => v.push(value("Distance", self.distance)),
+            Fillet => v.push(value("Radius", self.distance)),
+            Polygon if n == 0 => v.push(value("NumSides", self.count.unwrap_or(5) as f64)),
+            _ => {}
+        }
+        v
+    }
+
+    /// Current value of a numeric option.
+    pub fn option_value(&self, name: &str) -> Option<f64> {
+        self.options().iter().find_map(|o| match o.action {
+            OptAction::Value(n) if n.eq_ignore_ascii_case(name) => Some(if n == "NumSides" {
+                self.count.unwrap_or(5) as f64
+            } else {
+                self.distance
+            }),
+            _ => None,
+        })
+    }
+
+    /// Set a numeric option (`Distance`, `Radius`, `NumSides`).
+    pub fn set_option(&mut self, name: &str, x: f64) -> Result<(), String> {
+        match name.to_ascii_lowercase().as_str() {
+            "distance" | "radius" if x > 0.0 || (self.kind == ToolKind::Fillet && x >= 0.0) => {
+                self.distance = x;
+                Ok(())
+            }
+            "numsides" if (3.0..=1000.0).contains(&x) => {
+                self.count = Some(x.round() as usize);
+                Ok(())
+            }
+            "numsides" => Err("a polygon needs 3 or more sides".into()),
+            _ => Err(format!("invalid value for {name}: {x}")),
+        }
     }
 
     /// Live measurements for the cursor position (shown next to the cursor).
@@ -1521,5 +1645,60 @@ mod tests {
             vec![],
         );
         assert_eq!(f.instant_line(), "ProjectToCPlane 0,-1,0 0,0,0");
+    }
+
+    #[test]
+    fn prompt_options_follow_the_step() {
+        let mut t = Tool::new(
+            ToolKind::Polyline,
+            Plane::TOP,
+            false,
+            Point3::ORIGIN,
+            vec![],
+        );
+        assert!(t.options().is_empty());
+        t.feed_point(Point3::ORIGIN);
+        let labels: Vec<String> = t.options().into_iter().map(|o| o.label).collect();
+        assert_eq!(labels, vec!["Undo"]);
+        t.feed_point(Point3::new(10.0, 0.0, 0.0));
+        t.feed_point(Point3::new(10.0, 10.0, 0.0));
+        let opts = t.options();
+        assert_eq!(opts[0].action, OptAction::Word("Close"));
+        assert_eq!(opts[1].action, OptAction::Word("Undo"));
+
+        let mut o = Tool::new(ToolKind::Offset, Plane::TOP, true, Point3::ORIGIN, vec![]);
+        o.distance = 10.0;
+        assert_eq!(o.options()[0].label, "Distance=10");
+        assert_eq!(o.option_value("distance"), Some(10.0));
+        o.set_option("Distance", 2.5).expect("valid");
+        assert_eq!(o.options()[0].label, "Distance=2.5");
+        assert!(o.set_option("Distance", -1.0).is_err());
+
+        let mut p = Tool::new(ToolKind::Polygon, Plane::TOP, false, Point3::ORIGIN, vec![]);
+        assert_eq!(p.options()[0].label, "NumSides=5");
+        p.set_option("NumSides", 8.0).expect("valid");
+        assert_eq!(p.option_value("NumSides"), Some(8.0));
+        assert!(p.set_option("NumSides", 2.0).is_err());
+        let f = Tool::new(ToolKind::Fillet, Plane::TOP, false, Point3::ORIGIN, vec![]);
+        assert_eq!(f.options()[0].action, OptAction::Value("Radius"));
+    }
+
+    #[test]
+    fn aliases_round_trip() {
+        let kinds = ToolKind::CURVES
+            .iter()
+            .chain(&ToolKind::CURVE_TOOLS)
+            .chain(&ToolKind::SURFACES)
+            .chain(&ToolKind::TRANSFORMS)
+            .chain(&ToolKind::ANALYZE)
+            .chain(&ToolKind::EDIT);
+        for k in kinds {
+            if let (Some(a), ToolKind::OnSel(_)) = (k.alias(), k) {
+                assert_eq!(ToolKind::selection_command(a), Some(*k), "{a}");
+            } else if let Some(a) = k.alias() {
+                assert_eq!(ToolKind::from_name(a), Some(*k), "{a}");
+            }
+            assert!(!k.description().is_empty(), "{}", k.name());
+        }
     }
 }
