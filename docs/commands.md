@@ -12,7 +12,7 @@ is in `Help` and `forma-cli commands`.
 
 ## Summary
 
-279 Rhino commands: **164 ✓**, **54 partial**, **43 ✗**, **18 needs kernel**.
+279 Rhino commands: **167 ✓**, **54 partial**, **40 ✗**, **18 needs kernel**.
 
 ## Drawing: points and lines
 
@@ -256,7 +256,7 @@ is in `Help` and `forma-cli commands`.
 | SelText | ✓ |  |
 | SelDim | ✓ |  |
 | SelVisible | ✓ |  |
-| SelBoundary | ✗ |  |
+| SelBoundary | ✓ | `SelBoundary #curve` (objects inside a closed planar curve) |
 | SelID | ✓ | `Select #id …` |
 | Window / crossing selection | ✓ | mouse drag →/← |
 
@@ -333,7 +333,7 @@ is in `Help` and `forma-cli commands`.
 | TextDot | ✓ | `Dot` (alias TextDot) |
 | Hatch | partial | `Hatch <spacing> [angle]`: grouped lines, no hatch object / patterns |
 | AnnotationStyles / DimStyle | partial | `DimStyle [height] [decimals]` per document |
-| EditText | ✗ |  |
+| EditText | ✓ | `EditText #id <text>` (texts, dots, dimension overrides) |
 | Layout / Detail / Print | ✗ |  |
 
 ## View and display
@@ -369,6 +369,6 @@ is in `Help` and `forma-cli commands`.
 | Export (selected) | partial | .3dm, .obj, .stl; glTF to come |
 | Recent files | ✓ |  |
 | Units / DocumentProperties | partial | units from `New`; no dialog |
-| IncrementalSave | ✗ |  |
+| IncrementalSave | ✓ | `IncrementalSave` → model_001.3dm, model_002.3dm… |
 | Worksession | ✗ |  |
 | Exit | ✓ |  |

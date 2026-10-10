@@ -96,6 +96,7 @@ impl FormaApp {
                 ui.separator();
                 item(ui, &mut act, "Save", "Ctrl+S", Act::Save);
                 item(ui, &mut act, "Save As…", "Ctrl+Shift+S", Act::SaveAs);
+                item(ui, &mut act, "Incremental Save", "", Act::Cmd("IncrementalSave"));
                 item(
                     ui,
                     &mut act,
@@ -151,6 +152,7 @@ impl FormaApp {
                     item(ui, &mut act, "By Name…", "", Act::Prefill("SelName ", "SelName <name> — select objects by name (* wildcards)"));
                     item(ui, &mut act, "Small Objects…", "", Act::Prefill("SelSmall ", "SelSmall <size> — select objects smaller than size"));
                     item(ui, &mut act, "Duplicates", "", Act::Cmd("SelDup"));
+                    tool(ui, &mut act, "Inside Boundary Curve", K::Seq(&q::SEL_BOUNDARY));
                 });
                 ui.separator();
                 tool(ui, &mut act, "Join", K::Join);
@@ -437,6 +439,7 @@ impl FormaApp {
                 ui.separator();
                 tool(ui, &mut act, "Text", K::Seq(&q::TEXT));
                 tool(ui, &mut act, "Text Dot", K::Seq(&q::DOT));
+                tool(ui, &mut act, "Edit Text", K::Seq(&q::EDIT_TEXT));
                 tool(ui, &mut act, "Hatch", K::Seq(&q::HATCH));
                 ui.separator();
                 item(

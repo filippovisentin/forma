@@ -1547,8 +1547,28 @@ pub static INSERT: Seq = Seq {
     preview: none,
 };
 
+pub static EDIT_TEXT: Seq = Seq {
+    name: "EditText",
+    tip: "EditText — change the text of a text, dot or dimension",
+    sel: false,
+    steps: &[In::Object("Text, dot or dimension"), In::Text("New text")],
+    emit: |v, _| format!("EditText #{} {}", v[0].o(), v[1].t()),
+    preview: none,
+};
+
+pub static SEL_BOUNDARY: Seq = Seq {
+    name: "SelBoundary",
+    tip: "SelBoundary — select what lies inside a closed curve",
+    sel: false,
+    steps: &[In::Object("Closed boundary curve")],
+    emit: |v, _| format!("SelBoundary #{}", v[0].o()),
+    preview: none,
+};
+
 /// Every sequence tool (for typed names, help and tests).
 pub static ALL: &[&Seq] = &[
+    &EDIT_TEXT,
+    &SEL_BOUNDARY,
     &BLOCK,
     &INSERT,
     &LINES,

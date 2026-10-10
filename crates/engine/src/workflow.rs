@@ -635,6 +635,118 @@ impl Command for MoveGrips {
     }
 }
 
+simple_command!(
+    EditText,
+    "EditText",
+    &[],
+    "EditText #id <text…> — change the text of a text, dot or dimension (`<>` in a dimension stands for its measured value)"
+);
+impl Command for EditText {
+    impl_meta!(EditText);
+    fn run(&self, ctx: &mut Context, args: &mut Args) -> CommandResult {
+        let tok = args
+            .next_token()
+            .ok_or(CommandError::MissingInput("text object"))?;
+        let id = parse_ids(vec![tok])?
+            .first()
+            .copied()
+            .ok_or_else(|| CommandError::BadInput(tok.to_string()))?;
+        let text = args.rest().join(" ");
+        if text.trim().is_empty() {
+            return Err(CommandError::MissingInput("text"));
+        }
+        let g = ctx
+            .doc
+            .object(id)
+            .ok_or_else(|| CommandError::Invalid(format!("no object #{}", id.0)))?
+            .geometry
+            .clone();
+        let out = match g {
+            Geometry::Text(mut t) => {
+                t.text = text;
+                Geometry::Text(t)
+            }
+            Geometry::Dimension(mut d) => {
+                d.text = (text.trim() != "<>").then_some(text);
+                Geometry::Dimension(d)
+            }
+            _ => {
+                return Err(CommandError::Invalid(format!(
+                    "#{} is not a text, dot or dimension",
+                    id.0
+                )))
+            }
+        };
+        let mut t = ctx.doc.begin();
+        t.replace(id, out);
+        t.commit();
+        Ok(format!("#{} text changed", id.0))
+    }
+}
+
+/// Points that must lie inside a boundary for an object to count as inside.
+fn sample_points(g: &Geometry) -> Vec<Point3> {
+    match g {
+        Geometry::Mesh(m) => {
+            let step = (m.positions.len() / 2000).max(1);
+            m.positions.iter().step_by(step).copied().collect()
+        }
+        Geometry::Point(p) => vec![*p],
+        g => g.curve_points(),
+    }
+}
+
+simple_command!(
+    SelBoundary,
+    "SelBoundary",
+    &[],
+    "SelBoundary #curve — select the objects that lie inside a closed planar curve (seen along its normal, e.g. a room outline in plan)"
+);
+impl Command for SelBoundary {
+    impl_meta!(SelBoundary);
+    fn run(&self, ctx: &mut Context, args: &mut Args) -> CommandResult {
+        let tok = args
+            .next_token()
+            .ok_or(CommandError::MissingInput("boundary curve"))?;
+        let id = parse_ids(vec![tok])?
+            .first()
+            .copied()
+            .ok_or_else(|| CommandError::BadInput(tok.to_string()))?;
+        let g = &ctx
+            .doc
+            .object(id)
+            .ok_or_else(|| CommandError::Invalid(format!("no object #{}", id.0)))?
+            .geometry;
+        if !g.is_closed_curve() {
+            return Err(CommandError::Invalid(format!(
+                "#{} is not a closed curve",
+                id.0
+            )));
+        }
+        let n = g
+            .curve_normal()
+            .ok_or_else(|| CommandError::Invalid("the boundary is not planar".into()))?;
+        let poly = g.curve_points();
+        let plane = forma_geom::Plane::from_normal(poly[0], n);
+        let doc = &ctx.doc;
+        let inside: Vec<ObjectId> = doc
+            .objects()
+            .filter(|o| o.id != id && doc.is_selectable(o))
+            .filter(|o| {
+                let pts = sample_points(&o.geometry);
+                !pts.is_empty()
+                    && pts
+                        .iter()
+                        .all(|p| forma_geom::point_in_polygon(*p, &poly, &plane))
+            })
+            .map(|o| o.id)
+            .collect();
+        let k = inside.len();
+        ctx.selection.extend(inside);
+        Ok(format!("{k} object(s) inside #{} selected", id.0))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::Engine;
@@ -681,6 +793,26 @@ mod tests {
             .geometry
             .bounding_box();
         assert!((b.max.z - 10.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn edit_text_and_sel_boundary() {
+        let mut e = Engine::new();
+        e.run_line("Rectangle 0,0 100,100").unwrap();
+        e.run_line("Circle 50,50 10").unwrap();
+        e.run_line("Box 20,20 40,40 30").unwrap();
+        e.run_line("Line 90,50 150,50").unwrap();
+        e.run_line("Text 10,10 5 Soggiorno").unwrap();
+        e.run_line("SelBoundary #1").unwrap();
+        let sel: Vec<u64> = e.ctx.selection.iter().map(|i| i.0).collect();
+        assert_eq!(sel, vec![2, 3, 5]);
+        e.run_line("EditText #5 Cucina").unwrap();
+        let Geometry::Text(t) = &e.doc().object(forma_doc::ObjectId(5)).unwrap().geometry else {
+            panic!()
+        };
+        assert_eq!(t.text, "Cucina");
+        assert!(e.run_line("EditText #4 x").is_err());
+        assert!(e.run_line("SelBoundary #4").is_err());
     }
 
     #[test]

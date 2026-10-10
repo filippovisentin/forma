@@ -323,9 +323,69 @@ impl Command for Save {
     }
 }
 
+/// Next free `name_NNN.3dm` next to `path` (an existing `_NNN` suffix counts up).
+fn next_increment(path: &str) -> String {
+    let p = std::path::Path::new(path);
+    let dir = p
+        .parent()
+        .map(std::path::Path::to_path_buf)
+        .unwrap_or_default();
+    let stem = p
+        .file_stem()
+        .map_or_else(String::new, |s| s.to_string_lossy().into_owned());
+    let (base, start) = match stem.rsplit_once('_') {
+        Some((b, n)) if n.len() == 3 && n.chars().all(|c| c.is_ascii_digit()) => {
+            (b.to_string(), n.parse::<u32>().unwrap_or(0) + 1)
+        }
+        _ => (stem.clone(), 1),
+    };
+    (start..)
+        .map(|k| dir.join(format!("{base}_{k:03}.3dm")))
+        .find(|c| !c.exists())
+        .map(|c| c.display().to_string())
+        .expect("a free name")
+}
+
+simple_command!(
+    IncrementalSave,
+    "IncrementalSave",
+    &[],
+    "IncrementalSave — save as the next numbered copy (model_001.3dm, model_002.3dm…) next to the current file"
+);
+impl Command for IncrementalSave {
+    impl_meta!(IncrementalSave);
+    fn run(&self, ctx: &mut Context, _args: &mut Args) -> CommandResult {
+        let current = ctx.doc.path.clone().ok_or_else(|| {
+            CommandError::Invalid("IncrementalSave: save the model once first".into())
+        })?;
+        let path = next_increment(&current);
+        forma_io_3dm::write_document(&path, &ctx.doc)
+            .map_err(|e| CommandError::Invalid(e.to_string()))?;
+        ctx.doc.path = Some(path.clone());
+        Ok(format!("saved {path}"))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::Engine;
+
+    #[test]
+    fn incremental_save_numbers_copies() {
+        let dir = std::env::temp_dir().join(format!("forma-incr-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut e = Engine::new();
+        assert!(e.run_line("IncrementalSave").is_err());
+        e.run_line("Line 0,0 1,0").unwrap();
+        e.run_line(&format!("Save {}", dir.join("casa.3dm").display()))
+            .unwrap();
+        e.run_line("IncrementalSave").unwrap();
+        assert!(e.doc().path.as_deref().unwrap().ends_with("casa_001.3dm"));
+        e.run_line("IncrementalSave").unwrap();
+        assert!(e.doc().path.as_deref().unwrap().ends_with("casa_002.3dm"));
+        assert!(dir.join("casa.3dm").exists() && dir.join("casa_001.3dm").exists());
+        std::fs::remove_dir_all(&dir).ok();
+    }
 
     #[test]
     fn move_rotate_scale_mirror_copy_undo() {

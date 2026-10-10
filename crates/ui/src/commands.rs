@@ -63,11 +63,19 @@ impl FormaApp {
         if matches!(first.as_str(), "new" | "open") && self.guard(Guarded::Line(line.to_string())) {
             return;
         }
+        // A typed bare Save must not overwrite an original Rhino file either.
+        if matches!(first.as_str(), "save" | "saveas")
+            && line.split_whitespace().count() == 1
+            && (!self.saved_by_forma || first == "saveas")
+        {
+            self.save(true);
+            return;
+        }
         self.log(LogKind::Command, format!("Command: {line}"));
         match self.engine.run_line(line) {
             Ok(msg) => {
                 self.log(LogKind::Normal, msg);
-                let saved = matches!(first.as_str(), "save" | "saveas");
+                let saved = matches!(first.as_str(), "save" | "saveas" | "incrementalsave");
                 if first == "open" || first == "new" {
                     self.reset_document_view();
                     self.saved_by_forma = false;
