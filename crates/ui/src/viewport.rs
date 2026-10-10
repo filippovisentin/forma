@@ -2,7 +2,7 @@
 
 use eframe::egui::{Pos2, Rect};
 use forma_geom::{Plane, Point3, Vec3};
-use forma_render::glam::DVec3;
+use forma_render::glam::{DMat4, DVec3, DVec4};
 use forma_render::{Camera, DisplayMode, StandardView, View};
 
 pub fn to_d(p: Point3) -> DVec3 {
@@ -88,13 +88,19 @@ impl Viewport {
         (to_p(o + origin), to_v(d))
     }
 
-    /// Screen position of a world point (None when behind the camera).
+    /// Screen position of a world point (None when behind the camera). For many
+    /// points use [`Viewport::projector`], which builds the matrix only once.
     pub fn to_screen(&self, p: Point3, origin: DVec3) -> Option<Pos2> {
-        let (x, y) = self.camera.project(to_d(p) - origin, self.aspect())?;
-        Some(Pos2::new(
-            self.rect.left() + ((x + 1.0) / 2.0) as f32 * self.rect.width(),
-            self.rect.top() + ((1.0 - y) / 2.0) as f32 * self.rect.height(),
-        ))
+        self.projector(origin).to_screen(p)
+    }
+
+    /// World → screen mapping of this view, for projecting many points.
+    pub fn projector(&self, origin: DVec3) -> Projector {
+        Projector {
+            m: self.camera.view_proj_f64(self.aspect()),
+            rect: self.rect,
+            origin,
+        }
     }
 
     /// Point on the construction plane under the cursor. When the plane is seen
@@ -110,6 +116,52 @@ impl Viewport {
         let target = to_p(self.camera.target + origin);
         let facing = Plane::from_normal(target, to_v(self.camera.back()));
         facing.intersect_line(o, d).unwrap_or(target)
+    }
+}
+
+/// A frozen world → screen transform (camera matrix, viewport rectangle and
+/// scene origin), cheap to apply to many points.
+#[derive(Clone)]
+pub struct Projector {
+    m: DMat4,
+    rect: Rect,
+    origin: DVec3,
+}
+
+impl Projector {
+    /// Screen position of a world point (None when behind the camera).
+    pub fn to_screen(&self, p: Point3) -> Option<Pos2> {
+        let o = self.origin;
+        let clip = self.m * DVec4::new(p.x - o.x, p.y - o.y, p.z - o.z, 1.0);
+        if clip.w <= 1e-9 {
+            return None;
+        }
+        let (x, y) = (clip.x / clip.w, clip.y / clip.w);
+        Some(Pos2::new(
+            self.rect.left() + ((x + 1.0) / 2.0) as f32 * self.rect.width(),
+            self.rect.top() + ((1.0 - y) / 2.0) as f32 * self.rect.height(),
+        ))
+    }
+
+    /// Screen rectangle of a world box, or `None` when part of it is behind the
+    /// camera (then nothing can be culled).
+    pub fn screen_box(&self, min: Point3, max: Point3) -> Option<Rect> {
+        let mut r = Rect::NOTHING;
+        for i in 0..8 {
+            let c = Point3::new(
+                if i & 1 == 0 { min.x } else { max.x },
+                if i & 2 == 0 { min.y } else { max.y },
+                if i & 4 == 0 { min.z } else { max.z },
+            );
+            r.extend_with(self.to_screen(c)?);
+        }
+        Some(r)
+    }
+
+    /// Could anything inside the world box be within `radius` of `pos` on screen?
+    pub fn box_near(&self, min: Point3, max: Point3, pos: Pos2, radius: f32) -> bool {
+        self.screen_box(min, max)
+            .is_none_or(|r| r.expand(radius).contains(pos))
     }
 }
 

@@ -180,6 +180,12 @@ impl Engine {
         v
     }
 
+    /// Canonical name of a registered command or alias (case-insensitive).
+    pub fn resolve(&self, name: &str) -> Option<&'static str> {
+        let idx = *self.lookup.get(&name.to_lowercase())?;
+        Some(self.commands[idx].name())
+    }
+
     /// For a bare command name, what its first required argument is (from its
     /// help text: `Name <arg> …`), or `None` when it can run without arguments.
     /// Lets a UI wait for arguments instead of failing.
@@ -265,6 +271,14 @@ mod tests {
         assert_eq!(e.missing_input("select"), Some("object ids"));
         assert_eq!(e.missing_input("SelAll"), None);
         assert_eq!(e.missing_input("Delete"), None);
+    }
+
+    #[test]
+    fn resolve_names_and_aliases() {
+        let e = Engine::new();
+        assert_eq!(e.resolve("line"), Some("Line"));
+        assert_eq!(e.resolve("SELALL"), Some("SelAll"));
+        assert_eq!(e.resolve("nosuchcommand"), None);
     }
 
     #[test]

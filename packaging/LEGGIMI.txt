@@ -24,10 +24,27 @@ Mouse
 Tastiera
   Scrivi direttamente: il testo va nella riga di comando. Spazio = Invio, ma i
   comandi che chiedono valori (es. Select #2 #3, Layer Muri) aspettano Invio.
-  Esc annulla · Canc elimina · Ctrl+Z/Y · Ctrl+C/X/V copia/taglia/incolla
+  Esc: chiude un menu, annulla il comando in corso (e il testo scritto),
+  altrimenti cancella il testo, altrimenti deseleziona.
+  Canc elimina · Ctrl+Z/Y · Ctrl+C/X/V copia/taglia/incolla
   Ctrl+G gruppo · Ctrl+Shift+G separa · Ctrl+H nascondi · Ctrl+Alt+H mostra
   Ctrl+L blocca · Ctrl+Alt+L sblocca · Ctrl+J Join · F1 aiuto · F3 proprietà
   F7 griglia · F8 Ortho · F9 Grid Snap
+
+Riga di comando (come Rhino)
+  Mentre scrivi compare l'elenco dei comandi che corrispondono (es. "pol" ->
+  Polygon, Polyline). Frecce Su/Giù per scegliere, Invio, Tab o Spazio per
+  accettare. Se scrivi l'inizio di un nome e premi Invio, Forma completa
+  (Polyl -> Polyline); gli alias brevi (L, PL, C, M…) restano come sono.
+  Con la riga vuota, Su/Giù richiamano gli ultimi comandi usati.
+  Le opzioni del comando sono tra parentesi e si possono cliccare:
+  "Next point ( Close Undo )", "Side to offset ( Distance=10 )",
+  "Center of polygon ( NumSides=5 )", Fillet "( Radius=5 )". Si possono
+  anche scrivere: C, U, Distance=12, oppure Distance e poi il valore.
+  Con la riga vuota, Invio o clic destro (anche sulla riga di comando)
+  ripetono l'ultimo comando: il suggerimento grigio dice quale.
+  Passando il mouse sulle icone: nome del comando, cosa fa, alias e
+  scorciatoia da tastiera.
 
 Gumball (oggetti selezionati)
   Frecce: sposta lungo X/Y/Z · quadratini: sposta nel piano · archi: ruota
@@ -55,6 +72,19 @@ Misure e snap
   un attimo su un punto con un osnap, poi muoviti: compaiono linee
   tratteggiate allineate a quel punto (in orizzontale e verticale) e il
   cursore ci si aggancia, anche all'incrocio di due allineamenti.
+
+File, salvataggio e impostazioni
+  Con modifiche non salvate il titolo della finestra mostra un asterisco
+  (gggg.3dm*). Prima di New, Open o di chiudere Forma compare "Save changes
+  to …?": Yes salva, No continua senza salvare, Cancel annulla (Invio = Yes,
+  Esc = Cancel).
+  File > Recent Files: gli ultimi 10 file aperti o salvati.
+  Forma ricorda tra una sessione e l'altra: osnap attivi, Grid Snap, Ortho,
+  Planar, SmartTrack, Gumball, griglia, barra Osnap, filtro di selezione,
+  modalità di visualizzazione di ogni vista, scheda della barra strumenti,
+  larghezza dei pannelli e l'ultima cartella usata. Il file è
+  %APPDATA%\Forma\settings.txt (si può cancellare per tornare ai valori
+  iniziali).
 
 Comandi principali (si scrivono come in Rhino)
   Curve:      Point, Line, Polyline, Curve, InterpCrv, Rectangle, Circle, Arc,
