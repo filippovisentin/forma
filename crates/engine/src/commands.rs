@@ -269,6 +269,9 @@ impl Command for Open {
         );
         ctx.doc = doc;
         ctx.last_point = None;
+        // Ids restart in the new document: nothing stays selected.
+        ctx.selection.clear();
+        ctx.prev_selection.clear();
         Ok(msg)
     }
 }
@@ -304,7 +307,7 @@ impl Command for Line {
         let id = t.add(Geometry::Line(line));
         t.commit();
         ctx.last_point = Some(b);
-        Ok(format!("added #{}", id.0))
+        Ok(format!("added #{} line", id.0))
     }
 }
 

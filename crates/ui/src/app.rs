@@ -105,6 +105,9 @@ impl FormaApp {
             gumball_hot: None,
             gumball_drag: None,
             gumball_typed: None,
+            typed_fallback: None,
+            log_seen: 0,
+            log_count: 0,
             face_sel: None,
             grips: crate::grips::Grips::default(),
             cplane_dirty: false,
@@ -158,6 +161,7 @@ impl FormaApp {
             return;
         }
         self.log.push((kind, msg));
+        self.log_count += 1;
         if self.log.len() > 300 {
             self.log.remove(0);
         }

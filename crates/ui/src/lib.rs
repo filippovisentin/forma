@@ -309,6 +309,13 @@ struct FormaApp {
     gumball_drag: Option<GumballDrag>,
     /// A gumball handle was clicked: the next typed number moves/rotates by it.
     gumball_typed: Option<(gumball::Handle, Point3)>,
+    /// A typed command line with arguments: the tool to start (with those
+    /// arguments) if the engine says some required input is missing.
+    typed_fallback: Option<(ToolKind, Vec<String>)>,
+    /// Log lines already shown (the history scrolls to new ones).
+    log_seen: usize,
+    /// Lines logged so far (the log itself keeps the last 300).
+    log_count: usize,
     face_sel: Option<FaceSel>,
     face_drag: Option<FaceDrag>,
     /// The face arrow was clicked: the next typed number pushes / pulls it.

@@ -455,11 +455,32 @@ unsafe fn face_mesh(
                 .unwrap_or(Point3::new(c[0], c[1], c[2]))
         })
         .collect();
-    let normals: Vec<Vec3> = nrm.chunks(3).map(|c| Vec3::new(c[0], c[1], c[2])).collect();
-    let triangles = tris
+    let mut normals: Vec<Vec3> = nrm.chunks(3).map(|c| Vec3::new(c[0], c[1], c[2])).collect();
+    let triangles: Vec<[u32; 3]> = tris
         .into_iter()
         .map(|[a, b, c]| if info.reversed { [a, c, b] } else { [a, b, c] })
         .collect();
+    // Where the surface has no normal (poles, degenerate points) use the
+    // average of the triangles around the vertex, so shading has no dark spots.
+    let bad: Vec<bool> = normals
+        .iter()
+        .map(|n| !(n.x.is_finite() && n.y.is_finite() && n.z.is_finite()) || n.length() < 0.5)
+        .collect();
+    if bad.iter().any(|b| *b) {
+        let mut acc = vec![Vec3::new(0.0, 0.0, 0.0); positions.len()];
+        for t in &triangles {
+            let [a, b, c] = t.map(|i| positions[i as usize]);
+            let n = (b - a).cross(c - a);
+            for i in t {
+                acc[*i as usize] = acc[*i as usize] + n;
+            }
+        }
+        for (i, n) in normals.iter_mut().enumerate() {
+            if bad[i] {
+                *n = acc[i].normalized().unwrap_or(Vec3::Z);
+            }
+        }
+    }
     Some((
         Mesh {
             positions,

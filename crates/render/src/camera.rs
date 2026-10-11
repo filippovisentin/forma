@@ -28,6 +28,9 @@ pub struct Camera {
     pub fov_y: f64,
     /// Parallel projection (Top/Front/Right views).
     pub ortho: bool,
+    /// Radius of the model last fitted in view: zoomed in close, the far clip
+    /// plane still reaches the whole model.
+    pub scene_radius: f64,
 }
 
 impl Default for Camera {
@@ -54,6 +57,7 @@ impl Camera {
             pitch,
             fov_y: 40f64.to_radians(),
             ortho,
+            scene_radius: 0.0,
         }
     }
 
@@ -91,8 +95,8 @@ impl Camera {
     /// Double-precision view-projection (scene coordinates → clip space), for picking.
     pub fn view_proj_f64(&self, aspect: f64) -> DMat4 {
         let view = DMat4::look_at_rh(self.eye(), self.target, self.up());
-        let near = (self.distance * 1e-3).max(1e-3);
-        let far = self.distance * 100.0 + 1.0;
+        let far = (self.distance * 100.0).max(self.distance + 4.0 * self.scene_radius) + 1.0;
+        let near = (self.distance * 1e-3).max(far * 1e-7).max(1e-3);
         let proj = if self.ortho {
             let h = self.half_height();
             let w = h * aspect;
@@ -149,6 +153,7 @@ impl Camera {
         let horizontal = (vertical.tan() * aspect.max(1e-6)).atan();
         let half_fov = vertical.min(horizontal);
         self.target = center;
+        self.scene_radius = self.scene_radius.max(radius);
         self.distance = radius / half_fov.sin() * 1.05;
         // Tighten: project the 8 corners and scale until the box fills ~90% of the view.
         // In perspective the eye must stay outside the bounding sphere, otherwise

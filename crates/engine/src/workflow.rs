@@ -1262,7 +1262,7 @@ fn add_line(ctx: &mut Context, a: Point3, b: Point3) -> CommandResult {
     let id = t.add(Geometry::Line(LineCurve::new(a, b)));
     t.commit();
     ctx.last_point = Some(b);
-    Ok(format!("added #{}", id.0))
+    Ok(format!("added #{} line", id.0))
 }
 
 simple_command!(

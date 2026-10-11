@@ -140,6 +140,16 @@ impl FormaApp {
                     self.set_last(line);
                 }
             }
+            Err(forma_engine::CommandError::MissingInput(_)) if self.typed_fallback.is_some() => {
+                let (kind, rest) = self.typed_fallback.take().expect("checked");
+                self.start_tool(kind);
+                for t in &rest {
+                    self.feed_token(t);
+                    if self.tool.is_none() {
+                        break;
+                    }
+                }
+            }
             Err(e) => {
                 self.log(LogKind::Error, e.to_string());
                 if first == "open" {
@@ -202,7 +212,10 @@ impl FormaApp {
         self.set_last(kind.name());
         // A tool that starts by asking for one object takes the preselected
         // one (FilletEdge, Shell… on the selected solid), like Rhino.
+        // (Not for tools that act on the selection and then ask for another
+        // object, like ExtrudeCrvAlongCrv's path: the selection is the profile.)
         let first_is_object = !tool.selecting
+            && !kind.needs_selection()
             && matches!(tool.seq_step(), Some((_, crate::tools::seq::In::Object(_))));
         let preselected = (self.engine.ctx.selection.len() == 1)
             .then(|| self.engine.ctx.selection.iter().next().map(|i| i.0))
@@ -527,6 +540,26 @@ impl FormaApp {
             self.handle_step(step);
             return;
         }
+        // While a tool asks for objects, selection commands (SelAll, SelLast,
+        // Select #3…) run and the tool keeps waiting for Enter; any other
+        // command cancels the tool and runs, like Rhino.
+        if self
+            .tool
+            .as_ref()
+            .is_some_and(|t| t.want() == crate::tools::Want::Selection)
+        {
+            if let Some(name) = self.engine.resolve(&toks[0]) {
+                if !name.starts_with("Sel") && name != "Select" && name != "Invert" {
+                    self.tool = None;
+                    self.log(LogKind::Normal, "cancelled");
+                    self.submit(text);
+                    return;
+                }
+                self.run_engine_from_tool(text);
+                self.refresh_tool_selection();
+                return;
+            }
+        }
         if self.tool.is_some() {
             for t in &toks {
                 self.feed_token(t);
@@ -548,21 +581,14 @@ impl FormaApp {
             return;
         }
         if let Some(kind) = ToolKind::from_name(&first) {
-            // A sequence command typed with all its arguments runs as written;
-            // with only some of them (e.g. `BooleanDifference #3`) the tool starts
-            // with those and asks for the rest.
-            if let (true, ToolKind::Seq(seq)) = (toks.len() > 1, kind) {
-                if toks.len() - 1 < seq.steps.len() && !seq.sel {
-                    self.start_tool(kind);
-                    for t in &toks[1..] {
-                        self.feed_token(t);
-                        if self.tool.is_none() {
-                            break;
-                        }
-                    }
-                    return;
-                }
+            // A command typed with arguments runs as written, exactly like a
+            // script line (optional arguments included); only when some
+            // required input is missing (e.g. `BooleanDifference #3`) does the
+            // interactive tool start with what was typed and ask for the rest.
+            if toks.len() > 1 {
+                self.typed_fallback = Some((kind, toks[1..].to_vec()));
                 self.run_engine(text);
+                self.typed_fallback = None;
                 return;
             }
             self.start_tool(kind);

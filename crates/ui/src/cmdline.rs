@@ -54,23 +54,29 @@ impl FormaApp {
             .fill(Color32::WHITE)
             .stroke(Stroke::new(1.0, theme::BORDER))
             .inner_margin(egui::Margin::symmetric(6, 2));
+        // New output always shows, even after scrolling back (Rhino).
+        let grew = self.log_count != self.log_seen;
+        self.log_seen = self.log_count;
         frame.show(ui, |ui| {
-            egui::ScrollArea::vertical()
+            let mut area = egui::ScrollArea::vertical()
                 .max_height(log_height)
                 .min_scrolled_height(log_height)
                 .stick_to_bottom(true)
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
-                    ui.spacing_mut().item_spacing.y = 0.0;
-                    for (kind, line) in &self.log {
-                        let t = RichText::new(line).monospace().size(12.5);
-                        match kind {
-                            LogKind::Normal => ui.label(t),
-                            LogKind::Command => ui.label(t.color(theme::WEAK)),
-                            LogKind::Error => ui.label(t.color(Color32::from_rgb(190, 30, 30))),
-                        };
-                    }
-                });
+                .auto_shrink([false, false]);
+            if grew {
+                area = area.vertical_scroll_offset(f32::MAX);
+            }
+            area.show(ui, |ui| {
+                ui.spacing_mut().item_spacing.y = 0.0;
+                for (kind, line) in &self.log {
+                    let t = RichText::new(line).monospace().size(12.5);
+                    match kind {
+                        LogKind::Normal => ui.label(t),
+                        LogKind::Command => ui.label(t.color(theme::WEAK)),
+                        LogKind::Error => ui.label(t.color(Color32::from_rgb(190, 30, 30))),
+                    };
+                }
+            });
         });
         let mut clicked: Option<OptAction> = None;
         let mut edit_rect = egui::Rect::NOTHING;
