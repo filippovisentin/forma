@@ -80,6 +80,23 @@ impl FormaApp {
             }
             return;
         }
+        if first == "interface" {
+            let arg = line.split_whitespace().nth(1);
+            match arg.and_then(crate::theme::Look::parse) {
+                Some(look) => {
+                    self.pending_look = Some(look);
+                    self.log(LogKind::Normal, format!("interface: {}", look.name()));
+                }
+                None => self.log(
+                    LogKind::Error,
+                    format!(
+                        "Interface Classic|Graphite (now {})",
+                        crate::theme::look().name()
+                    ),
+                ),
+            }
+            return;
+        }
         if first == "namedview" {
             self.named_view(line);
             return;

@@ -6,7 +6,7 @@ use crate::icons::{self, Icon};
 use crate::menus::{ALIGN, ARRAY_PREFILL, SET_VIEWS};
 use crate::tools::ToolKind;
 use crate::{theme, Act, FormaApp, SidePanel};
-use eframe::egui::{self, Color32, RichText, Stroke, StrokeKind};
+use eframe::egui::{self, RichText, Stroke, StrokeKind};
 use forma_render::DisplayMode;
 
 /// Rhino-style toolbar tabs above the viewports.
@@ -86,7 +86,11 @@ fn tooltip(ui: &mut egui::Ui, it: &Item) {
         keys.push(format!("Shortcut: {k}"));
     }
     if !keys.is_empty() {
-        ui.label(RichText::new(keys.join("  ·  ")).small().color(theme::WEAK));
+        ui.label(
+            RichText::new(keys.join("  ·  "))
+                .small()
+                .color(theme::weak()),
+        );
     }
 }
 
@@ -95,18 +99,15 @@ impl FormaApp {
         let (rect, resp) = ui.allocate_exact_size(egui::vec2(32.0, 32.0), egui::Sense::click());
         if resp.hovered() || active {
             let (fill, stroke) = if active {
-                (theme::ACCENT_BG, theme::ACCENT)
+                (theme::accent_bg(), theme::accent())
             } else {
-                (
-                    Color32::from_rgb(229, 241, 251),
-                    Color32::from_rgb(160, 200, 236),
-                )
+                (theme::hover(), theme::hover_stroke())
             };
             ui.painter().rect_filled(rect, 3.0, fill);
             ui.painter()
                 .rect_stroke(rect, 3.0, Stroke::new(1.0, stroke), StrokeKind::Inside);
         }
-        icons::paint(ui.painter(), rect.shrink(3.0), it.icon, theme::TEXT);
+        icons::paint(ui.painter(), rect.shrink(3.0), it.icon, theme::text());
         resp.on_hover_ui(|ui| tooltip(ui, it)).clicked()
     }
 
@@ -422,9 +423,9 @@ impl FormaApp {
                 let selected = self.tab == i;
                 let text = RichText::new(*name).size(12.5);
                 let (fill, border) = if selected {
-                    (Color32::WHITE, theme::BORDER)
+                    (theme::input(), theme::border())
                 } else {
-                    (theme::STRIP, theme::STRIP)
+                    (theme::strip(), theme::strip())
                 };
                 let b = egui::Button::new(if selected { text.strong() } else { text })
                     .fill(fill)
@@ -443,8 +444,8 @@ impl FormaApp {
         let mut act: Option<Act> = None;
         let items = self.tab_items();
         let frame = egui::Frame::NONE
-            .fill(Color32::WHITE)
-            .stroke(Stroke::new(1.0, theme::BORDER))
+            .fill(theme::input())
+            .stroke(Stroke::new(1.0, theme::border()))
             .inner_margin(egui::Margin::symmetric(4, 2));
         frame.show(ui, |ui| {
             ui.set_width(ui.available_width());

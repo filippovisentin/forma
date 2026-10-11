@@ -257,6 +257,10 @@ impl FormaApp {
                     tool(ui, &mut act, "Add Section Cut", K::Seq(&q::CLIPPING_PLANE));
                     item(ui, &mut act, "Remove Section Cut", "", Act::Submit("ClippingPlane Off"));
                 });
+                ui.menu_button("Interface", |ui| {
+                    item(ui, &mut act, "Classic (original, light)", "", Act::Submit("Interface Classic"));
+                    item(ui, &mut act, "Graphite (new, dark)", "", Act::Submit("Interface Graphite"));
+                });
                 ui.menu_button("Named Views", |ui| {
                     item(ui, &mut act, "Save Current View…", "", Act::Form(&crate::dialogs::SAVE_VIEW));
                     if !view_names.is_empty() {

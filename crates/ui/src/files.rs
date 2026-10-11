@@ -84,7 +84,7 @@ impl FormaApp {
             ui.label(
                 RichText::new("Enter = Yes · Esc = Cancel")
                     .small()
-                    .color(theme::WEAK),
+                    .color(theme::weak()),
             );
         });
         if answer.is_none() {

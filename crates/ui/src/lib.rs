@@ -306,6 +306,8 @@ struct FormaApp {
     /// Closing was confirmed.
     allow_close: bool,
     pending_fit: bool,
+    /// A different interface look was chosen: applied at the start of the next frame.
+    pending_look: Option<theme::Look>,
     gumball_on: bool,
     gumball_hot: Option<(usize, gumball::Handle)>,
     gumball_drag: Option<GumballDrag>,

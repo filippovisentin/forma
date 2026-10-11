@@ -72,7 +72,7 @@ impl FormaApp {
             ui.painter()
                 .rect_filled(sw, 1.0, Color32::from_rgb(r, g, b));
             ui.painter()
-                .rect_stroke(sw, 1.0, Stroke::new(1.0, theme::WEAK), StrokeKind::Inside);
+                .rect_stroke(sw, 1.0, Stroke::new(1.0, theme::weak()), StrokeKind::Inside);
             let mut pick: Option<String> = None;
             egui::ComboBox::from_id_salt("status-layer")
                 .selected_text(egui::RichText::new(cur.name.clone()).size(12.5))
@@ -92,9 +92,9 @@ impl FormaApp {
             let pane = |ui: &mut egui::Ui, on: &mut bool, label: &str, tip: &str| {
                 let text = egui::RichText::new(label).size(12.5);
                 let text = if *on {
-                    text.strong().color(Color32::BLACK)
+                    text.strong().color(theme::text())
                 } else {
-                    text.color(theme::WEAK)
+                    text.color(theme::weak())
                 };
                 if ui
                     .add(egui::Button::new(text).frame(false))
@@ -148,7 +148,7 @@ impl FormaApp {
             ui.label(
                 egui::RichText::new(format!("Minutes from last save: {mins}"))
                     .size(12.5)
-                    .color(theme::WEAK),
+                    .color(theme::weak()),
             );
             ui.separator();
             let doc = self.engine.doc();
@@ -159,7 +159,7 @@ impl FormaApp {
                     self.engine.ctx.selection.len()
                 ))
                 .size(12.5)
-                .color(theme::WEAK),
+                .color(theme::weak()),
             );
         });
     }

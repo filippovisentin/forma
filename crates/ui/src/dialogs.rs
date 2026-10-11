@@ -401,7 +401,11 @@ impl FormaApp {
         let modal = egui::Modal::new(egui::Id::new("forma-form")).show(ctx, |ui| {
             ui.set_width(340.0);
             ui.label(RichText::new(f.form.title).strong());
-            ui.label(RichText::new(f.form.help).small().color(crate::theme::WEAK));
+            ui.label(
+                RichText::new(f.form.help)
+                    .small()
+                    .color(crate::theme::weak()),
+            );
             ui.add_space(6.0);
             egui::Grid::new("form-grid")
                 .num_columns(2)
@@ -459,7 +463,7 @@ impl FormaApp {
                 });
             if let Some(e) = &f.error {
                 ui.add_space(4.0);
-                ui.colored_label(egui::Color32::from_rgb(190, 40, 40), e);
+                ui.colored_label(crate::theme::error(), e);
             }
             ui.add_space(8.0);
             ui.horizontal(|ui| {

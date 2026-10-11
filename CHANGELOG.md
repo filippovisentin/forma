@@ -12,6 +12,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   written every 2 minutes to `autosave.3dm` in the settings folder (in the
   background, the open model is not touched). After a crash or power cut the app
   offers to recover it at the next start; Save, Open, New and a normal exit delete it.
+- **Two interface looks**: View ▸ Interface ▸ Classic (the original light look) or
+  Graphite (new, dark chrome with a gold accent), or type `Interface Classic` /
+  `Interface Graphite`. The choice is kept between runs. Viewports keep their grey
+  background in both looks.
 - Crashes are written to `crash.log` in the settings folder (the Windows app has no
   console), so they can be reported.
 

@@ -7,7 +7,7 @@ use crate::snap::{SnapKind, SnapSettings};
 use crate::tools::{ToolKind, SELECTION_COMMANDS};
 use crate::viewport::Viewport;
 use crate::{perf, pick, theme, FormaApp, LogKind, SelFilter, SelInfo, SidePanel};
-use eframe::egui::{self, Color32};
+use eframe::egui;
 use forma_doc::{LengthUnit, ObjectId};
 use forma_engine::Engine;
 use forma_render::glam::DVec3;
@@ -101,6 +101,7 @@ impl FormaApp {
             guard_pass: false,
             allow_close: false,
             pending_fit: true,
+            pending_look: None,
             gumball_on: true,
             gumball_hot: None,
             gumball_drag: None,
@@ -141,7 +142,12 @@ impl FormaApp {
             side_width: 280.0,
             command_height: 92.0,
         };
-        theme::apply(&cc.egui_ctx);
+        let look = app
+            .settings
+            .get("ui.look")
+            .and_then(theme::Look::parse)
+            .unwrap_or(theme::Look::Classic);
+        theme::init(&cc.egui_ctx, look);
         app.apply_settings();
         // Interior design in centimetres, like Filippo's Rhino files.
         let _ = app.engine.run_line("New cm");
@@ -380,6 +386,7 @@ impl FormaApp {
             s.set(&format!("view.{i}.mode"), v.mode.name());
         }
         s.set("tab", self.tab);
+        s.set("ui.look", theme::look().name());
         s.set("panel.side", self.side_width.round());
         s.set("panel.command", self.command_height.round());
         s
@@ -418,6 +425,10 @@ impl eframe::App for FormaApp {
         if let Some(p) = dropped.into_iter().next() {
             self.run_engine(&format!("Open {p}"));
         }
+        if let Some(look) = self.pending_look.take() {
+            theme::set_look(&ctx, look);
+            self.dirty_all();
+        }
         self.handle_close(&ctx);
         if self.confirm.is_none() && self.autosave.offer.is_none() {
             self.handle_keyboard(&ctx);
@@ -426,12 +437,12 @@ impl eframe::App for FormaApp {
         self.update_title(&ctx);
 
         let strip = egui::Frame::NONE
-            .fill(theme::STRIP)
+            .fill(theme::strip())
             .inner_margin(egui::Margin::symmetric(6, 2));
         egui::Panel::top("menu")
             .frame(
                 egui::Frame::NONE
-                    .fill(Color32::WHITE)
+                    .fill(theme::menu())
                     .inner_margin(egui::Margin::symmetric(4, 1)),
             )
             .show(ui, |ui| self.ui_menu(ui));
@@ -441,7 +452,7 @@ impl eframe::App for FormaApp {
             .size_range(56.0..=400.0)
             .frame(
                 egui::Frame::NONE
-                    .fill(theme::PANEL)
+                    .fill(theme::panel())
                     .inner_margin(egui::Margin::symmetric(4, 3)),
             )
             .show(ui, |ui| self.ui_command_line(ui));
@@ -449,7 +460,7 @@ impl eframe::App for FormaApp {
         egui::Panel::top("tabs")
             .frame(
                 egui::Frame::NONE
-                    .fill(theme::STRIP)
+                    .fill(theme::strip())
                     .inner_margin(egui::Margin {
                         left: 4,
                         right: 4,
@@ -471,7 +482,7 @@ impl eframe::App for FormaApp {
             .exact_size(72.0)
             .frame(
                 egui::Frame::NONE
-                    .fill(theme::PANEL)
+                    .fill(theme::panel())
                     .inner_margin(egui::Margin::symmetric(2, 4)),
             )
             .show(ui, |ui| self.ui_toolbar(ui));
@@ -481,13 +492,13 @@ impl eframe::App for FormaApp {
             .size_range(160.0..=900.0)
             .frame(
                 egui::Frame::NONE
-                    .fill(theme::PANEL)
+                    .fill(theme::panel())
                     .inner_margin(egui::Margin::same(6)),
             )
             .show(ui, |ui| self.ui_side(ui));
         self.side_width = r.response.rect.width();
         egui::CentralPanel::default()
-            .frame(egui::Frame::NONE.fill(Color32::from_gray(150)))
+            .frame(egui::Frame::NONE.fill(theme::gap()))
             .show(ui, |ui| self.ui_viewports(ui, frame));
         self.ui_confirm(&ctx);
         self.ui_recover(&ctx);

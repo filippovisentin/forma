@@ -445,7 +445,7 @@ impl FormaApp {
             );
         }
         let (w, c) = if active {
-            (2.0, theme::ACCENT)
+            (2.0, theme::accent())
         } else {
             (1.0, Color32::from_gray(110))
         };
