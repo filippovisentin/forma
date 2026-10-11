@@ -206,7 +206,7 @@ impl FormaApp {
             agent::RUN => self.agent_run(text),
             agent::PYTHON => {
                 let before = self.log_count;
-                self.run_python_source(text, "<agent>");
+                let _ = self.run_python_source(text, "<agent>");
                 let new = (self.log_count - before).min(self.log.len());
                 let mut ok = true;
                 let mut out = String::new();

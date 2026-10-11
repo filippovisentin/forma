@@ -82,6 +82,28 @@ fn iconic_button(ui: &mut egui::Ui, label: &str, key: &str, icon: Option<Icon>) 
     r
 }
 
+/// Tools ▸ Ask AI: set apart from the other entries (violet, bold, AI icon).
+fn ask_entry(ui: &mut egui::Ui) -> egui::Response {
+    let r = ui
+        .add(egui::Button::new(
+            egui::RichText::new("      Ask AI — Write a Command…")
+                .strong()
+                .color(crate::theme::ai()),
+        ))
+        .on_hover_text(
+            "Describe a command in words: a local model writes it as a Python script (Ask)",
+        );
+    let h = 18.0;
+    let at = egui::pos2(r.rect.left() + 3.0, r.rect.center().y - h / 2.0);
+    crate::icons::paint(
+        ui.painter(),
+        egui::Rect::from_min_size(at, egui::vec2(h, h)),
+        Icon::Named("Ask"),
+        crate::theme::text(),
+    );
+    r
+}
+
 /// A Rectangular array asks for its numbers on the command line.
 pub(crate) const ARRAY_PREFILL: Act = Act::Form(&crate::dialogs::ARRAY);
 
@@ -601,6 +623,11 @@ impl FormaApp {
                 );
             });
             ui.menu_button("Tools", |ui| {
+                if ask_entry(ui).clicked() {
+                    act = Some(Act::Submit("Ask"));
+                    ui.close();
+                }
+                ui.separator();
                 ui.menu_button("Object Snap", |ui| {
                     for k in SnapKind::ALL {
                         ui.checkbox(self.snap.flag(k), k.label());

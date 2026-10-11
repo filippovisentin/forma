@@ -13,6 +13,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `units`), every `.py` in the scripts folder is a command named after it (Tools ▸
   Scripts), one Undo per script, `forma-cli python`, and the MCP tool `forma_python`
   (in the open app too, over the agent connection). No Python installation needed.
+- **Ask: AI writes commands.** Describe a command in words (`Ask`, the violet ✦
+  button first in the Standard toolbar, or Tools ▸ Ask AI): a local model (Ollama,
+  LM Studio, any OpenAI-style server, set by URL under *Model*) writes it as a Python
+  script. Check it, press Run (one Undo reverts it), *Ask to fix* sends the error back,
+  *Save* puts it in the scripts folder as a new command.
+- **Icons for every command**: menus show each command's icon, and the commands that
+  had none (about 110: dimensions, meshes, edges, CPlanes, blocks, hidden views…) got
+  one. Original drawings in the style of classic CAD toolbars.
 
 ## [1.1.0] — 2026-10-11
 

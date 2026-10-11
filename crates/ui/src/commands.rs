@@ -85,6 +85,10 @@ impl FormaApp {
             self.new_model = Some(self.new_dialog(false));
             return;
         }
+        if first == "ask" {
+            self.ask_command(line);
+            return;
+        }
         if first == "runpythonscript" || first == "runpython" {
             self.run_python_command(line);
             return;

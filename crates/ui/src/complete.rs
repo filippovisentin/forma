@@ -9,7 +9,11 @@ pub struct Entry {
 }
 
 /// Commands that only exist in the UI (views, display modes, toggles).
-pub const UI_COMMANDS: [(&str, &str); 32] = [
+pub const UI_COMMANDS: [(&str, &str); 33] = [
+    (
+        "Ask",
+        "AI: describe a command in words, a local model writes it as a Python script: Ask <request>",
+    ),
     (
         "RunPythonScript",
         "Run a Python script: RunPythonScript [file.py] (import forma; forma.run(\"Box …\"))",

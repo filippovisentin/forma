@@ -26,7 +26,7 @@ pub(crate) fn min_grid_extent(u: LengthUnit) -> f64 {
 }
 
 /// Every command name the command line knows, for autocomplete.
-fn completer(engine: &Engine) -> Completer {
+pub(crate) fn completer(engine: &Engine) -> Completer {
     let engine_cmds = engine.command_list().into_iter().map(|(n, h)| {
         (
             n.to_string(),
@@ -146,6 +146,7 @@ impl FormaApp {
             autosave: crate::autosave::Autosave::at_startup(),
             new_model: None,
             agent: None,
+            ask: crate::ask::AskWindow::default(),
             egui_ctx: cc.egui_ctx.clone(),
             side_width: 280.0,
             command_height: 92.0,
@@ -521,6 +522,7 @@ impl eframe::App for FormaApp {
         self.ui_recover(&ctx);
         self.ui_new_dialog(&ctx);
         self.ui_form(&ctx);
+        self.ui_ask(&ctx);
         self.poll_capture(&ctx);
 
         // Changes made by panels this frame (commands, layer toggles) need a

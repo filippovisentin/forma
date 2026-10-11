@@ -18,6 +18,30 @@ command line works in a script, and one **Undo** removes all a script did.
 What a script prints goes to the command history; an error stops it and shows the
 Python traceback with the line number.
 
+## Ask: let an AI write the command
+
+**Ask** (the violet ✦ button, first in the Standard toolbar; **Tools ▸ Ask AI**; or type
+`Ask`) opens a window where you describe the command in words, e.g. *"a staircase of 12
+steps, 30 cm deep and 17 cm high, on layer Stairs"*. A language model writes the Python
+script and the window shows it — nothing runs until you press **▶ Run** (one Undo
+reverts it). If it fails, **Ask to fix** sends the error back to the model; ask for
+changes in the same box (*"make it 90 cm wide"*). **Save** writes it to the scripts
+folder: from then on it is a command (`staircase_steps.py` → `StaircaseSteps`).
+
+The model runs **on your computer**, so requests and models stay local:
+
+1. Install [Ollama](https://ollama.com) and pull a coding model:
+   `ollama pull qwen2.5-coder:7b` (or `:14b` on a stronger machine).
+2. In the Ask window open **Model ▾**: the default URL `http://localhost:11434` and model
+   `qwen2.5-coder:7b` match Ollama. For LM Studio use `http://localhost:1234/v1`; any
+   server with an OpenAI-style API works as `http://host:port/v1` (API key only if the
+   server wants one). Only `http://` is supported.
+
+To work with **Claude or another assistant on a different account** (or another
+computer), connect it the other way round: **Tools ▸ Agent Connection**, then
+`forma-cli mcp --live` in the assistant (see [AGENTS.md](AGENTS.md)). It can then run
+commands and Python in the open model directly.
+
 ## The `forma` module
 
 | Call | What it does |

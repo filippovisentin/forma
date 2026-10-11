@@ -141,14 +141,15 @@ impl FormaApp {
         match std::fs::read_to_string(path) {
             Ok(src) => {
                 let name = path.display().to_string();
-                self.run_python_source(&src, &name);
+                let _ = self.run_python_source(&src, &name);
             }
             Err(e) => self.log(LogKind::Error, format!("{}: {e}", path.display())),
         }
     }
 
-    /// Run Python source; everything it changes is one undo step.
-    pub(crate) fn run_python_source(&mut self, src: &str, name: &str) {
+    /// Run Python source; everything it changes is one undo step. The error is
+    /// the traceback (also logged).
+    pub(crate) fn run_python_source(&mut self, src: &str, name: &str) -> Result<(), String> {
         self.log(LogKind::Command, format!("Command: RunPythonScript {name}"));
         self.tool = None;
         self.pending = None;
@@ -156,7 +157,7 @@ impl FormaApp {
         let depth = self.engine.doc().undo_depth();
         let result = forma_script::run_python(&mut AppHost { app: self }, src, name);
         self.engine.ctx.doc.group_undo_since(depth);
-        match result {
+        match &result {
             Ok(()) => self.log(LogKind::Normal, "script finished"),
             Err(e) => {
                 for line in e.lines() {
@@ -167,6 +168,7 @@ impl FormaApp {
         if was_empty && !self.engine.doc().is_empty() {
             self.pending_fit = true;
         }
+        result
     }
 
     /// Tools ▸ Scripts ▸ Open Scripts Folder.

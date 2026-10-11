@@ -11,6 +11,7 @@
 
 mod agent_link;
 mod app;
+mod ask;
 mod autosave;
 mod capture;
 mod cmdline;
@@ -375,6 +376,8 @@ struct FormaApp {
     autosave: autosave::Autosave,
     /// AI assistants' connection to this window (Tools ▸ Agent Connection), when on.
     agent: Option<agent_link::AgentLink>,
+    /// The Ask window (AI writes a command as a Python script).
+    ask: ask::AskWindow,
     /// For work that needs the context outside the frame callbacks.
     egui_ctx: egui::Context,
     /// The "New model" (units) dialog, when open.

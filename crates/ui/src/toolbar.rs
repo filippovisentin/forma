@@ -154,6 +154,12 @@ pub(crate) const SIDEBAR: [&[ToolKind]; 7] = [
 impl FormaApp {
     fn icon_button(&self, ui: &mut egui::Ui, it: &Item, active: bool) -> bool {
         let (rect, resp) = ui.allocate_exact_size(egui::vec2(32.0, 32.0), egui::Sense::click());
+        if it.icon == Icon::Named("Ask") {
+            // The AI command stands out.
+            ui.painter().rect_filled(rect, 4.0, theme::ai_bg());
+            ui.painter()
+                .rect_stroke(rect, 4.0, Stroke::new(1.0, theme::ai()), StrokeKind::Inside);
+        }
         if resp.hovered() || active {
             let (fill, stroke) = if active {
                 (theme::accent_bg(), theme::accent())
@@ -213,6 +219,14 @@ pub(crate) fn tab_items_for(tab: usize) -> Vec<Option<Item>> {
     let mut v = Vec::new();
     match tab {
         0 => {
+            v.push(named(
+                "Ask",
+                "Ask",
+                "AI: describe a command in words, a local model writes it as a Python script",
+                "",
+                Act::Submit("Ask"),
+            ));
+            v.push(None);
             v.push(named("New", "New", "New model", "Ctrl+N", Act::Cmd("New")));
             v.push(named(
                 "Open",

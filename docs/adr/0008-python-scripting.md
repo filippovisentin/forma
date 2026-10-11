@@ -33,3 +33,21 @@ Layers move up by one to make room: `forma-script` 4, `forma-ui` and `forma-mcp`
 - The release binary grows by about 25 MB (interpreter and frozen standard library).
 - Scripts can do anything the user can (files, network): the MCP server refuses Python
   when it runs with `--root`, and AI-written scripts are always shown before they run.
+
+## Addendum: `Ask` (AI-written scripts)
+`Ask` sends a request in plain words to a language model and shows the Python script it
+writes; the user runs it, asks for a fix (the traceback goes back to the model) or saves
+it in the scripts folder as a command. The model is **local by default** (Ollama at
+`http://localhost:11434`; LM Studio and other OpenAI-style servers at `…/v1`), set by
+URL in the Ask window, so models and requests stay on the computer. An assistant on
+another account or machine (e.g. Claude) uses the existing agent connection instead
+(`forma-cli mcp --live`, ADR 0007).
+
+- The HTTP client is a few dozen lines over `std::net` (plain `http://`, one request per
+  connection, `Content-Length` and chunked answers): enough for a local server, and no
+  TLS stack or HTTP crate in the build. `https://` URLs are refused with a message.
+- `serde_json` (already used by `forma-mcp`, ADR 0007) is added to `forma-script` to
+  build requests and read answers.
+- The prompt carries the `forma` module's API and every command's one-line syntax
+  (`Engine::command_list`), well under a 16k-token context.
+- Nothing the model writes runs without the user pressing Run; one Undo reverts it.

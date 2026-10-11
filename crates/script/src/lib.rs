@@ -18,6 +18,8 @@
 //! The front end decides where commands go by implementing [`Host`]: the desktop
 //! app runs them like typed commands, [`EngineHost`] runs them on an engine.
 
+pub mod ai;
+
 use forma_engine::Engine;
 use std::cell::Cell;
 
