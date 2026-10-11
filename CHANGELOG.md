@@ -7,6 +7,42 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.2.0] — 2026-10-11
+
+### Added
+- **Python scripts inside the app** ([docs/SCRIPTING.md](docs/SCRIPTING.md), ADR 0008):
+  `RunPythonScript`, the `forma` module (`run`, `objects`, `selection`, `select`,
+  `units`), every `.py` in the scripts folder is a command named after it (Tools ▸
+  Scripts), one Undo per script, `forma-cli python`, and the MCP tool `forma_python`
+  (in the open app too, over the agent connection). No Python installation needed.
+- **Ask: AI writes commands.** Describe a command in words (`Ask`, the violet ✦
+  button first in the Standard toolbar, or Tools ▸ Ask AI): a local model (Ollama,
+  LM Studio, any OpenAI-style server, set by URL under *Model*) writes it as a Python
+  script. Check it, press Run (one Undo reverts it), *Ask to fix* sends the error back,
+  *Save* puts it in the scripts folder as a new command.
+- **Free-form surfaces are exact NURBS**: Sweep1, Sweep2, EdgeSrf (Coons patch whose
+  edges are the curves), SrfPt and Pipe no longer make meshes. Sweeps along polylines
+  are mitred at the corners (a picture frame from a rectangle and a profile) and
+  joined into one polysurface; pipes are capped closed solids.
+- **Free-form curves stay exact** through Split, Trim, Join, Offset, Fillet, Extend and
+  Explode: pieces are cut from the original NURBS (knot insertion) at the exact
+  crossings, joins are exact (lines and arcs become part of one NURBS curve; Explode
+  cuts it again at its corners), offsets are smooth NURBS curves within tolerance, and
+  fillets touch the curve exactly. CurveBoolean (union, intersection, difference) cuts
+  the curves at their exact crossings and joins the right pieces, so round and free-form
+  edges stay exact (straight-only results are still polylines). Before, these tools
+  turned NURBS into polylines.
+- **Command area like Rhino**: drag its edge to resize it (a grip shows where;
+  double-click it for compact / tall), dock it at the top or bottom, or float it as a
+  window you can move and resize (View ▸ Command Area, or `CommandArea
+  Top|Bottom|Float|Compact|Tall`). Remembered between sessions.
+- **Application icon**: an original golden free-form surface with its control points,
+  in the title bar, the taskbar and on `forma.exe` itself (Explorer, Desktop shortcut,
+  Start menu). ADR 0009.
+- **Icons for every command**: menus show each command's icon, and the commands that
+  had none (about 110: dimensions, meshes, edges, CPlanes, blocks, hidden views…) got
+  one. Original drawings in the style of classic CAD toolbars.
+
 ## [1.1.0] — 2026-10-11
 
 ### Added
@@ -291,7 +327,8 @@ First official release: exact solids and surfaces, tested in the app.
   with undo / redo, `cargo xtask ci` gate on Linux and Windows, openNURBS `.3dm` I/O
   (ADR 0002), geometry-kernel spike choosing OpenCascade (ADR 0001), Windows release workflow.
 
-[Unreleased]: https://github.com/filippovisentin/forma/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/filippovisentin/forma/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/filippovisentin/forma/releases/tag/v1.2.0
 [0.6.0]: https://github.com/filippovisentin/forma/releases/tag/v0.6.0
 [0.5.0]: https://github.com/filippovisentin/forma/releases/tag/v0.5.0
 [0.4.0]: https://github.com/filippovisentin/forma/releases/tag/v0.4.0

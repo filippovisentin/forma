@@ -87,6 +87,35 @@ impl Command for SrfPt {
             Some(_) => Some(args.point("fourth corner", Some(c))?),
             None => None,
         };
+        // Exact: a trimmed plane (3 corners) or the ruled surface between two
+        // opposite sides (4 corners, bilinear).
+        let tol = ctx.doc.absolute_tolerance.max(1e-9);
+        let exact = match d {
+            None => {
+                let n = (b - a).cross(c - a);
+                if n.length() <= ctx.tolerance.absolute {
+                    None
+                } else {
+                    forma_io_3dm::exact::make_planar(
+                        &Geometry::Polyline(vec![a, b, c, a]),
+                        &[],
+                        n,
+                        None,
+                    )
+                }
+            }
+            Some(d) => {
+                let (s0, s1) = (
+                    Geometry::Line(forma_geom::LineCurve::new(a, b)),
+                    Geometry::Line(forma_geom::LineCurve::new(d, c)),
+                );
+                forma_io_3dm::exact::make_loft(&[&s0, &s1], true, tol)
+            }
+        };
+        if let Some(bx) = exact.filter(|bx| bx.mesh.area() > ctx.tolerance.absolute) {
+            ctx.last_point = Some(d.unwrap_or(c));
+            return added_exact(ctx, Some(bx), Mesh::default, "surface");
+        }
         let m = match d {
             None => {
                 let n = (b - a).cross(c - a);
@@ -128,6 +157,14 @@ impl Command for EdgeSrf {
             return Err(CommandError::Invalid(
                 "EdgeSrf: select 2, 3 or 4 open curves".into(),
             ));
+        }
+        let geoms: Vec<&Geometry> = curves.iter().map(|c| &c.geometry).collect();
+        if let Some(b) =
+            forma_io_3dm::exact::make_edge_srf(&geoms, ctx.doc.absolute_tolerance.max(1e-9))
+        {
+            let src = curves[0].clone();
+            add_selected(ctx, vec![(Geometry::Brep(b), src)]);
+            return Ok("edge surface added".into());
         }
         let pts: Vec<Vec<Point3>> = curves.iter().map(|c| c.geometry.curve_points()).collect();
         let tol = ctx.doc.absolute_tolerance.max(1e-6) * 10.0;
@@ -362,6 +399,23 @@ impl Command for Pipe {
             rail.dedup_by(|a, b| a.distance_to(*b) < 1e-9);
             if rail.len() < 2 {
                 continue;
+            }
+            // Exact: a circle swept along the rail, capped with flat discs.
+            if let Some(t) = (rail[1] - rail[0]).normalized() {
+                let circle = Geometry::Arc(forma_geom::CircleArc::circle(
+                    Plane::from_normal(rail[0], t),
+                    r,
+                ));
+                let closed = c.geometry.is_closed_curve();
+                if let Some(mut b) = crate::surfaces::sweep1_exact(&circle, &rail, closed, tol) {
+                    if !open && !c.geometry.is_closed_curve() {
+                        if let Some((capped, _)) = forma_io_3dm::exact::capped(&b, tol) {
+                            b = capped;
+                        }
+                    }
+                    out.push((Geometry::Brep(b), c));
+                    continue;
+                }
             }
             let mut m = pipe_mesh(&rail, r, 32);
             if !open && !c.geometry.is_closed_curve() {
@@ -759,13 +813,117 @@ impl Command for Unweld {
 #[cfg(test)]
 mod tests {
     use crate::Engine;
-    use forma_doc::Geometry;
+    use forma_doc::{Geometry, ObjectId};
     use std::f64::consts::PI;
 
     fn last_mesh(e: &Engine) -> forma_geom::Mesh {
         match e.doc().objects().last().unwrap().geometry.as_mesh() {
             Some(m) => m.clone(),
             None => panic!("no faces"),
+        }
+    }
+
+    fn last_brep(e: &Engine) -> forma_geom::Brep {
+        match &e.doc().objects().last().unwrap().geometry {
+            Geometry::Brep(b) => b.clone(),
+            g => panic!("not exact: {}", g.kind()),
+        }
+    }
+
+    /// Lengths of the naked edges of a brep, sorted.
+    fn edge_lengths(b: &forma_geom::Brep) -> Vec<f64> {
+        let mut v: Vec<f64> = forma_io_3dm::exact::edges(b, true)
+            .iter()
+            .filter_map(Geometry::length)
+            .collect();
+        v.sort_by(f64::total_cmp);
+        v
+    }
+
+    #[test]
+    fn free_form_surfaces_are_exact() {
+        let mut e = Engine::new();
+        // EdgeSrf, four sides (one an arc): its edges are the curves.
+        e.run_line("Curve 0,0,0 50,0,40 100,0,0").unwrap(); // #1
+        e.run_line("Curve 100,0,0 100,50,-30 100,100,0").unwrap(); // #2
+        e.run_line("Curve 100,100,0 50,100,40 0,100,0").unwrap(); // #3
+        e.run_line("Arc 0,50,0 0,0,0 0,100,0").unwrap(); // #4
+        let mut want: Vec<f64> = (1..=4)
+            .map(|i| {
+                e.doc()
+                    .object(ObjectId(i))
+                    .unwrap()
+                    .geometry
+                    .length()
+                    .unwrap()
+            })
+            .collect();
+        want.sort_by(f64::total_cmp);
+        e.run_line("SelAll").unwrap();
+        e.run_line("EdgeSrf").unwrap();
+        let b = last_brep(&e);
+        assert_eq!(b.faces, 1);
+        let got = edge_lengths(&b);
+        assert_eq!(got.len(), 4, "{got:?}");
+        for (g, w) in got.iter().zip(&want) {
+            assert!((g - w).abs() < 1e-3, "edges {got:?} vs curves {want:?}");
+        }
+        // Three sides.
+        e.run_line("SelNone").unwrap();
+        e.run_line("Line 150,0,0 250,0,0").unwrap();
+        e.run_line("Curve 250,0,0 230,50,40 200,90,0").unwrap();
+        e.run_line("Curve 200,90,0 160,50,30 150,0,0").unwrap();
+        e.run_line("Select #6 #7 #8").unwrap();
+        e.run_line("EdgeSrf").unwrap();
+        assert_eq!(edge_lengths(&last_brep(&e)).len(), 3);
+        // SrfPt: a twisted (bilinear) patch and a flat triangle.
+        e.run_line("SrfPt 0,0,0 10,0,5 10,10,0 0,10,5").unwrap();
+        let b = last_brep(&e);
+        let bb = b.mesh.bounding_box().unwrap();
+        assert!(
+            (bb.max.z - 5.0).abs() < 1e-9 && bb.min.z.abs() < 1e-9,
+            "{bb:?}"
+        );
+        e.run_line("SrfPt 0,0,0 10,0,0 0,10,0").unwrap();
+        assert!((last_brep(&e).mesh.area() - 50.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn sweeps_and_pipes_are_exact() {
+        let mut e = Engine::new();
+        // Pipe along a smooth curve: a closed solid around the curve.
+        e.run_line("Line 0,0,0 100,0,0").unwrap(); // #1
+        e.run_line("SelAll").unwrap();
+        e.run_line("Pipe 5").unwrap();
+        let b = last_brep(&e);
+        assert!(b.solid);
+        let v = b.mesh.volume();
+        assert!((v - PI * 25.0 * 100.0).abs() / v < 0.005, "{v}");
+        // Pipe along a polyline: mitred corners, still one closed solid of the
+        // same volume (centre line × section).
+        e.run_line("SelNone").unwrap();
+        e.run_line("Polyline 0,50,0 100,50,0 100,150,0 0,150,30")
+            .unwrap(); // #3
+        e.run_line("Select #3").unwrap();
+        e.run_line("Pipe 4").unwrap();
+        let b = last_brep(&e);
+        assert!(b.solid && b.faces >= 5, "faces {}", b.faces);
+        let len = 200.0 + (100.0f64 * 100.0 + 30.0 * 30.0).sqrt();
+        let v = b.mesh.volume();
+        assert!((v - PI * 16.0 * len).abs() / v < 0.01, "{v}");
+        // Sweep1 of a circle along a curve: the profile stays the same size.
+        e.run_line("SelNone").unwrap();
+        e.run_line("Curve 0,300,0 0,400,60 150,450,120 300,400,0")
+            .unwrap(); // #5
+        e.run_line("Circle 0,300,0 20 0,1,0").unwrap(); // #6
+        e.run_line("Select #6").unwrap();
+        e.run_line("Sweep1 #5").unwrap();
+        let b = last_brep(&e);
+        assert_eq!(b.faces, 1);
+        let ends = edge_lengths(&b);
+        assert_eq!(ends.len(), 2, "{ends:?}");
+        for l in ends {
+            assert!((l - 2.0 * PI * 20.0).abs() < 0.05, "{l}");
         }
     }
 

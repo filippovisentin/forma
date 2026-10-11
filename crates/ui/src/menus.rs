@@ -1,6 +1,7 @@
 //! The menu bar (File, Edit, View, Curve, Surface, Solid, Mesh, Dimension,
 //! Transform, Tools, Analyze, Help), in the order of Rhino 8.
 
+use crate::cmdline::CmdDock;
 use crate::snap::SnapKind;
 use crate::tools::seq as q;
 use crate::tools::ToolKind;
@@ -30,6 +31,80 @@ pub(crate) const ALIGN: [(&str, &str); 7] = [
     ("Centers", "Align center"),
 ];
 
+use crate::icons::{has_drawing, Icon};
+
+/// The icon of a menu action, when it has a drawing.
+fn icon_for_act(a: &Act) -> Option<Icon> {
+    let icon = match a {
+        Act::Tool(k) => Icon::Tool(*k),
+        Act::Open => Icon::Named("Open"),
+        Act::Save | Act::SaveAs => Icon::Named("Save"),
+        Act::Help => Icon::Named("Help"),
+        Act::Clip(c) => Icon::Named(c),
+        Act::Cmd(c) | Act::Submit(c) => {
+            let w: &'static str = c.split_whitespace().next().unwrap_or("");
+            Icon::Named(match w.to_ascii_lowercase().as_str() {
+                "ze" | "zea" => "ZoomExtents",
+                "zs" => "ZoomSelected",
+                "top" => "Top",
+                "front" => "Front",
+                "right" => "Right",
+                "perspective" => "Perspective",
+                "back" => "Back",
+                "bottom" => "Bottom",
+                "left" => "Left",
+                "ask" => "Ask",
+                _ => w,
+            })
+        }
+        _ => return None,
+    };
+    let name = match icon {
+        Icon::Tool(k) => k.name(),
+        Icon::Named(n) => n,
+    };
+    has_drawing(name).then_some(icon)
+}
+
+/// A menu entry with its command's icon at the left (space kept when it has none,
+/// so the labels line up), like the menus of Rhino and AutoCAD.
+fn iconic_button(ui: &mut egui::Ui, label: &str, key: &str, icon: Option<Icon>) -> egui::Response {
+    let r = ui.add(egui::Button::new(format!("      {label}")).shortcut_text(key));
+    if let Some(icon) = icon {
+        let h = 16.0;
+        let at = egui::pos2(r.rect.left() + 4.0, r.rect.center().y - h / 2.0);
+        crate::icons::paint(
+            ui.painter(),
+            egui::Rect::from_min_size(at, egui::vec2(h, h)),
+            icon,
+            crate::theme::text(),
+        );
+    }
+    r
+}
+
+/// Tools ▸ Ask AI: set apart from the other entries (violet, bold, AI icon).
+fn ask_entry(ui: &mut egui::Ui) -> egui::Response {
+    let r = ui
+        .add(egui::Button::new(
+            egui::RichText::new("      Ask AI — Write a Command…")
+                .strong()
+                .color(crate::theme::ai()),
+        ))
+        .on_hover_text(
+            "Describe a command in words: a local model writes it as a Python script (Ask)",
+        );
+    let h = 18.0;
+    let at = egui::pos2(r.rect.left() + 3.0, r.rect.center().y - h / 2.0);
+    crate::icons::paint(
+        ui.painter(),
+        egui::Rect::from_min_size(at, egui::vec2(h, h)),
+        Icon::Named("Ask"),
+        crate::theme::text(),
+    );
+    r
+}
+
 /// A Rectangular array asks for its numbers on the command line.
 pub(crate) const ARRAY_PREFILL: Act = Act::Form(&crate::dialogs::ARRAY);
 
@@ -40,15 +115,20 @@ impl FormaApp {
         let mut clear_recent = false;
         let view_names: Vec<String> = self.named_views.iter().map(|v| v.0.clone()).collect();
         let mut restore_view: Option<String> = None;
+        let mut run_script: Option<std::path::PathBuf> = None;
+        let mut open_scripts = false;
         let item = |ui: &mut egui::Ui, act: &mut Option<Act>, label: &str, key: &str, a: Act| {
-            let b = egui::Button::new(label).shortcut_text(key);
-            if ui.add(b).clicked() {
+            if iconic_button(ui, label, key, icon_for_act(&a)).clicked() {
                 *act = Some(a);
                 ui.close();
             }
         };
         let tool = |ui: &mut egui::Ui, act: &mut Option<Act>, label: &str, k: ToolKind| {
-            if ui.button(label).on_hover_text(k.tooltip()).clicked() {
+            let icon = has_drawing(k.name()).then_some(Icon::Tool(k));
+            if iconic_button(ui, label, "", icon)
+                .on_hover_text(k.tooltip())
+                .clicked()
+            {
                 *act = Some(Act::Tool(k));
                 ui.close();
             }
@@ -252,6 +332,27 @@ impl FormaApp {
                 ui.menu_button("Section (Clipping Plane)", |ui| {
                     tool(ui, &mut act, "Add Section Cut", K::Seq(&q::CLIPPING_PLANE));
                     item(ui, &mut act, "Remove Section Cut", "", Act::Submit("ClippingPlane Off"));
+                });
+                ui.menu_button("Command Area", |ui| {
+                    let now = self.cmd_dock;
+                    for (d, label, cmd) in [
+                        (CmdDock::Top, "Docked at the Top", "CommandArea Top"),
+                        (CmdDock::Bottom, "Docked at the Bottom", "CommandArea Bottom"),
+                        (CmdDock::Float, "Floating Window", "CommandArea Float"),
+                    ] {
+                        let label = if d == now {
+                            format!("✓ {label}")
+                        } else {
+                            label.to_string()
+                        };
+                        if ui.button(label).clicked() {
+                            act = Some(Act::Submit(cmd));
+                            ui.close();
+                        }
+                    }
+                    ui.separator();
+                    item(ui, &mut act, "Compact", "", Act::Submit("CommandArea Compact"));
+                    item(ui, &mut act, "Tall", "", Act::Submit("CommandArea Tall"));
                 });
                 ui.menu_button("Interface", |ui| {
                     item(ui, &mut act, "Classic (original, light)", "", Act::Submit("Interface Classic"));
@@ -544,6 +645,11 @@ impl FormaApp {
                 );
             });
             ui.menu_button("Tools", |ui| {
+                if ask_entry(ui).clicked() {
+                    act = Some(Act::Submit("Ask"));
+                    ui.close();
+                }
+                ui.separator();
                 ui.menu_button("Object Snap", |ui| {
                     for k in SnapKind::ALL {
                         ui.checkbox(self.snap.flag(k), k.label());
@@ -555,6 +661,23 @@ impl FormaApp {
                 ui.checkbox(&mut self.snap.ortho, "Ortho (F8)");
                 ui.checkbox(&mut self.snap.planar, "Planar");
                 ui.separator();
+                ui.menu_button("Scripts (Python)", |ui| {
+                    item(ui, &mut act, "Run Python Script…", "", Act::Submit("RunPythonScript"));
+                    if ui.button("Open Scripts Folder").clicked() {
+                        open_scripts = true;
+                        ui.close();
+                    }
+                    let scripts = crate::scripting::script_commands();
+                    if !scripts.is_empty() {
+                        ui.separator();
+                    }
+                    for (name, path) in scripts {
+                        if ui.button(name).on_hover_text(path.display().to_string()).clicked() {
+                            run_script = Some(path);
+                            ui.close();
+                        }
+                    }
+                });
                 if self.agent.is_some() {
                     item(ui, &mut act, "✓ Agent Connection (AI assistants)", "", Act::Submit("AgentConnection Off"));
                 } else {
@@ -587,6 +710,12 @@ impl FormaApp {
         });
         if let Some(a) = act {
             self.act(ui.ctx(), a);
+        }
+        if let Some(p) = run_script {
+            self.run_python_file(&p);
+        }
+        if open_scripts {
+            self.open_scripts_folder();
         }
         if let Some(n) = restore_view {
             self.named_view(&format!("NamedView {n}"));

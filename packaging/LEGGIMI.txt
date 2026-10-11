@@ -1,4 +1,4 @@
-FORMA 1.1 — modellatore personale in stile Rhino 8
+FORMA 1.2 — modellatore personale in stile Rhino 8
 ==================================================
 
 Avvio
@@ -7,6 +7,28 @@ Avvio
   "Crea collegamento sul Desktop.bat" aggiunge Forma al Desktop e al menu Start.
   All'avvio Forma chiede le unità del nuovo modello (mm, cm, m, pollici, piedi);
   "Ask at every start" si può togliere. File > New / Ctrl+N la ripropone.
+
+Novità della 1.2: script Python, Ask (AI), forme libere esatte
+  Script Python dentro l'app (niente da installare): Tools > Scripts (Python).
+  Ogni file .py nella cartella degli script (Tools > Scripts > Open Scripts
+  Folder) diventa un comando: stanza.py -> Stanza.
+  Ask (pulsante viola con la stella, primo della scheda Standard, oppure
+  Tools > Ask AI): descrivi il comando a parole, un modello AI locale scrive
+  lo script. Run lo esegue (un Undo annulla tutto), Ask to fix gli rimanda
+  l'errore, Save lo salva come nuovo comando.
+  Modello locale: installa Ollama (https://ollama.com), poi in un terminale
+  "ollama pull qwen2.5-coder:7b". In Ask > Model l'indirizzo predefinito
+  http://localhost:11434 è già quello di Ollama (LM Studio:
+  http://localhost:1234/v1).
+  Claude su un altro account: Tools > Agent Connection e forma-cli.exe mcp --live.
+  Tutte le voci dei menu hanno ora la loro icona, e Forma ha la sua icona.
+  Riga di comando come in Rhino: trascina il bordo (maniglia puntinata) per
+  ridimensionarla, doppio clic per compatta / alta; View > Command Area per
+  metterla in alto, in basso o in una finestra mobile.
+  Forme libere esatte: Sweep1, Sweep2, EdgeSrf, SrfPt e Pipe danno superfici
+  NURBS esatte (Sweep1 su polilinee con angoli a 45°, come una cornice).
+  Le curve libere restano esatte con Split, Trim, Join, Offset, Fillet, Extend,
+  Explode e CurveBoolean.
 
 Novità della 1.1
   Salvataggio automatico ogni 2 minuti delle modifiche non salvate; dopo un
@@ -144,9 +166,9 @@ Limiti di questa versione
     salvano come polisuperfici (anche dopo Move, Rotate, Scale, Mirror).
     Box, Cylinder, Sphere, Extrude, PlanarSrf, ExtrudeSrf, Revolve, Cap,
     Join ed Explode lavorano su geometria esatta.
-  - Restano mesh: Loft, Sweep1/Sweep2, FilletEdge e le booleane quando ci sono
-    facce curve (con solidi a facce piane, es. muri e scatole, il risultato
-    torna una polisuperficie esatta).
+  - Anche le forme libere sono superfici NURBS esatte: Loft, Sweep1 (con
+    angoli a 45° sulle polilinee, come una cornice), Sweep2, EdgeSrf, SrfPt,
+    Pipe, Revolve.
   - I punti di controllo (F10) delle superfici curve non sono ancora
     modificabili; quelli dei solidi a facce piane sì (spigoli).
   - Salvando un file aperto da Rhino, la prima volta Forma propone un nuovo nome

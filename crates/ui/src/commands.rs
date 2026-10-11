@@ -85,9 +85,29 @@ impl FormaApp {
             self.new_model = Some(self.new_dialog(false));
             return;
         }
+        if first == "ask" {
+            self.ask_command(line);
+            return;
+        }
+        if first == "runpythonscript" || first == "runpython" {
+            self.run_python_command(line);
+            return;
+        }
+        // A Python script of the scripts folder, by name (engine commands win).
+        if self.engine.resolve(&first).is_none() {
+            if let Some(path) = crate::scripting::script_for(&first) {
+                self.run_python_file(&path);
+                self.set_last(line);
+                return;
+            }
+        }
         if first == "agentconnection" {
             let ctx = self.egui_ctx.clone();
             self.agent_command(&ctx, line);
+            return;
+        }
+        if first == "commandarea" {
+            self.command_area(line);
             return;
         }
         if first == "interface" {
@@ -487,6 +507,19 @@ impl FormaApp {
                 "<point> <up|down|north|south|east|west>, Off, or Enter to pick",
             ));
             return;
+        }
+        // Interface commands whose argument comes next (Enter runs them).
+        if self.at_command_prompt() && toks.len() == 1 {
+            let what = match toks[0].to_ascii_lowercase().as_str() {
+                "commandarea" => Some("Top, Bottom, Float, Compact or Tall"),
+                "interface" => Some("Classic or Graphite"),
+                "agentconnection" => Some("On or Off"),
+                _ => None,
+            };
+            if let Some(what) = what {
+                self.pending = Some((toks[0].to_string(), what));
+                return;
+            }
         }
         if self.at_command_prompt() {
             let first = toks[0];

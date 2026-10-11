@@ -638,6 +638,245 @@ pub fn sweep1_mesh(rail: &[Point3], profile: &[Point3]) -> Mesh {
     m.welded(1e-9)
 }
 
+/// Where an exact Sweep1 places its profile, piece by piece: the rail is split
+/// at its sharp corners (more than 10°, e.g. the vertices of a polyline) and for
+/// each piece come the maps taking the profile, as placed at the start of the
+/// rail, to stations along it. Frames turn with rotation-minimising frames
+/// (as [`sweep1_mesh`]) and keep turning across corners; at a corner the end
+/// stations are mitred (projected onto the plane halfway between the two
+/// directions), so neighbouring pieces meet exactly. A straight piece has two
+/// stations (a ruled surface), a curved one up to `max_stations`. Lofting the
+/// profile through each piece's maps and joining the pieces gives the swept
+/// polysurface. `closed`: the rail ends where it starts. Empty when degenerate.
+pub fn sweep1_pieces(rail: &[Point3], closed: bool, max_stations: usize) -> Vec<Vec<Xform>> {
+    let mut pts: Vec<Point3> = rail.to_vec();
+    pts.dedup_by(|a, b| a.distance_to(*b) < 1e-9);
+    if closed && pts.len() > 2 && pts[0].distance_to(*pts.last().expect("len")) > 1e-9 {
+        pts.push(pts[0]);
+    }
+    if pts.len() < 2 {
+        return Vec::new();
+    }
+    let dir = |a: Point3, b: Point3| (b - a).normalized();
+    let kink = |a: Vec3, b: Vec3| a.dot(b) < 10f64.to_radians().cos();
+    // Split at sharp corners.
+    let mut pieces: Vec<Vec<Point3>> = vec![vec![pts[0]]];
+    for i in 1..pts.len() {
+        pieces.last_mut().expect("piece").push(pts[i]);
+        if i + 1 < pts.len() {
+            if let (Some(a), Some(b)) = (dir(pts[i - 1], pts[i]), dir(pts[i], pts[i + 1])) {
+                if kink(a, b) {
+                    pieces.push(vec![pts[i]]);
+                }
+            }
+        }
+    }
+    let end_tangent = |p: &[Point3]| dir(p[p.len() - 2], p[p.len() - 1]);
+    let start_tangent = |p: &[Point3]| dir(p[0], p[1]);
+    // A closed rail with a corner where it closes is mitred there too.
+    let closing_corner = closed && {
+        match (
+            end_tangent(pieces.last().expect("piece")),
+            start_tangent(&pieces[0]),
+        ) {
+            (Some(a), Some(b)) => kink(a, b),
+            _ => false,
+        }
+    };
+    let Some(t0) = start_tangent(&pieces[0]) else {
+        return Vec::new();
+    };
+    let reference = {
+        let p = Plane::from_normal(pts[0], t0);
+        Plane {
+            origin: pts[0],
+            x: p.x,
+            y: t0.cross(p.x),
+            z: t0,
+        }
+    };
+    // Projection along `d` onto the plane through `o` with normal `n`.
+    let miter = |o: Point3, n: Vec3, d: Vec3| -> Xform {
+        let dn = d.dot(n);
+        let c = [d.x, d.y, d.z];
+        let nn = [n.x, n.y, n.z];
+        let mut m = [[0.0; 3]; 3];
+        for (r, row) in m.iter_mut().enumerate() {
+            for (k, v) in row.iter_mut().enumerate() {
+                *v = f64::from(u8::from(r == k)) - c[r] * nn[k] / dn;
+            }
+        }
+        Xform {
+            m,
+            t: d * (o.to_vec().dot(n) / dn),
+        }
+    };
+    let count = pieces.len();
+    let mut x_axis = reference.x;
+    let mut out = Vec::with_capacity(count);
+    for (k, piece) in pieces.iter().enumerate() {
+        let straight = piece.len() == 2;
+        let dense = if straight {
+            piece.clone()
+        } else {
+            resample(piece, 241, false)
+        };
+        let nr = dense.len();
+        if nr < 2 {
+            return Vec::new();
+        }
+        let seg = |i: usize| dir(dense[i], dense[i + 1]);
+        let mut tangents = Vec::with_capacity(nr);
+        for i in 0..nr {
+            let t = if i == 0 {
+                seg(0)
+            } else if i == nr - 1 {
+                seg(nr - 2)
+            } else {
+                match (seg(i - 1), seg(i)) {
+                    (Some(a), Some(b)) => (a + b).normalized().or(Some(b)),
+                    (a, b) => b.or(a),
+                }
+            };
+            let Some(t) = t else { return Vec::new() };
+            tangents.push(t);
+        }
+        // Continue the frame: across a corner, the smallest turn.
+        let mut rr = (x_axis - tangents[0] * x_axis.dot(tangents[0]))
+            .normalized()
+            .unwrap_or_else(|| Plane::from_normal(dense[0], tangents[0]).x);
+        let mut frames = Vec::with_capacity(nr);
+        frames.push(rr);
+        for i in 0..nr - 1 {
+            let v1 = dense[i + 1] - dense[i];
+            let c1 = v1.dot(v1);
+            if c1 < 1e-24 {
+                frames.push(rr);
+                continue;
+            }
+            let rl = rr - v1 * (2.0 / c1 * v1.dot(rr));
+            let tl = tangents[i] - v1 * (2.0 / c1 * v1.dot(tangents[i]));
+            let v2 = tangents[i + 1] - tl;
+            let c2 = v2.dot(v2);
+            rr = if c2 < 1e-24 {
+                rl
+            } else {
+                rl - v2 * (2.0 / c2 * v2.dot(rl))
+            };
+            frames.push(rr);
+        }
+        let plane_at = |i: usize| {
+            let (t, x) = (tangents[i], frames[i]);
+            Plane {
+                origin: dense[i],
+                x,
+                y: t.cross(x),
+                z: t,
+            }
+        };
+        let n = if straight {
+            2
+        } else {
+            piece.len().clamp(8, max_stations.max(8))
+        };
+        let mut maps: Vec<Xform> = (0..n)
+            .map(|s| {
+                let i = (s * (nr - 1) + (n - 1) / 2) / (n - 1);
+                Xform::plane_to_plane(&reference, &plane_at(i.min(nr - 1)))
+            })
+            .collect();
+        // Mitre the ends that are corners.
+        let prev = if k > 0 {
+            end_tangent(&pieces[k - 1])
+        } else if closing_corner {
+            end_tangent(&pieces[count - 1])
+        } else {
+            None
+        };
+        if let Some(a) = prev {
+            let b = tangents[0];
+            if let Some(nrm) = (a + b).normalized() {
+                maps[0] = maps[0].then(&miter(dense[0], nrm, b));
+            }
+        }
+        let next = if k + 1 < count {
+            start_tangent(&pieces[k + 1])
+        } else if closing_corner {
+            start_tangent(&pieces[0])
+        } else {
+            None
+        };
+        if let Some(b) = next {
+            let a = tangents[nr - 1];
+            if let Some(nrm) = (a + b).normalized() {
+                maps[n - 1] = maps[n - 1].then(&miter(dense[nr - 1], nrm, a));
+            }
+            x_axis = Xform::rotation_between(a, b).vector(frames[nr - 1]);
+        }
+        out.push(maps);
+    }
+    out
+}
+
+/// Where an exact Sweep2 places its profile: `n` maps (move, turn, uniform
+/// scale) taking the profile, which runs from near the start of `rail1` to near
+/// the start of `rail2`, to stations where its ends touch both rails (as
+/// [`sweep2_mesh`]). The rails are spread evenly by length; the second is turned
+/// round when it runs the other way. Empty when degenerate.
+pub fn sweep2_stations(rail1: &[Point3], rail2: &[Point3], n: usize) -> Vec<Xform> {
+    if rail1.len() < 2 || rail2.len() < 2 || n < 2 {
+        return Vec::new();
+    }
+    let a = resample(rail1, n, false);
+    let mut b = resample(rail2, n, false);
+    if a.len() != n || b.len() != n {
+        return Vec::new();
+    }
+    if a[0].distance_to(b[0]) + a[n - 1].distance_to(b[n - 1])
+        > a[0].distance_to(b[n - 1]) + a[n - 1].distance_to(b[0])
+    {
+        b.reverse();
+    }
+    let tangent = |r: &[Point3], i: usize| {
+        let (p, q) = if i + 1 < r.len() {
+            (r[i], r[i + 1])
+        } else {
+            (r[i - 1], r[i])
+        };
+        (q - p).normalized().unwrap_or(Vec3::Z)
+    };
+    let frame = |i: usize| -> Option<(Plane, f64)> {
+        let chord = b[i] - a[i];
+        let len = chord.length();
+        let x = chord.normalized()?;
+        let t = tangent(&a, i) + tangent(&b, i);
+        let z = (t - x * t.dot(x)).normalized()?;
+        Some((
+            Plane {
+                origin: a[i],
+                x,
+                y: z.cross(x),
+                z,
+            },
+            len,
+        ))
+    };
+    let Some((p0, l0)) = frame(0) else {
+        return Vec::new();
+    };
+    if l0 < 1e-12 {
+        return Vec::new();
+    }
+    let mut out = Vec::with_capacity(n);
+    for i in 0..n {
+        let Some((p, l)) = frame(i) else {
+            return Vec::new();
+        };
+        out.push(Xform::plane_to_plane(&p0, &p).then(&Xform::scale(p.origin, l / l0)));
+    }
+    out
+}
+
 /// Sweep along two rails (Rhino's Sweep2): the profile, which should run from
 /// near the start of `rail1` to near the start of `rail2`, is moved, turned and
 /// scaled at each station so its ends follow both rails. Both rails are

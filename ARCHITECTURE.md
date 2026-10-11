@@ -13,10 +13,11 @@ checks this on every CI run.
 | 2 | `forma-io-mesh` | Export OBJ, STL, glTF. |
 | 2 | `forma-render` | Turn document geometry into GPU-ready meshes and lines; viewports, camera, display modes, picking. wgpu, no windowing. |
 | 3 | `forma-engine` | Command registry, command-line parser and prompts, object snaps, construction planes, sessions. The single entry point for every action. |
-| 4 | `forma-ui` | egui front end: viewports, command line widget, layer panel, properties. Replaceable. |
-| 4 | `forma-mcp` | MCP server exposing `command_line`, `execute`, `inspect`, `render`. |
-| 5 | `apps/forma` | Desktop binary (eframe). |
-| 5 | `apps/forma-cli` | Headless CLI: run scripts, convert files, start MCP. |
+| 4 | `forma-script` | Python scripting (embedded RustPython, ADR 0008): the `forma` module, scripts as commands. |
+| 5 | `forma-ui` | egui front end: viewports, command line widget, layer panel, properties. Replaceable. |
+| 5 | `forma-mcp` | MCP server for AI agents (ADR 0007): run commands and Python, inspect, render. |
+| 6 | `apps/forma` | Desktop binary (eframe). |
+| 6 | `apps/forma-cli` | Headless CLI: run scripts, convert files, start MCP. |
 | — | `xtask` | Dev automation (`ci`, `layering`). Not part of the product. |
 
 ## Key decisions

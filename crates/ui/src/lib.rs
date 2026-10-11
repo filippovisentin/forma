@@ -11,6 +11,7 @@
 
 mod agent_link;
 mod app;
+mod ask;
 mod autosave;
 mod capture;
 mod cmdline;
@@ -30,6 +31,7 @@ mod overlays;
 mod panels;
 mod perf;
 mod pick;
+mod scripting;
 mod settings;
 mod snap;
 mod start;
@@ -80,70 +82,35 @@ pub fn run(open: Option<String>) -> eframe::Result {
     )
 }
 
-/// Window and taskbar icon, drawn in code (no image assets): a white
-/// wireframe box on a blue rounded square.
+/// Window and taskbar icon: `packaging/icon/forma-256.png` (made by
+/// `packaging/icon/make_icon.py`; the same picture is in `forma.ico` for the
+/// Windows executable).
 fn app_icon() -> egui::IconData {
-    const N: usize = 64;
-    let mut rgba = vec![0u8; N * N * 4];
-    // Isometric box corners (pixels).
-    let p = |x: f32, y: f32| (x, y);
-    let (top, l, r, c) = (p(32.0, 12.0), p(13.0, 22.0), p(51.0, 22.0), p(32.0, 32.0));
-    let (lb, rb, cb) = (p(13.0, 42.0), p(51.0, 42.0), p(32.0, 53.0));
-    let edges = [
-        (top, l),
-        (top, r),
-        (l, c),
-        (r, c),
-        (l, lb),
-        (r, rb),
-        (c, cb),
-        (lb, cb),
-        (rb, cb),
-    ];
-    let dist = |(px, py): (f32, f32), (a, b): ((f32, f32), (f32, f32))| {
-        let (dx, dy) = (b.0 - a.0, b.1 - a.1);
-        let t = (((px - a.0) * dx + (py - a.1) * dy) / (dx * dx + dy * dy)).clamp(0.0, 1.0);
-        ((px - a.0 - t * dx).powi(2) + (py - a.1 - t * dy).powi(2)).sqrt()
+    decode_icon(include_bytes!("../../../packaging/icon/forma-256.png")).unwrap_or_default()
+}
+
+fn decode_icon(bytes: &[u8]) -> Option<egui::IconData> {
+    let mut dec = png::Decoder::new(std::io::Cursor::new(bytes));
+    dec.set_transformations(png::Transformations::EXPAND);
+    let mut reader = dec.read_info().ok()?;
+    let mut buf = vec![0; reader.output_buffer_size()?];
+    let info = reader.next_frame(&mut buf).ok()?;
+    buf.truncate(info.buffer_size());
+    let rgba = match info.color_type {
+        png::ColorType::Rgba => buf,
+        png::ColorType::Rgb => buf
+            .as_chunks::<3>()
+            .0
+            .iter()
+            .flat_map(|c| [c[0], c[1], c[2], 255])
+            .collect(),
+        _ => return None,
     };
-    for y in 0..N {
-        for x in 0..N {
-            let (fx, fy) = (x as f32 + 0.5, y as f32 + 0.5);
-            // Rounded square, radius 12, with a soft edge.
-            let qx = (fx - 32.0).abs() - 20.0;
-            let qy = (fy - 32.0).abs() - 20.0;
-            let outside =
-                (qx.max(0.0).powi(2) + qy.max(0.0).powi(2)).sqrt() + qx.max(qy).min(0.0) - 10.0;
-            let alpha = (0.5 - outside).clamp(0.0, 1.0);
-            if alpha <= 0.0 {
-                continue;
-            }
-            // Blue background, lighter at the top.
-            let k = fy / N as f32;
-            let mut col = [
-                40.0 + 30.0 * (1.0 - k),
-                90.0 + 40.0 * (1.0 - k),
-                170.0 + 40.0 * (1.0 - k),
-            ];
-            let d = edges
-                .iter()
-                .map(|e| dist((fx, fy), *e))
-                .fold(f32::INFINITY, f32::min);
-            let line = (2.6 - d).clamp(0.0, 1.0);
-            for c in &mut col {
-                *c += (255.0 - *c) * line;
-            }
-            let i = (y * N + x) * 4;
-            rgba[i] = col[0] as u8;
-            rgba[i + 1] = col[1] as u8;
-            rgba[i + 2] = col[2] as u8;
-            rgba[i + 3] = (alpha * 255.0) as u8;
-        }
-    }
-    egui::IconData {
+    Some(egui::IconData {
         rgba,
-        width: N as u32,
-        height: N as u32,
-    }
+        width: info.width,
+        height: info.height,
+    })
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -374,6 +341,8 @@ struct FormaApp {
     autosave: autosave::Autosave,
     /// AI assistants' connection to this window (Tools ▸ Agent Connection), when on.
     agent: Option<agent_link::AgentLink>,
+    /// The Ask window (AI writes a command as a Python script).
+    ask: ask::AskWindow,
     /// For work that needs the context outside the frame callbacks.
     egui_ctx: egui::Context,
     /// The "New model" (units) dialog, when open.
@@ -381,6 +350,24 @@ struct FormaApp {
     /// Panel sizes (points), remembered between runs.
     side_width: f32,
     command_height: f32,
+    /// A height to give the docked command area next frame (double-click on
+    /// the grip, `CommandArea Compact|Tall`).
+    command_resize: Option<f32>,
+    /// Where the command area is (View ▸ Command Area).
+    cmd_dock: cmdline::CmdDock,
 }
 
 const CMD_ID: &str = "forma-command-line";
+
+#[cfg(test)]
+mod icon_tests {
+    #[test]
+    fn the_app_icon_decodes() {
+        let icon = super::app_icon();
+        assert_eq!((icon.width, icon.height), (256, 256));
+        assert_eq!(icon.rgba.len(), 256 * 256 * 4);
+        // Transparent corner, opaque middle.
+        assert_eq!(icon.rgba[3], 0);
+        assert_eq!(icon.rgba[(128 * 256 + 128) * 4 + 3], 255);
+    }
+}

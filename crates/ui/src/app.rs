@@ -1,6 +1,7 @@
 //! App construction, the frame loop, document → GPU sync and persistent
 //! settings.
 
+use crate::cmdline::{CmdDock, CMD_COMPACT, CMD_MAX, CMD_MIN};
 use crate::complete::{Completer, UI_COMMANDS};
 use crate::settings::Settings;
 use crate::snap::{SnapKind, SnapSettings};
@@ -26,7 +27,7 @@ pub(crate) fn min_grid_extent(u: LengthUnit) -> f64 {
 }
 
 /// Every command name the command line knows, for autocomplete.
-fn completer(engine: &Engine) -> Completer {
+pub(crate) fn completer(engine: &Engine) -> Completer {
     let engine_cmds = engine.command_list().into_iter().map(|(n, h)| {
         (
             n.to_string(),
@@ -50,8 +51,12 @@ fn completer(engine: &Engine) -> Completer {
     let ui = UI_COMMANDS
         .iter()
         .map(|(n, h)| (n.to_string(), h.to_string()));
+    // Python scripts in the scripts folder are commands too.
+    let scripts = crate::scripting::script_commands()
+        .into_iter()
+        .map(|(n, p)| (n, format!("Python script {}", p.display())));
     // UI descriptions first: they describe the interactive tool.
-    Completer::new(tools.chain(sel).chain(ui).chain(engine_cmds))
+    Completer::new(tools.chain(sel).chain(ui).chain(scripts).chain(engine_cmds))
 }
 
 impl FormaApp {
@@ -142,9 +147,12 @@ impl FormaApp {
             autosave: crate::autosave::Autosave::at_startup(),
             new_model: None,
             agent: None,
+            ask: crate::ask::AskWindow::default(),
             egui_ctx: cc.egui_ctx.clone(),
             side_width: 280.0,
-            command_height: 92.0,
+            command_height: CMD_COMPACT,
+            command_resize: None,
+            cmd_dock: CmdDock::Top,
         };
         let look = app
             .settings
@@ -363,7 +371,10 @@ impl FormaApp {
             self.side_width = w.clamp(160.0, 900.0);
         }
         if let Some(h) = s.get_f32("panel.command") {
-            self.command_height = h.clamp(56.0, 400.0);
+            self.command_height = h.clamp(CMD_MIN, CMD_MAX);
+        }
+        if let Some(d) = s.get("panel.command_dock").and_then(CmdDock::parse) {
+            self.cmd_dock = d;
         }
     }
 
@@ -395,6 +406,7 @@ impl FormaApp {
         s.set("ui.look", theme::look().name());
         s.set("panel.side", self.side_width.round());
         s.set("panel.command", self.command_height.round());
+        s.set("panel.command_dock", self.cmd_dock.name());
         s
     }
 
@@ -459,17 +471,9 @@ impl eframe::App for FormaApp {
                     .inner_margin(egui::Margin::symmetric(4, 1)),
             )
             .show(ui, |ui| self.ui_menu(ui));
-        let r = egui::Panel::top("command")
-            .resizable(true)
-            .default_size(self.command_height)
-            .size_range(56.0..=400.0)
-            .frame(
-                egui::Frame::NONE
-                    .fill(theme::panel())
-                    .inner_margin(egui::Margin::symmetric(4, 3)),
-            )
-            .show(ui, |ui| self.ui_command_line(ui));
-        self.command_height = r.response.rect.height();
+        if self.cmd_dock == CmdDock::Top {
+            self.ui_command_panel(ui, true);
+        }
         egui::Panel::top("tabs")
             .frame(
                 egui::Frame::NONE
@@ -489,6 +493,9 @@ impl eframe::App for FormaApp {
             egui::Panel::bottom("osnap")
                 .frame(strip)
                 .show(ui, |ui| self.ui_osnap(ui));
+        }
+        if self.cmd_dock == CmdDock::Bottom {
+            self.ui_command_panel(ui, false);
         }
         egui::Panel::left("tools")
             .resizable(false)
@@ -513,10 +520,14 @@ impl eframe::App for FormaApp {
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE.fill(theme::gap()))
             .show(ui, |ui| self.ui_viewports(ui, frame));
+        if self.cmd_dock == CmdDock::Float {
+            self.ui_command_window(&ctx);
+        }
         self.ui_confirm(&ctx);
         self.ui_recover(&ctx);
         self.ui_new_dialog(&ctx);
         self.ui_form(&ctx);
+        self.ui_ask(&ctx);
         self.poll_capture(&ctx);
 
         // Changes made by panels this frame (commands, layer toggles) need a

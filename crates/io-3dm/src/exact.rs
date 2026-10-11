@@ -627,6 +627,31 @@ pub fn make_loft(curves: &[&Geometry], straight: bool, tol: f64) -> Option<Brep>
     )
 }
 
+/// Surface bounded by 2, 3 or 4 curves meeting end to end (EdgeSrf): ruled
+/// between two curves, else a Coons patch whose edges are the curves.
+pub fn make_edge_srf(curves: &[&Geometry], tol: f64) -> Option<Brep> {
+    let mut stream = Vec::new();
+    for c in curves {
+        if !push_loop(&mut stream, c) {
+            return None;
+        }
+    }
+    let mut len = 0;
+    // SAFETY: buffers outlive the call; owned bytes out.
+    made(
+        unsafe {
+            ffi::f3dm_make_edge_srf(
+                stream.as_ptr(),
+                stream.len(),
+                c_int::try_from(curves.len()).ok()?,
+                tol,
+                &mut len,
+            )
+        },
+        len,
+    )
+}
+
 /// The surface swept by `profile` moving along `path` without turning
 /// (ExtrudeCrvAlongCrv).
 pub fn make_along(profile: &Geometry, path: &Geometry, tol: f64) -> Option<Brep> {

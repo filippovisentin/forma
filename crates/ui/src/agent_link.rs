@@ -204,6 +204,22 @@ impl FormaApp {
                 }
             }
             agent::RUN => self.agent_run(text),
+            agent::PYTHON => {
+                let before = self.log_count;
+                let _ = self.run_python_source(text, "<agent>");
+                let new = (self.log_count - before).min(self.log.len());
+                let mut ok = true;
+                let mut out = String::new();
+                for (kind, msg) in &self.log[self.log.len() - new..] {
+                    if *kind == LogKind::Command {
+                        continue;
+                    }
+                    ok &= *kind != LogKind::Error;
+                    out.push_str(msg);
+                    out.push('\n');
+                }
+                (ok, out)
+            }
             v => (false, format!("unknown request {v}")),
         }
     }
@@ -223,35 +239,14 @@ impl FormaApp {
             out.push_str("> ");
             out.push_str(line);
             out.push('\n');
-            let before = self.log_count;
-            let first = line.split_whitespace().next().unwrap_or("").to_lowercase();
-            if VIEW_WORDS.contains(&first.as_str()) {
-                self.submit(line); // views are the window's, not the engine's
-            } else {
-                self.run_engine(line);
-            }
-            let new = (self.log_count - before).min(self.log.len());
-            let logged = &self.log[self.log.len() - new..];
-            let mut failed = false;
-            for (kind, msg) in logged {
-                if *kind == LogKind::Command {
-                    continue; // the echo of the line itself
-                }
-                failed |= *kind == LogKind::Error;
-                out.push_str(msg);
-                out.push('\n');
-            }
+            let (ok, text) = self.run_captured(line);
+            out.push_str(&text);
+            let failed = !ok;
             if self.confirm.is_some() {
                 out.push_str(
                     "(the app asks the user to save changes first; nothing more was run)\n",
                 );
                 return (false, out);
-            }
-            if self.tool.is_some() {
-                // Missing input started an interactive tool: give it back to the user.
-                self.tool = None;
-                out.push_str("error: some input of this command is missing\n");
-                failed = true;
             }
             if failed {
                 out.push_str("(stopped; the lines after this one did not run)\n");
@@ -266,7 +261,7 @@ impl FormaApp {
 }
 
 /// View commands an agent may use in the live app.
-const VIEW_WORDS: [&str; 16] = [
+pub(crate) const VIEW_WORDS: [&str; 16] = [
     "ze",
     "zea",
     "zoomextents",

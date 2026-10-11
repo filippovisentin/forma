@@ -149,6 +149,20 @@ pub fn weak() -> Color32 {
 pub fn accent() -> Color32 {
     p().accent
 }
+/// The AI (Ask) colour: violet, lighter on the dark look.
+pub fn ai() -> Color32 {
+    match look() {
+        Look::Classic => Color32::from_rgb(98, 54, 220),
+        Look::Graphite => Color32::from_rgb(176, 150, 255),
+    }
+}
+/// Background of the AI button.
+pub fn ai_bg() -> Color32 {
+    match look() {
+        Look::Classic => Color32::from_rgb(236, 230, 255),
+        Look::Graphite => Color32::from_rgb(52, 44, 82),
+    }
+}
 pub fn accent_bg() -> Color32 {
     p().accent_bg
 }

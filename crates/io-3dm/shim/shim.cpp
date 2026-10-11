@@ -2276,6 +2276,233 @@ unsigned char* f3dm_make_loft(const double* stream, size_t n, int count, int str
   return brep_bytes(out, len);
 }
 
+// Non-rational cubic through `pts` (chord-length parameters, domain [0, 1]),
+// for boundary curves that are rational (arcs) where a Coons patch needs
+// polynomial ones. Exact at the points; the samples are dense enough that the
+// difference is far below modelling tolerances.
+static bool interpolate_cubic(const std::vector<ON_3dPoint>& pts, ON_NurbsCurve& out) {
+  const int rows = static_cast<int>(pts.size());
+  if (rows < 4) return false;
+  std::vector<double> t(rows, 0.0);
+  for (int i = 1; i < rows; i++) t[i] = t[i - 1] + pts[i - 1].DistanceTo(pts[i]);
+  if (t[rows - 1] <= 0.0) return false;
+  for (double& x : t) x /= t[rows - 1];
+  const int deg = 3;
+  std::vector<double> knots(rows + deg - 1);
+  for (int i = 0; i < deg; i++) {
+    knots[i] = 0.0;
+    knots[rows + deg - 2 - i] = 1.0;
+  }
+  for (int j = 1; j < rows - deg; j++) {
+    double s = 0.0;
+    for (int i = j; i < j + deg; i++) s += t[i];
+    knots[deg - 1 + j] = s / deg;
+  }
+  std::vector<double> a(rows * rows, 0.0);
+  ON_NurbsCurve basis(1, false, deg + 1, rows);
+  for (int q = 0; q < rows + deg - 1; q++) basis.SetKnot(q, knots[q]);
+  for (int j = 0; j < rows; j++) {
+    for (int q = 0; q < rows; q++) basis.SetCV(q, ON_3dPoint(q == j ? 1.0 : 0.0, 0, 0));
+    for (int i = 0; i < rows; i++) {
+      double v = 0.0;
+      basis.Evaluate(t[i], 0, 1, &v);
+      a[i * rows + j] = v;
+    }
+  }
+  std::vector<double> b(rows * 3);
+  for (int i = 0; i < rows; i++) {
+    b[i * 3] = pts[i].x;
+    b[i * 3 + 1] = pts[i].y;
+    b[i * 3 + 2] = pts[i].z;
+  }
+  if (!solve(a, b, rows, 3)) return false;
+  out.Create(3, false, deg + 1, rows);
+  for (int q = 0; q < rows + deg - 1; q++) out.SetKnot(q, knots[q]);
+  for (int i = 0; i < rows; i++) out.SetCV(i, ON_3dPoint(b[i * 3], b[i * 3 + 1], b[i * 3 + 2]));
+  return true;
+}
+
+// Polynomial NURBS form of a curve on [0, 1].
+static bool polynomial_form(const ON_Curve& c, ON_NurbsCurve& out) {
+  if (!c.GetNurbForm(out)) return false;
+  out.SetDomain(0.0, 1.0);
+  if (!out.IsRational()) return true;
+  const int n = 8 * (std::max)(1, out.SpanCount()) + 1;
+  std::vector<ON_3dPoint> pts(n);
+  for (int i = 0; i < n; i++) pts[i] = out.PointAt(static_cast<double>(i) / (n - 1));
+  return interpolate_cubic(pts, out);
+}
+
+// Brings `s` to `degree` and the knots `target` (openNURBS knot vector of the
+// wanted degree) in direction `dir`; its knots there must be a subset.
+static bool match_dir(ON_NurbsSurface& s, int dir, int degree, const ON_NurbsCurve& target) {
+  if (s.Degree(dir) < degree && !s.IncreaseDegree(dir, degree)) return false;
+  const int kc = target.KnotCount();
+  for (int q = degree - 1; q < kc - degree + 1;) {
+    const double k = target.Knot(q);
+    int mult = 1;
+    while (q + mult < kc - degree + 1 && target.Knot(q + mult) == k) mult++;
+    if (k > 0.0 && k < 1.0) {
+      int have = 0;
+      for (int r = 0; r < s.KnotCount(dir); r++)
+        if (s.Knot(dir, r) == k) have++;
+      if (mult > have && !s.InsertKnot(dir, k, mult - have)) return false;
+    }
+    q += mult;
+  }
+  return true;
+}
+
+// Surface through 2, 3 or 4 curves meeting end to end (EdgeSrf). Two curves:
+// the ruled surface between them; three or four: the bilinearly blended Coons
+// patch, whose edges are the curves (a missing fourth side shrinks to a point).
+unsigned char* f3dm_make_edge_srf(const double* stream, size_t n, int count, double tol,
+                                  size_t* len) {
+  *len = 0;
+  size_t k = 0;
+  std::vector<ON_Curve*> raw;
+  for (int i = 0; i < count; i++) {
+    ON_Curve* c = stream_curve(stream, n, &k);
+    if (!c) break;
+    raw.push_back(c);
+  }
+  auto cleanup = [&]() {
+    for (ON_Curve* c : raw) delete c;
+  };
+  if (static_cast<int>(raw.size()) != count || count < 2 || count > 4) {
+    cleanup();
+    return nullptr;
+  }
+  std::vector<ON_NurbsCurve> c(count);
+  for (int i = 0; i < count; i++)
+    if (!polynomial_form(*raw[i], c[i])) {
+      cleanup();
+      return nullptr;
+    }
+  cleanup();
+  const double gap = (std::max)(tol * 10.0, 1e-6);
+  ON_Brep* out = nullptr;
+  if (count == 2) {
+    const ON_3dPoint a0 = c[0].PointAtStart(), a1 = c[0].PointAtEnd();
+    const ON_3dPoint b0 = c[1].PointAtStart(), b1 = c[1].PointAtEnd();
+    if (a0.DistanceTo(b1) + a1.DistanceTo(b0) < a0.DistanceTo(b0) + a1.DistanceTo(b1)) c[1].Reverse();
+    ON_NurbsSurface* ns = ON_NurbsSurface::New();
+    if (!ns->CreateRuledSurface(c[0], c[1])) {
+      delete ns;
+      return nullptr;
+    }
+    ON_Surface* srf = ns;
+    out = new ON_Brep();
+    if (!out->Create(srf)) {
+      delete srf;
+      delete out;
+      return nullptr;
+    }
+    return brep_bytes(out, len);
+  }
+  // Chain the sides head to tail.
+  std::vector<ON_NurbsCurve> loop;
+  loop.push_back(c[0]);
+  std::vector<bool> used(count, false);
+  used[0] = true;
+  for (int step = 1; step < count; step++) {
+    const ON_3dPoint end = loop.back().PointAtEnd();
+    int found = -1;
+    for (int i = 0; i < count && found < 0; i++) {
+      if (used[i]) continue;
+      if (c[i].PointAtStart().DistanceTo(end) < gap) {
+        found = i;
+      } else if (c[i].PointAtEnd().DistanceTo(end) < gap) {
+        c[i].Reverse();
+        c[i].SetDomain(0.0, 1.0);
+        found = i;
+      }
+    }
+    if (found < 0) return nullptr;
+    used[found] = true;
+    loop.push_back(c[found]);
+  }
+  if (loop.back().PointAtEnd().DistanceTo(loop.front().PointAtStart()) > gap) return nullptr;
+  if (count == 3) {
+    // The fourth side shrinks to the corner where the loop closes.
+    const ON_3dPoint p = loop.front().PointAtStart();
+    ON_NurbsCurve point(3, false, 2, 2);
+    point.SetCV(0, p);
+    point.SetCV(1, p);
+    point.SetKnot(0, 0.0);
+    point.SetKnot(1, 1.0);
+    loop.push_back(point);
+  }
+  // Bottom A(u) = side 0, right D(v) = side 1, top C(u) = side 2 reversed,
+  // left B(v) = side 3 reversed.
+  ON_NurbsCurve A = loop[0], D = loop[1], C = loop[2], B = loop[3];
+  C.Reverse();
+  B.Reverse();
+  for (ON_NurbsCurve* x : {&A, &B, &C, &D}) x->SetDomain(0.0, 1.0);
+  for (int pass = 0; pass < 2; pass++)
+    if (!make_compatible(A, C) || !make_compatible(B, D)) return nullptr;
+  for (ON_NurbsCurve* x : {&A, &B, &C, &D}) x->SetDomain(0.0, 1.0);
+  if (A.CVCount() != C.CVCount() || B.CVCount() != D.CVCount()) return nullptr;
+  const int pu = A.Degree(), pv = B.Degree();
+  const int nu = A.CVCount(), nv = B.CVCount();
+  // Ruled across v (A to C), ruled across u (B to D), bilinear corners.
+  ON_NurbsSurface s1(3, false, pu + 1, 2, nu, 2);
+  for (int q = 0; q < A.KnotCount(); q++) s1.SetKnot(0, q, A.Knot(q));
+  s1.SetKnot(1, 0, 0.0);
+  s1.SetKnot(1, 1, 1.0);
+  for (int i = 0; i < nu; i++) {
+    ON_3dPoint p, q;
+    A.GetCV(i, p);
+    C.GetCV(i, q);
+    s1.SetCV(i, 0, p);
+    s1.SetCV(i, 1, q);
+  }
+  ON_NurbsSurface s2(3, false, 2, pv + 1, 2, nv);
+  s2.SetKnot(0, 0, 0.0);
+  s2.SetKnot(0, 1, 1.0);
+  for (int q = 0; q < B.KnotCount(); q++) s2.SetKnot(1, q, B.Knot(q));
+  for (int j = 0; j < nv; j++) {
+    ON_3dPoint p, q;
+    B.GetCV(j, p);
+    D.GetCV(j, q);
+    s2.SetCV(0, j, p);
+    s2.SetCV(1, j, q);
+  }
+  ON_NurbsSurface s3(3, false, 2, 2, 2, 2);
+  for (int d = 0; d < 2; d++) {
+    s3.SetKnot(d, 0, 0.0);
+    s3.SetKnot(d, 1, 1.0);
+  }
+  s3.SetCV(0, 0, A.PointAtStart());
+  s3.SetCV(1, 0, A.PointAtEnd());
+  s3.SetCV(0, 1, C.PointAtStart());
+  s3.SetCV(1, 1, C.PointAtEnd());
+  if (!match_dir(s1, 1, pv, B) || !match_dir(s2, 0, pu, A) || !match_dir(s3, 0, pu, A) ||
+      !match_dir(s3, 1, pv, B))
+    return nullptr;
+  for (const ON_NurbsSurface* s : {&s1, &s2, &s3})
+    if (s->CVCount(0) != nu || s->CVCount(1) != nv) return nullptr;
+  ON_NurbsSurface* ns = ON_NurbsSurface::New(3, false, pu + 1, pv + 1, nu, nv);
+  for (int q = 0; q < A.KnotCount(); q++) ns->SetKnot(0, q, A.Knot(q));
+  for (int q = 0; q < B.KnotCount(); q++) ns->SetKnot(1, q, B.Knot(q));
+  for (int i = 0; i < nu; i++)
+    for (int j = 0; j < nv; j++) {
+      ON_3dPoint p1, p2, p3;
+      s1.GetCV(i, j, p1);
+      s2.GetCV(i, j, p2);
+      s3.GetCV(i, j, p3);
+      ns->SetCV(i, j, ON_3dPoint(p1 + ON_3dVector(p2) - ON_3dVector(p3)));
+    }
+  ON_Surface* srf = ns;
+  out = new ON_Brep();
+  if (!out->Create(srf)) {
+    delete srf;
+    delete out;
+    return nullptr;
+  }
+  return brep_bytes(out, len);
+}
+
 // Surface made by moving a curve along a path (ExtrudeCrvAlongCrv): the sum
 // surface curve(s) + path(t) - path(start), one face per profile segment.
 unsigned char* f3dm_make_along(const double* stream, size_t n, double tol, size_t* len) {

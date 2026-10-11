@@ -149,6 +149,27 @@ impl Geometry {
         }
     }
 
+    /// The curve as one exact NURBS curve (lines and polylines of degree 1, arcs
+    /// and polycurves rational); `None` for anything that is not a curve.
+    pub fn to_nurbs(&self) -> Option<NurbsCurve> {
+        match self {
+            Geometry::Nurbs(n) => Some(n.clone()),
+            Geometry::Line(l) => {
+                NurbsCurve::new(1, vec![l.from, l.to], vec![1.0, 1.0], vec![0.0, 1.0])
+            }
+            Geometry::Polyline(p) => {
+                let mut pts = p.clone();
+                pts.dedup_by(|a, b| a.distance_to(*b) < 1e-12);
+                let n = pts.len();
+                let knots = (0..n).map(|i| i as f64).collect();
+                NurbsCurve::new(1, pts, vec![1.0; n], knots)
+            }
+            Geometry::Arc(a) => Some(NurbsCurve::from_arc(a)),
+            Geometry::PolyCurve(s) => NurbsCurve::from_segs(s),
+            _ => None,
+        }
+    }
+
     /// The curve as a chain of line/arc segments (None for meshes and points).
     /// NURBS curves become their display polyline (an approximation).
     pub fn to_chain(&self) -> Option<Chain> {
@@ -696,6 +717,21 @@ impl Document {
     }
 
     /// Undo the last committed transaction. Returns false if there was nothing to undo.
+    /// Number of undo steps (see [`Document::group_undo_since`]).
+    pub fn undo_depth(&self) -> usize {
+        self.undo.len()
+    }
+
+    /// Merge every undo step added since `depth` into one, so a script or macro
+    /// that ran many commands is undone with a single Undo.
+    pub fn group_undo_since(&mut self, depth: usize) {
+        if self.undo.len() <= depth + 1 {
+            return;
+        }
+        let merged: Vec<Change> = self.undo.drain(depth..).flatten().collect();
+        self.undo.push(merged);
+    }
+
     pub fn undo(&mut self) -> bool {
         let Some(changes) = self.undo.pop() else {
             return false;
@@ -1066,6 +1102,28 @@ mod tests {
         assert_eq!(s.path.as_deref(), Some("a.3dm"));
         assert!(!s.can_undo());
         assert!(doc.can_undo());
+    }
+
+    #[test]
+    fn grouped_steps_undo_together() {
+        let mut doc = Document::new();
+        let mut t = doc.begin();
+        t.add(line());
+        t.commit();
+        let mark = doc.undo_depth();
+        for _ in 0..3 {
+            let mut t = doc.begin();
+            t.add(line());
+            t.commit();
+        }
+        doc.group_undo_since(mark);
+        assert_eq!(doc.undo_depth(), mark + 1);
+        assert!(doc.undo());
+        assert_eq!(doc.len(), 1, "the three grouped adds went at once");
+        assert!(doc.redo());
+        assert_eq!(doc.len(), 4);
+        doc.group_undo_since(99); // nothing to group
+        assert_eq!(doc.undo_depth(), 2);
     }
 
     #[test]

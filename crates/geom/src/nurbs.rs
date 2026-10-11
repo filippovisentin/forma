@@ -359,6 +359,358 @@ fn arc_beziers(arc: &CircleArc) -> Vec<Bezier2> {
 }
 
 /// Knot span index for `t` (The NURBS Book A2.1) with `n` control points.
+/// Homogeneous control point (x·w, y·w, z·w, w).
+type Hom = [f64; 4];
+
+fn hom(p: Point3, w: f64) -> Hom {
+    [p.x * w, p.y * w, p.z * w, w]
+}
+
+fn lerp_h(a: Hom, b: Hom, t: f64) -> Hom {
+    [
+        a[0] + (b[0] - a[0]) * t,
+        a[1] + (b[1] - a[1]) * t,
+        a[2] + (b[2] - a[2]) * t,
+        a[3] + (b[3] - a[3]) * t,
+    ]
+}
+
+impl NurbsCurve {
+    fn homogeneous(&self) -> Vec<Hom> {
+        self.points
+            .iter()
+            .zip(&self.weights)
+            .map(|(p, w)| hom(*p, *w))
+            .collect()
+    }
+
+    /// Curve from textbook knots and homogeneous points.
+    fn from_hom(degree: usize, pw: &[Hom], full: &[f64]) -> Option<NurbsCurve> {
+        let points = pw
+            .iter()
+            .map(|h| Point3::new(h[0] / h[3], h[1] / h[3], h[2] / h[3]))
+            .collect();
+        let weights = pw.iter().map(|h| h[3]).collect();
+        NurbsCurve::new(degree, points, weights, full[1..full.len() - 1].to_vec())
+    }
+
+    /// How many times `t` is a knot (within 1e-12 of the domain size).
+    fn multiplicity(&self, t: f64) -> usize {
+        let (a, b) = self.domain();
+        let eps = (b - a).abs() * 1e-12;
+        self.knots.iter().filter(|k| (**k - t).abs() <= eps).count()
+    }
+
+    /// The same curve with the knot `t` inserted `times` more times (Boehm's
+    /// algorithm, The NURBS Book A5.1): exact, only the representation changes.
+    /// The total multiplicity is capped at the degree.
+    pub fn with_knot(&self, t: f64, times: usize) -> NurbsCurve {
+        let p = self.degree;
+        let (a, b) = self.domain();
+        if t <= a || t >= b {
+            return self.clone();
+        }
+        let room = p.saturating_sub(self.multiplicity(t));
+        let mut u = self.full_knots();
+        let mut pw = self.homogeneous();
+        for _ in 0..times.min(room) {
+            let n = pw.len();
+            let k = find_span(n, p, t, &u);
+            let mut q = Vec::with_capacity(n + 1);
+            for i in 0..=n {
+                if i + p <= k {
+                    q.push(pw[i]);
+                } else if i > k {
+                    q.push(pw[i - 1]);
+                } else {
+                    let den = u[i + p] - u[i];
+                    let alpha = if den.abs() < 1e-300 {
+                        0.0
+                    } else {
+                        (t - u[i]) / den
+                    };
+                    q.push(lerp_h(pw[i - 1], pw[i], alpha));
+                }
+            }
+            u.insert(k + 1, t);
+            pw = q;
+        }
+        NurbsCurve::from_hom(p, &pw, &u).unwrap_or_else(|| self.clone())
+    }
+
+    /// The two halves at parameter `t` (strictly inside the domain), exact.
+    pub fn split_at(&self, t: f64) -> Option<(NurbsCurve, NurbsCurve)> {
+        let (a, b) = self.domain();
+        let eps = (b - a) * 1e-9;
+        if t <= a + eps || t >= b - eps {
+            return None;
+        }
+        let p = self.degree;
+        let c = self.with_knot(t, p);
+        let u = c.full_knots();
+        let pw = c.homogeneous();
+        let tol = (b - a) * 1e-12;
+        // First knot equal to t: the left half ends there.
+        let r = u.iter().position(|k| (k - t).abs() <= tol)?;
+        if r == 0 || r > pw.len() {
+            return None;
+        }
+        let mut lk: Vec<f64> = u[..r].to_vec();
+        lk.extend(std::iter::repeat_n(t, p + 1));
+        let mut rk: Vec<f64> = vec![t; p + 1];
+        rk.extend_from_slice(&u[r + p..]);
+        let left = NurbsCurve::from_hom(p, &pw[..r], &lk)?;
+        let right = NurbsCurve::from_hom(p, &pw[r - 1..], &rk)?;
+        Some((left, right))
+    }
+
+    /// The part of the curve between parameters `t0 < t1`, exact.
+    pub fn sub(&self, t0: f64, t1: f64) -> Option<NurbsCurve> {
+        let (a, b) = self.domain();
+        let (t0, t1) = (t0.clamp(a, b), t1.clamp(a, b));
+        if t1 - t0 <= (b - a) * 1e-9 {
+            return None;
+        }
+        let right = match self.split_at(t0) {
+            Some((_, r)) => r,
+            None => self.clone(),
+        };
+        Some(match right.split_at(t1) {
+            Some((l, _)) => l,
+            None => right,
+        })
+    }
+
+    /// Parameter of the point of the curve closest to `p` (sampling, then a
+    /// golden-section search around the best sample).
+    pub fn closest_param(&self, p: Point3) -> f64 {
+        let mut params = Vec::new();
+        for (a, b) in self.spans() {
+            for i in 0..32 {
+                params.push(a + (b - a) * f64::from(i) / 32.0);
+            }
+        }
+        params.push(self.domain().1);
+        let d = |t: f64| self.point_at(t).distance_to(p);
+        let best = (0..params.len())
+            .min_by(|i, j| d(params[*i]).total_cmp(&d(params[*j])))
+            .unwrap_or(0);
+        let mut lo = params[best.saturating_sub(1)];
+        let mut hi = params[(best + 1).min(params.len() - 1)];
+        let g = (5f64.sqrt() - 1.0) / 2.0;
+        for _ in 0..80 {
+            let m1 = hi - g * (hi - lo);
+            let m2 = lo + g * (hi - lo);
+            if d(m1) < d(m2) {
+                hi = m2;
+            } else {
+                lo = m1;
+            }
+        }
+        (lo + hi) / 2.0
+    }
+
+    /// The same curve raised to degree `degree` (exact): split into Bézier
+    /// pieces, each raised (The NURBS Book eq. 5.36), joined with knots of full
+    /// multiplicity.
+    pub fn elevated(&self, degree: usize) -> NurbsCurve {
+        let p = self.degree;
+        if degree <= p {
+            return self.clone();
+        }
+        // Bézier pieces: every interior knot to multiplicity p.
+        let mut c = self.clone();
+        let (a, b) = self.domain();
+        let breaks: Vec<f64> = {
+            let mut v: Vec<f64> = self
+                .knots
+                .iter()
+                .copied()
+                .filter(|k| *k > a && *k < b)
+                .collect();
+            v.dedup_by(|x, y| (*x - *y).abs() < 1e-14);
+            v
+        };
+        for &k in &breaks {
+            c = c.with_knot(k, p);
+        }
+        let pw = c.homogeneous();
+        let pieces = (pw.len() - 1) / p;
+        let mut out: Vec<Hom> = Vec::new();
+        for s in 0..pieces {
+            let mut seg: Vec<Hom> = pw[s * p..=s * p + p].to_vec();
+            for q in p..degree {
+                // Degree q -> q + 1.
+                let mut up = Vec::with_capacity(q + 2);
+                up.push(seg[0]);
+                for i in 1..=q {
+                    let al = i as f64 / (q + 1) as f64;
+                    up.push(lerp_h(seg[i], seg[i - 1], al));
+                }
+                up.push(seg[q]);
+                seg = up;
+            }
+            if s == 0 {
+                out.extend(seg);
+            } else {
+                out.extend(seg.into_iter().skip(1));
+            }
+        }
+        let mut full = vec![a; degree + 1];
+        for &k in &breaks {
+            full.extend(std::iter::repeat_n(k, degree));
+        }
+        full.extend(std::iter::repeat_n(b, degree + 1));
+        NurbsCurve::from_hom(degree, &out, &full).unwrap_or_else(|| self.clone())
+    }
+
+    /// Curves joined end to end into one (exact): each must start where the
+    /// previous one ends (within `tol`). Degrees are raised to the highest; the
+    /// joins become knots of full multiplicity (corners stay corners). The
+    /// parameter of each piece keeps its length.
+    pub fn join(curves: &[NurbsCurve], tol: f64) -> Option<NurbsCurve> {
+        let first = curves.first()?;
+        let q = curves.iter().map(|c| c.degree).max()?;
+        let mut pw: Vec<Hom> = Vec::new();
+        let mut full: Vec<f64> = Vec::new();
+        let mut offset = 0.0;
+        for (i, c) in curves.iter().enumerate() {
+            if i > 0 && curves[i - 1].end().distance_to(c.start()) > tol {
+                return None;
+            }
+            let e = c.elevated(q);
+            let (a, b) = e.domain();
+            if b - a <= 0.0 {
+                return None;
+            }
+            // Map the parameter onto [offset, offset + length].
+            let len = e.length().max(1e-9);
+            let map = |k: f64| offset + (k - a) / (b - a) * len;
+            let mut h = e.homogeneous();
+            let u: Vec<f64> = e.full_knots().into_iter().map(map).collect();
+            if i == 0 {
+                pw = h;
+                full = u;
+            } else {
+                // Scale the weights so the shared point has one weight.
+                let wl = pw.last().expect("points")[3];
+                let f = wl / h[0][3];
+                for x in &mut h {
+                    for v in x.iter_mut() {
+                        *v *= f;
+                    }
+                }
+                full.pop();
+                full.extend_from_slice(&u[q + 1..]);
+                pw.extend(h.into_iter().skip(1));
+            }
+            offset += len;
+        }
+        let _ = first;
+        NurbsCurve::from_hom(q, &pw, &full)
+    }
+
+    /// The curve cut at its corners: interior knots of full multiplicity where
+    /// the direction changes (as left by [`NurbsCurve::join`]). One piece when
+    /// the curve is smooth.
+    pub fn split_at_kinks(&self) -> Vec<NurbsCurve> {
+        let (a, b) = self.domain();
+        let p = self.degree;
+        let mut cuts: Vec<f64> = Vec::new();
+        for &k in &self.knots {
+            if k > a
+                && k < b
+                && cuts.last().is_none_or(|c| (k - c).abs() > 1e-12)
+                && self.multiplicity(k) >= p
+            {
+                let h = (b - a) * 1e-7;
+                let (d0, d1) = (
+                    self.point_at(k) - self.point_at(k - h),
+                    self.point_at(k + h) - self.point_at(k),
+                );
+                if let (Some(u), Some(v)) = (d0.normalized(), d1.normalized()) {
+                    if u.dot(v) < 1.0 - 1e-9 {
+                        cuts.push(k);
+                    }
+                }
+            }
+        }
+        let mut out = Vec::new();
+        let mut rest = self.clone();
+        for k in cuts {
+            match rest.split_at(k) {
+                Some((l, r)) => {
+                    out.push(l);
+                    rest = r;
+                }
+                None => break,
+            }
+        }
+        out.push(rest);
+        out
+    }
+
+    /// The planar offset of the curve by `distance` towards `side` (a unit
+    /// normal of the plane crossed with the tangent gives the left side): a
+    /// cubic through points of the exact offset, refined until it stays within
+    /// `tol` of it. `None` where the offset folds over itself (radius of
+    /// curvature smaller than the distance).
+    pub fn offset_planar(
+        &self,
+        distance: f64,
+        normal: Vec3,
+        left: bool,
+        tol: f64,
+    ) -> Option<NurbsCurve> {
+        let (a, b) = self.domain();
+        let sign = if left { 1.0 } else { -1.0 };
+        let at = |t: f64| -> Point3 {
+            let n = normal
+                .cross(self.tangent_at(t))
+                .normalized()
+                .unwrap_or(Vec3::X);
+            self.point_at(t) + n * (distance * sign)
+        };
+        // Folds: a sample of the offset running against the curve.
+        let probe = 64 * self.spans().len();
+        for i in 0..probe {
+            let (t0, t1) = (
+                a + (b - a) * i as f64 / probe as f64,
+                a + (b - a) * (i + 1) as f64 / probe as f64,
+            );
+            let (dc, doff) = (self.point_at(t1) - self.point_at(t0), at(t1) - at(t0));
+            if dc.dot(doff) <= 0.0 {
+                return None;
+            }
+        }
+        let closed = self.is_closed();
+        let mut count = (8 * self.spans().len()).max(16);
+        for _ in 0..4 {
+            let params: Vec<f64> = (0..=count)
+                .map(|i| a + (b - a) * i as f64 / count as f64)
+                .collect();
+            let mut pts: Vec<Point3> = params.iter().map(|t| at(*t)).collect();
+            if closed {
+                let last = pts.len() - 1;
+                pts[last] = pts[0];
+            }
+            let c = NurbsCurve::interpolate(&pts, 3)?;
+            let worst = params
+                .windows(2)
+                .map(|w| {
+                    let m = at((w[0] + w[1]) / 2.0);
+                    c.point_at(c.closest_param(m)).distance_to(m)
+                })
+                .fold(0.0, f64::max);
+            if worst <= tol {
+                return Some(c);
+            }
+            count *= 2;
+        }
+        None
+    }
+}
+
 fn find_span(n: usize, p: usize, t: f64, u: &[f64]) -> usize {
     let last = n - 1;
     if t >= u[last + 1] {
@@ -448,6 +800,117 @@ fn solve(mut a: Vec<Vec<f64>>, mut b: Vec<[f64; 3]>) -> Option<Vec<[f64; 3]>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn wavy() -> NurbsCurve {
+        NurbsCurve::clamped_uniform(
+            &[
+                Point3::new(0.0, 0.0, 0.0),
+                Point3::new(30.0, 40.0, 0.0),
+                Point3::new(70.0, -20.0, 0.0),
+                Point3::new(100.0, 20.0, 0.0),
+                Point3::new(130.0, 0.0, 0.0),
+            ],
+            3,
+        )
+        .unwrap()
+    }
+
+    /// Largest distance from points of `a` to the curve `b`.
+    fn deviation(a: &NurbsCurve, b: &NurbsCurve) -> f64 {
+        let (t0, t1) = a.domain();
+        (0..=100)
+            .map(|i| {
+                let p = a.point_at(t0 + (t1 - t0) * f64::from(i) / 100.0);
+                b.point_at(b.closest_param(p)).distance_to(p)
+            })
+            .fold(0.0, f64::max)
+    }
+
+    #[test]
+    fn knots_split_and_sub_curves_are_exact() {
+        let c = wavy();
+        let k = c.with_knot(0.7, 2);
+        assert_eq!(k.points.len(), c.points.len() + 2);
+        assert!(deviation(&c, &k) < 1e-9);
+        let (l, r) = c.split_at(1.3).unwrap();
+        let p = c.point_at(1.3);
+        assert!(l.end().distance_to(p) < 1e-9 && r.start().distance_to(p) < 1e-9);
+        assert!(deviation(&l, &c) < 1e-9 && deviation(&r, &c) < 1e-9);
+        assert!(((l.length() + r.length()) - c.length()).abs() < 1e-3);
+        let s = c.sub(0.4, 1.6).unwrap();
+        assert!(s.start().distance_to(c.point_at(0.4)) < 1e-9);
+        assert!(s.end().distance_to(c.point_at(1.6)) < 1e-9);
+        assert!(c.split_at(0.0).is_none());
+        // Rational: a circle cut in two keeps its radius.
+        let circle = NurbsCurve::from_arc(&CircleArc::circle(
+            Plane::from_normal(Point3::ORIGIN, Vec3::Z),
+            5.0,
+        ));
+        let (a, _) = circle.split_at(1.5).unwrap();
+        for i in 0..=50 {
+            let (t0, t1) = a.domain();
+            let q = a.point_at(t0 + (t1 - t0) * f64::from(i) / 50.0);
+            assert!((q.distance_to(Point3::ORIGIN) - 5.0).abs() < 1e-9);
+        }
+    }
+
+    #[test]
+    fn closest_points() {
+        let c = wavy();
+        let t = 1.234;
+        let p = c.point_at(t) + Vec3::new(0.0, 0.0, 3.0);
+        assert!((c.closest_param(p) - t).abs() < 1e-6);
+    }
+
+    #[test]
+    fn elevation_and_join_keep_the_shape() {
+        let c = wavy();
+        let e = c.elevated(5);
+        assert_eq!(e.degree, 5);
+        assert!(deviation(&c, &e) < 1e-9 && deviation(&e, &c) < 1e-9);
+        let arc = NurbsCurve::from_arc(
+            &crate::curvetools::arc_3pt(
+                c.end(),
+                Point3::new(170.0, 0.0, 0.0),
+                Point3::new(150.0, 20.0, 0.0),
+            )
+            .unwrap(),
+        );
+        let line = NurbsCurve::new(
+            1,
+            vec![arc.end(), Point3::new(200.0, 0.0, 0.0)],
+            vec![1.0, 1.0],
+            vec![0.0, 1.0],
+        )
+        .unwrap();
+        let j = NurbsCurve::join(&[c.clone(), arc.clone(), line.clone()], 1e-9).unwrap();
+        assert_eq!(j.degree, 3);
+        for part in [&c, &arc, &line] {
+            assert!(deviation(part, &j) < 1e-8, "{}", deviation(part, &j));
+        }
+        assert!((j.length() - (c.length() + arc.length() + line.length())).abs() < 1e-3);
+        assert!(NurbsCurve::join(&[line, c], 1e-9).is_none(), "gap");
+    }
+
+    #[test]
+    fn planar_offsets() {
+        let circle = NurbsCurve::from_arc(&CircleArc::circle(
+            Plane::from_normal(Point3::ORIGIN, Vec3::Z),
+            20.0,
+        ));
+        // Counter-clockwise: the left side is inside.
+        let inner = circle.offset_planar(5.0, Vec3::Z, true, 1e-4).unwrap();
+        let outer = circle.offset_planar(5.0, Vec3::Z, false, 1e-4).unwrap();
+        for (c, r) in [(&inner, 15.0), (&outer, 25.0)] {
+            let (t0, t1) = c.domain();
+            for i in 0..=200 {
+                let q = c.point_at(t0 + (t1 - t0) * f64::from(i) / 200.0);
+                assert!((q.distance_to(Point3::ORIGIN) - r).abs() < 2e-4, "{r}");
+            }
+        }
+        // Deeper than the radius: folds.
+        assert!(circle.offset_planar(25.0, Vec3::Z, true, 1e-4).is_none());
+    }
 
     #[test]
     fn rational_circle_points_lie_on_the_circle() {

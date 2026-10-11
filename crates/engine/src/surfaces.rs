@@ -6,7 +6,7 @@ use crate::{Args, Command, CommandError, CommandResult, Context};
 use forma_doc::{Geometry, Object, ObjectId};
 use forma_geom::{
     self as geom, cap_planar_holes, extrude_open_mesh, loft_mesh, planar_mesh, point_in_polygon,
-    resample, revolve_mesh, sweep1_mesh, Plane, Point3, Vec3,
+    resample, revolve_mesh, sweep1_mesh, sweep1_pieces, Plane, Point3, Vec3, Xform,
 };
 
 /// Add `items` (geometry with the attributes of its source object) as one undo
@@ -454,6 +454,51 @@ impl Command for Revolve {
     }
 }
 
+/// How many places along a rail an exact sweep puts the profile: more for
+/// longer, more detailed rails.
+pub(crate) fn stations(rail: &[Point3]) -> usize {
+    rail.len().clamp(8, 32)
+}
+
+/// The exact surface of `profile` moved by each station map, lofted smoothly
+/// (cubic across the stations). `None` when the loft fails.
+pub(crate) fn swept_exact(
+    profile: &Geometry,
+    stations: &[Xform],
+    tol: f64,
+) -> Option<forma_geom::Brep> {
+    if stations.len() < 2 {
+        return None;
+    }
+    let sections: Vec<Geometry> = stations.iter().map(|x| profile.transformed(x)).collect();
+    let refs: Vec<&Geometry> = sections.iter().collect();
+    forma_io_3dm::exact::make_loft(&refs, false, tol)
+}
+
+/// Exact Sweep1 of `profile` along a rail (points of the rail curve): one
+/// piece per smooth stretch, mitred at sharp corners and joined.
+pub(crate) fn sweep1_exact(
+    profile: &Geometry,
+    rail: &[Point3],
+    closed: bool,
+    tol: f64,
+) -> Option<forma_geom::Brep> {
+    let pieces = sweep1_pieces(rail, closed, 32);
+    let mut faces = Vec::with_capacity(pieces.len());
+    for maps in &pieces {
+        faces.push(swept_exact(profile, maps, tol)?);
+    }
+    match faces.len() {
+        0 => None,
+        1 => faces.pop(),
+        _ => {
+            let refs: Vec<&forma_geom::Brep> = faces.iter().collect();
+            let (mut joined, _) = forma_io_3dm::exact::join(&refs, tol)?;
+            (joined.len() == 1).then(|| joined.remove(0))
+        }
+    }
+}
+
 simple_command!(
     Sweep1,
     "Sweep1",
@@ -467,13 +512,16 @@ impl Command for Sweep1 {
             .next_token()
             .ok_or(CommandError::MissingInput("rail curve #id"))?;
         let rail_id = crate::edit::parse_ids(vec![tok])?[0];
-        let rail = ctx
+        let rail_geometry = ctx
             .doc
             .object(rail_id)
             .filter(|o| o.geometry.is_curve())
             .ok_or_else(|| CommandError::Invalid(format!("#{} is not a curve", rail_id.0)))?
             .geometry
-            .curve_points();
+            .clone();
+        let rail = rail_geometry.curve_points();
+        let rail_closed = rail_geometry.is_closed_curve();
+        let tol = ctx.doc.absolute_tolerance.max(1e-9);
         let profiles: Vec<Object> = selected_curves(ctx, "Sweep1")?
             .into_iter()
             .filter(|o| o.id != rail_id)
@@ -485,6 +533,11 @@ impl Command for Sweep1 {
         }
         let mut out = Vec::new();
         for p in profiles {
+            // Exact: a smooth loft through the profile placed along the rail.
+            if let Some(b) = sweep1_exact(&p.geometry, &rail, rail_closed, tol) {
+                out.push((Geometry::Brep(b), p));
+                continue;
+            }
             let m = sweep1_mesh(&rail, &p.geometry.curve_points());
             if !m.triangles.is_empty() {
                 out.push((Geometry::Mesh(m), p));
@@ -531,8 +584,22 @@ impl Command for Sweep2 {
                 "Sweep2: select profile curves".into(),
             ));
         }
+        let tol = ctx.doc.absolute_tolerance.max(1e-9);
+        let n = stations(&ra).max(stations(&rb));
         let mut out = Vec::new();
         for p in profiles {
+            let mut prof = p.geometry.clone();
+            // The profile runs from rail 1 to rail 2.
+            let pts = prof.curve_points();
+            if let (Some(s), Some(e), Some(r0)) = (pts.first(), pts.last(), ra.first()) {
+                if s.distance_to(*r0) > e.distance_to(*r0) {
+                    prof = prof.reversed();
+                }
+            }
+            if let Some(b) = swept_exact(&prof, &forma_geom::sweep2_stations(&ra, &rb, n), tol) {
+                out.push((Geometry::Brep(b), p));
+                continue;
+            }
             let m = forma_geom::sweep2_mesh(&ra, &rb, &p.geometry.curve_points());
             if !m.triangles.is_empty() {
                 out.push((Geometry::Mesh(m), p));

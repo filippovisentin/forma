@@ -161,6 +161,14 @@ impl Server {
                     .to_lowercase();
                 text(true, command_list(&filter))
             }
+            "forma_python" => {
+                let code = args
+                    .get("code")
+                    .and_then(Value::as_str)
+                    .ok_or((-32602, "forma_python needs `code`".to_string()))?;
+                let (ok, out) = self.python(code);
+                text(ok, out)
+            }
             "forma_render" => match self.render(&args) {
                 Ok(png) => json!({
                     "content": [{ "type": "image", "data": base64(&png), "mimeType": "image/png" }],
@@ -189,6 +197,32 @@ impl Server {
         match &mut self.backend {
             Backend::Local(engine) => agent::run_script(engine, &script),
             Backend::Live => live(agent::RUN, &script).unwrap_or_else(|e| (false, e)),
+        }
+    }
+
+    /// Run Python (`import forma`) on the model; what it printed, or the traceback.
+    pub fn python(&mut self, code: &str) -> (bool, String) {
+        if self.root.is_some() {
+            // A script could open any file: the folder limit cannot hold.
+            return (
+                false,
+                "Python is not available with --root (scripts can reach any file)".into(),
+            );
+        }
+        match &mut self.backend {
+            Backend::Local(engine) => {
+                let mut host = forma_script::EngineHost::new(engine);
+                let r = host.run_script(code, "<agent>");
+                let mut out = std::mem::take(&mut host.out);
+                match r {
+                    Ok(()) => (true, out),
+                    Err(e) => {
+                        out.push_str(&e);
+                        (false, out)
+                    }
+                }
+            }
+            Backend::Live => live(agent::PYTHON, code).unwrap_or_else(|e| (false, e)),
         }
     }
 
@@ -322,6 +356,21 @@ fn tools() -> Value {
                 "properties": {
                     "filter": { "type": "string", "description": "Text to look for in names and descriptions." }
                 }
+            }
+        },
+        {
+            "name": "forma_python",
+            "description": "Run a Python script on the model, for loops and arithmetic that plain command lines cannot do. \
+    `import forma`, then forma.run(\"<command line>\") runs a command (raises RuntimeError on failure), \
+    forma.objects() lists objects as dicts (id, kind, layer, name, min, max), forma.selection(), \
+    forma.select(ids), forma.units(); print() output is returned. The whole script is one undo step. \
+    Example: for i in range(5): forma.run(f\"Box {i*120},0,0 {i*120+100},20,0 270\")",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "code": { "type": "string", "description": "Python source." }
+                },
+                "required": ["code"]
             }
         },
         {
@@ -461,6 +510,7 @@ mod tests {
                 "forma_run",
                 "forma_inspect",
                 "forma_commands",
+                "forma_python",
                 "forma_render"
             ]
         );
@@ -523,6 +573,27 @@ mod tests {
         ));
         assert!(help.contains("ExtrudeCrvAlongCrv"), "{help}");
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn python_tool_builds_with_a_loop() {
+        let mut s = Server::new(&Options::default()).unwrap();
+        let (ok, out) = tool_text(&call(
+            &mut s,
+            1,
+            "tools/call",
+            json!({ "name": "forma_python", "arguments": { "code":
+                "import forma\nfor i in range(3):\n    forma.run(f'Box {i*20},0,0 {i*20+10},10,0 10')\nprint(len(forma.objects()))" } }),
+        ));
+        assert!(ok, "{out}");
+        assert_eq!(out.trim(), "3");
+        let (ok, out) = tool_text(&call(
+            &mut s,
+            2,
+            "tools/call",
+            json!({ "name": "forma_python", "arguments": { "code": "import forma\nforma.run('Nope')" } }),
+        ));
+        assert!(!ok && out.contains("RuntimeError"), "{out}");
     }
 
     #[test]
