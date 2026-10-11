@@ -1,2 +1,0 @@
-/usr/bin/ar qc ../../lin64/gcc/lib/libTKXMesh.a CMakeFiles/TKXMesh.dir/__/XBRepMesh/XBRepMesh.cxx.o
-/usr/bin/ranlib ../../lin64/gcc/lib/libTKXMesh.a

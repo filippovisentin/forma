@@ -1,2 +1,0 @@
-/usr/bin/ar qc ../../lin64/gcc/lib/libTKRWMesh.a CMakeFiles/TKRWMesh.dir/__/RWMesh/RWMesh.cxx.o CMakeFiles/TKRWMesh.dir/__/RWMesh/RWMesh_CafReader.cxx.o CMakeFiles/TKRWMesh.dir/__/RWMesh/RWMesh_CoordinateSystemConverter.cxx.o CMakeFiles/TKRWMesh.dir/__/RWMesh/RWMesh_FaceIterator.cxx.o CMakeFiles/TKRWMesh.dir/__/RWMesh/RWMesh_MaterialMap.cxx.o CMakeFiles/TKRWMesh.dir/__/RWMesh/RWMesh_TriangulationReader.cxx.o CMakeFiles/TKRWMesh.dir/__/RWMesh/RWMesh_TriangulationSource.cxx.o
-/usr/bin/ranlib ../../lin64/gcc/lib/libTKRWMesh.a

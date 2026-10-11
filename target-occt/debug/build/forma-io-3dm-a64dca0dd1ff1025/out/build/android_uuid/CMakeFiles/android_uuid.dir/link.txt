@@ -1,2 +1,0 @@
-/usr/bin/ar qc libandroid_uuid.a CMakeFiles/android_uuid.dir/copy.c.o CMakeFiles/android_uuid.dir/gen_uuid.c.o CMakeFiles/android_uuid.dir/isnull.c.o CMakeFiles/android_uuid.dir/pack.c.o CMakeFiles/android_uuid.dir/parse.c.o CMakeFiles/android_uuid.dir/unpack.c.o CMakeFiles/android_uuid.dir/unparse.c.o CMakeFiles/android_uuid.dir/uuid_time.c.o
-/usr/bin/ranlib libandroid_uuid.a
