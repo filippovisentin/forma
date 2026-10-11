@@ -106,6 +106,10 @@ impl FormaApp {
             self.agent_command(&ctx, line);
             return;
         }
+        if first == "commandarea" {
+            self.command_area(line);
+            return;
+        }
         if first == "interface" {
             let arg = line.split_whitespace().nth(1);
             match arg.and_then(crate::theme::Look::parse) {
@@ -503,6 +507,19 @@ impl FormaApp {
                 "<point> <up|down|north|south|east|west>, Off, or Enter to pick",
             ));
             return;
+        }
+        // Interface commands whose argument comes next (Enter runs them).
+        if self.at_command_prompt() && toks.len() == 1 {
+            let what = match toks[0].to_ascii_lowercase().as_str() {
+                "commandarea" => Some("Top, Bottom, Float, Compact or Tall"),
+                "interface" => Some("Classic or Graphite"),
+                "agentconnection" => Some("On or Off"),
+                _ => None,
+            };
+            if let Some(what) = what {
+                self.pending = Some((toks[0].to_string(), what));
+                return;
+            }
         }
         if self.at_command_prompt() {
             let first = toks[0];

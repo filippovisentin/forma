@@ -1,6 +1,7 @@
 //! The menu bar (File, Edit, View, Curve, Surface, Solid, Mesh, Dimension,
 //! Transform, Tools, Analyze, Help), in the order of Rhino 8.
 
+use crate::cmdline::CmdDock;
 use crate::snap::SnapKind;
 use crate::tools::seq as q;
 use crate::tools::ToolKind;
@@ -331,6 +332,27 @@ impl FormaApp {
                 ui.menu_button("Section (Clipping Plane)", |ui| {
                     tool(ui, &mut act, "Add Section Cut", K::Seq(&q::CLIPPING_PLANE));
                     item(ui, &mut act, "Remove Section Cut", "", Act::Submit("ClippingPlane Off"));
+                });
+                ui.menu_button("Command Area", |ui| {
+                    let now = self.cmd_dock;
+                    for (d, label, cmd) in [
+                        (CmdDock::Top, "Docked at the Top", "CommandArea Top"),
+                        (CmdDock::Bottom, "Docked at the Bottom", "CommandArea Bottom"),
+                        (CmdDock::Float, "Floating Window", "CommandArea Float"),
+                    ] {
+                        let label = if d == now {
+                            format!("✓ {label}")
+                        } else {
+                            label.to_string()
+                        };
+                        if ui.button(label).clicked() {
+                            act = Some(Act::Submit(cmd));
+                            ui.close();
+                        }
+                    }
+                    ui.separator();
+                    item(ui, &mut act, "Compact", "", Act::Submit("CommandArea Compact"));
+                    item(ui, &mut act, "Tall", "", Act::Submit("CommandArea Tall"));
                 });
                 ui.menu_button("Interface", |ui| {
                     item(ui, &mut act, "Classic (original, light)", "", Act::Submit("Interface Classic"));

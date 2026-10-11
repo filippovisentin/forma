@@ -9,7 +9,139 @@ use eframe::egui::{self, RichText, Stroke};
 /// Rows shown by the autocomplete list.
 const AC_ROWS: usize = 12;
 
+/// Where the command area is (View ▸ Command Area): docked above the toolbars
+/// (Rhino's default), docked above the status bar, or a floating window.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum CmdDock {
+    Top,
+    Bottom,
+    Float,
+}
+
+impl CmdDock {
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            CmdDock::Top => "Top",
+            CmdDock::Bottom => "Bottom",
+            CmdDock::Float => "Float",
+        }
+    }
+    pub(crate) fn parse(s: &str) -> Option<CmdDock> {
+        match s.to_ascii_lowercase().as_str() {
+            "top" => Some(CmdDock::Top),
+            "bottom" => Some(CmdDock::Bottom),
+            "float" | "floating" => Some(CmdDock::Float),
+            _ => None,
+        }
+    }
+}
+
+/// Heights of the docked command area: smallest, compact, tall, largest.
+pub(crate) const CMD_MIN: f32 = 56.0;
+pub(crate) const CMD_COMPACT: f32 = 92.0;
+pub(crate) const CMD_TALL: f32 = 260.0;
+pub(crate) const CMD_MAX: f32 = 700.0;
+
 impl FormaApp {
+    /// The docked command area, resizable by dragging its inner edge (the grip
+    /// shows where); double-click the grip to switch between compact and tall.
+    pub(crate) fn ui_command_panel(&mut self, ui: &mut egui::Ui, top: bool) {
+        let panel = if top {
+            egui::Panel::top("command")
+        } else {
+            egui::Panel::bottom("command-bottom")
+        };
+        let mut panel = panel.resizable(true).size_range(CMD_MIN..=CMD_MAX).frame(
+            egui::Frame::NONE
+                .fill(theme::panel())
+                .inner_margin(egui::Margin::symmetric(4, 3)),
+        );
+        panel = match self.command_resize.take() {
+            Some(h) => panel.exact_size(h),
+            None => panel.default_size(self.command_height),
+        };
+        let r = panel.show(ui, |ui| self.ui_command_line(ui));
+        let rect = r.response.rect;
+        self.command_height = rect.height();
+        // Grip on the edge that drags.
+        let y = if top { rect.bottom() } else { rect.top() };
+        let grip =
+            egui::Rect::from_center_size(egui::pos2(rect.center().x, y), egui::vec2(60.0, 6.0));
+        let id = egui::Id::new(("command-grip", top));
+        let resp = ui.interact(grip, id, egui::Sense::click());
+        let p = ui
+            .ctx()
+            .layer_painter(egui::LayerId::new(egui::Order::Foreground, id));
+        let c = if resp.hovered() {
+            theme::accent()
+        } else {
+            theme::weak()
+        };
+        for k in -2..=2 {
+            p.circle_filled(egui::pos2(rect.center().x + k as f32 * 6.0, y), 1.4, c);
+        }
+        let resp = resp.on_hover_text(
+            "Drag the edge to resize the command area · double-click: compact / tall · \
+             View ▸ Command Area: top, bottom or floating",
+        );
+        if resp.double_clicked() {
+            self.command_resize = Some(if self.command_height > (CMD_COMPACT + CMD_TALL) / 2.0 {
+                CMD_COMPACT
+            } else {
+                CMD_TALL
+            });
+        }
+        if resp.hovered() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
+        }
+    }
+
+    /// The floating command area: a window to move and resize anywhere.
+    pub(crate) fn ui_command_window(&mut self, ctx: &egui::Context) {
+        let screen = ctx.content_rect();
+        let mut open = true;
+        egui::Window::new("Command")
+            .id(egui::Id::new("command-float"))
+            .open(&mut open)
+            .resizable(true)
+            .collapsible(true)
+            .default_size(egui::vec2(720.0, 170.0))
+            .default_pos(egui::pos2(
+                screen.center().x - 360.0,
+                screen.bottom() - 260.0,
+            ))
+            .min_size(egui::vec2(320.0, 80.0))
+            .show(ctx, |ui| {
+                ui.set_min_size(ui.available_size());
+                self.ui_command_line(ui);
+            });
+        if !open {
+            // Closing the window docks it back at the top (it is never lost).
+            self.cmd_dock = CmdDock::Top;
+        }
+    }
+
+    /// `CommandArea Top|Bottom|Float|Compact|Tall`.
+    pub(crate) fn command_area(&mut self, line: &str) {
+        let arg = line.split_whitespace().nth(1).unwrap_or("");
+        if let Some(d) = CmdDock::parse(arg) {
+            self.cmd_dock = d;
+            self.log(LogKind::Normal, format!("command area: {}", d.name()));
+            return;
+        }
+        match arg.to_ascii_lowercase().as_str() {
+            "compact" => self.command_resize = Some(CMD_COMPACT),
+            "tall" => self.command_resize = Some(CMD_TALL),
+            _ => self.log(
+                LogKind::Error,
+                format!(
+                    "CommandArea Top|Bottom|Float|Compact|Tall (now {})",
+                    self.cmd_dock.name()
+                ),
+            ),
+        }
+    }
+
     /// Commands matching the typed word, when the list should be shown.
     pub(crate) fn completions(&self) -> Vec<&Entry> {
         if !self.at_command_prompt() || self.history.is_browsing() {
@@ -187,9 +319,23 @@ impl FormaApp {
             return;
         }
         let mut run: Option<String> = None;
+        // Below the input, or above it when the command line is docked low.
+        let low = below.center().y > ui.ctx().content_rect().center().y;
+        let (pos, pivot) = if low {
+            (
+                below.left_top() + egui::vec2(-2.0, -2.0),
+                egui::Align2::LEFT_BOTTOM,
+            )
+        } else {
+            (
+                below.left_bottom() + egui::vec2(-2.0, 2.0),
+                egui::Align2::LEFT_TOP,
+            )
+        };
         egui::Area::new(egui::Id::new("command-autocomplete"))
             .order(egui::Order::Foreground)
-            .fixed_pos(below.left_bottom() + egui::vec2(-2.0, 2.0))
+            .pivot(pivot)
+            .fixed_pos(pos)
             .show(ui.ctx(), |ui| {
                 egui::Frame::menu(ui.style()).show(ui, |ui| {
                     ui.set_width(380.0);

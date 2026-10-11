@@ -9,7 +9,11 @@ pub struct Entry {
 }
 
 /// Commands that only exist in the UI (views, display modes, toggles).
-pub const UI_COMMANDS: [(&str, &str); 33] = [
+pub const UI_COMMANDS: [(&str, &str); 34] = [
+    (
+        "CommandArea",
+        "Where the command area is and its size: CommandArea Top|Bottom|Float|Compact|Tall",
+    ),
     (
         "Ask",
         "AI: describe a command in words, a local model writes it as a Python script: Ask <request>",

@@ -385,6 +385,11 @@ struct FormaApp {
     /// Panel sizes (points), remembered between runs.
     side_width: f32,
     command_height: f32,
+    /// A height to give the docked command area next frame (double-click on
+    /// the grip, `CommandArea Compact|Tall`).
+    command_resize: Option<f32>,
+    /// Where the command area is (View ▸ Command Area).
+    cmd_dock: cmdline::CmdDock,
 }
 
 const CMD_ID: &str = "forma-command-line";

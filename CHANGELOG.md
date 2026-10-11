@@ -22,6 +22,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   edges are the curves), SrfPt and Pipe no longer make meshes. Sweeps along polylines
   are mitred at the corners (a picture frame from a rectangle and a profile) and
   joined into one polysurface; pipes are capped closed solids.
+- **Command area like Rhino**: drag its edge to resize it (a grip shows where;
+  double-click it for compact / tall), dock it at the top or bottom, or float it as a
+  window you can move and resize (View ▸ Command Area, or `CommandArea
+  Top|Bottom|Float|Compact|Tall`). Remembered between sessions.
 - **Icons for every command**: menus show each command's icon, and the commands that
   had none (about 110: dimensions, meshes, edges, CPlanes, blocks, hidden views…) got
   one. Original drawings in the style of classic CAD toolbars.
