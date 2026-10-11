@@ -24,6 +24,40 @@ pub struct LineVertex {
 
 /// Colour of visible solid/surface edges (linear RGB).
 pub const EDGE_COLOR: [f32; 4] = [0.02, 0.02, 0.025, 1.0];
+/// Edges on a dark viewport background.
+pub const EDGE_COLOR_DARK: [f32; 4] = [0.62, 0.63, 0.66, 1.0];
+
+static DARK: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Dark viewports (the Graphite look): dark background and grid, light edges, and
+/// black or near-black object colours drawn light grey (like Rhino's dark mode).
+/// Scenes built after the call use it; cached objects are rebuilt.
+pub fn set_dark_viewports(dark: bool) {
+    DARK.store(dark, std::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn dark_viewports() -> bool {
+    DARK.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// The colour an object is drawn with: on a dark background, colours too dark to
+/// see become light grey.
+fn shown(rgb: [u8; 3], dark: bool) -> [u8; 3] {
+    let lum = 0.2126 * f32::from(rgb[0]) + 0.7152 * f32::from(rgb[1]) + 0.0722 * f32::from(rgb[2]);
+    if dark && lum < 60.0 {
+        [215, 215, 218]
+    } else {
+        rgb
+    }
+}
+
+fn edge_color(dark: bool) -> [f32; 4] {
+    if dark {
+        EDGE_COLOR_DARK
+    } else {
+        EDGE_COLOR
+    }
+}
 /// Selection highlight (linear RGB), Rhino-like yellow.
 pub const HIGHLIGHT: [f32; 4] = [1.0, 0.78, 0.0, 1.0];
 
@@ -99,6 +133,7 @@ fn wire_color(rgb: [u8; 3]) -> [f32; 4] {
 struct Entry {
     rev: u64,
     color: [u8; 3],
+    dark: bool,
     mesh_vertices: Vec<MeshVertex>,
     mesh_indices: Vec<u32>,
     lines: Vec<LineVertex>,
@@ -151,7 +186,7 @@ impl SceneCache {
         let stale = self
             .entries
             .get(&o.id)
-            .is_none_or(|e| e.rev != o.rev || e.color != color);
+            .is_none_or(|e| e.rev != o.rev || e.color != color || e.dark != dark_viewports());
         if stale {
             let e = build_entry(o, color, self.origin);
             self.entries.insert(o.id, e);
@@ -196,7 +231,7 @@ impl SceneCache {
             self.origin.to_array().map(f64::to_bits).hash(&mut h);
             for id in ids {
                 let e = &self.entries[id];
-                (id.0, e.rev, e.color).hash(&mut h);
+                (id.0, e.rev, e.color, e.dark).hash(&mut h);
                 if !(e.mesh_indices.is_empty() && e.lines.is_empty()) {
                     min = min.min(e.min);
                     max = max.max(e.max);
@@ -291,7 +326,10 @@ fn append(s: &mut Scene, e: &Entry, highlight: Option<[f32; 4]>, first: &mut boo
     }
 }
 
-fn build_entry(o: &Object, color: [u8; 3], origin: DVec3) -> Entry {
+fn build_entry(o: &Object, layer_color: [u8; 3], origin: DVec3) -> Entry {
+    let dark = dark_viewports();
+    let color = shown(layer_color, dark);
+    let edge = edge_color(dark);
     let local = |p: &Point3| -> [f32; 3] {
         [
             (p.x - origin.x) as f32,
@@ -301,7 +339,8 @@ fn build_entry(o: &Object, color: [u8; 3], origin: DVec3) -> Entry {
     };
     let mut e = Entry {
         rev: o.rev,
-        color,
+        color: layer_color,
+        dark,
         ..Default::default()
     };
     let b = o.geometry.bounding_box();
@@ -327,11 +366,11 @@ fn build_entry(o: &Object, color: [u8; 3], origin: DVec3) -> Entry {
             for [a, b] in m.boundary_edges() {
                 e.lines.push(LineVertex {
                     pos: local(&m.positions[a as usize]),
-                    color: EDGE_COLOR,
+                    color: edge,
                 });
                 e.lines.push(LineVertex {
                     pos: local(&m.positions[b as usize]),
-                    color: EDGE_COLOR,
+                    color: edge,
                 });
             }
             // Isocurves of curved faces (what wireframe views show of them).
@@ -340,11 +379,11 @@ fn build_entry(o: &Object, color: [u8; 3], origin: DVec3) -> Entry {
                     for s in w.windows(2) {
                         e.lines.push(LineVertex {
                             pos: local(&s[0]),
-                            color: EDGE_COLOR,
+                            color: edge,
                         });
                         e.lines.push(LineVertex {
                             pos: local(&s[1]),
-                            color: EDGE_COLOR,
+                            color: edge,
                         });
                     }
                 }
@@ -535,8 +574,11 @@ fn grid_on(
     let half = (extent / spacing).ceil() as i64;
     let cu = ((center - plane_origin).dot(u) / spacing).round() as i64;
     let cv = ((center - plane_origin).dot(v) / spacing).round() as i64;
-    let minor = [0.300, 0.300, 0.300, 1.0];
-    let major = [0.205, 0.205, 0.205, 1.0];
+    let (minor, major) = if dark_viewports() {
+        ([0.032, 0.034, 0.038, 1.0], [0.055, 0.058, 0.064, 1.0])
+    } else {
+        ([0.300, 0.300, 0.300, 1.0], [0.205, 0.205, 0.205, 1.0])
+    };
     let world = |a: f64, b: f64| -> [f32; 3] {
         let p = plane_origin + u * a + v * b - o;
         [p.x as f32, p.y as f32, p.z as f32]
@@ -594,6 +636,15 @@ fn grid_on(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dark_viewports_lighten_dark_colours_only() {
+        assert_eq!(shown([0, 0, 0], true), [215, 215, 218]);
+        assert_eq!(shown([0, 0, 0], false), [0, 0, 0]);
+        assert_eq!(shown([200, 40, 40], true), [200, 40, 40]);
+        assert_eq!(edge_color(false), EDGE_COLOR);
+        assert_eq!(edge_color(true), EDGE_COLOR_DARK);
+    }
 
     fn doc_with_box() -> Document {
         let mut d = Document::new();

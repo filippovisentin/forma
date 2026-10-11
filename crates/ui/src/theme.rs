@@ -5,7 +5,8 @@
 //!   inputs, blue selection).
 //! - Graphite: dark chrome, warm grey panels and a gold accent.
 //!
-//! Viewports keep their grey background in both, so black curves stay legible.
+//! Graphite also darkens the viewports (`forma_render::set_dark_viewports`), where
+//! black objects are drawn light grey.
 //! Segoe UI is used when available.
 
 use eframe::egui::{self, Color32, CornerRadius, FontData, FontDefinitions, FontFamily, Stroke};
@@ -182,6 +183,7 @@ pub fn init(ctx: &egui::Context, look: Look) {
 /// Switch the chrome to `look`.
 pub fn set_look(ctx: &egui::Context, look: Look) {
     GRAPHITE_ON.store(look == Look::Graphite, Ordering::Relaxed);
+    forma_render::set_dark_viewports(look == Look::Graphite);
     let c = look.palette();
     let mut v = if look == Look::Graphite {
         egui::Visuals::dark()

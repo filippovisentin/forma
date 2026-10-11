@@ -40,7 +40,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   hollowed cylinder, a grown sphere): the kernel recognises planes, cylinders, cones,
   spheres and tori in the NURBS faces. Meshes still go through triangles as before.
 
+- The Graphite look now has dark viewports too: dark background and grid, light edges,
+  and black or near-black objects (and their text and points) drawn light grey, like
+  Rhino's dark mode. Classic keeps the grey viewports.
+
 ### Fixed
+- The command history no longer goes blank after a few commands (it scrolled past its
+  last line).
 - `FilletEdge` / `ChamferEdge` no longer pick the seam of a cylinder or sphere (it cannot
   be filleted) when a pick point is near both the seam and a real edge.
 - `Mesh` keeps the sharp edges of the polysurface (split at more than 30°, smooth

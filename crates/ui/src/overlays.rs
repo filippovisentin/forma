@@ -14,6 +14,18 @@ use forma_render::DisplayMode;
 const INK: Color32 = Color32::from_rgb(20, 20, 24);
 const YELLOW: Color32 = Color32::from_rgb(255, 200, 0);
 
+/// An object colour as drawn over the viewport: on dark viewports (Graphite)
+/// colours too dark to see are drawn light grey, like the rendered geometry.
+fn shown(rgb: [u8; 3]) -> Color32 {
+    let [r, g, b] = rgb;
+    let lum = 0.2126 * f32::from(r) + 0.7152 * f32::from(g) + 0.0722 * f32::from(b);
+    if forma_render::dark_viewports() && lum < 60.0 {
+        Color32::from_rgb(215, 215, 218)
+    } else {
+        Color32::from_rgb(r, g, b)
+    }
+}
+
 /// Look of a text label.
 #[derive(Clone, Copy)]
 enum Label {
@@ -109,8 +121,7 @@ impl FormaApp {
                 let c = if self.engine.ctx.selection.contains(&o.id) {
                     YELLOW
                 } else {
-                    let [r, g, b] = doc.display_color(o);
-                    Color32::from_rgb(r, g, b)
+                    shown(doc.display_color(o))
                 };
                 let r = Rect::from_center_size(sp, egui::vec2(6.0, 6.0));
                 p.rect_filled(r, 0.0, c);
@@ -134,8 +145,7 @@ impl FormaApp {
             let color = if self.engine.ctx.selection.contains(&o.id) {
                 YELLOW
             } else {
-                let [r, g, b] = doc.display_color(o);
-                Color32::from_rgb(r, g, b)
+                shown(doc.display_color(o))
             };
             let Some(sp) = pr.to_screen(l.position) else {
                 continue;
@@ -431,6 +441,8 @@ impl FormaApp {
             egui::FontId::proportional(if active { 13.5 } else { 13.0 }),
             if active {
                 Color32::BLACK
+            } else if forma_render::dark_viewports() {
+                Color32::from_gray(200)
             } else {
                 Color32::from_gray(45)
             },
@@ -441,13 +453,17 @@ impl FormaApp {
                 egui::Align2::RIGHT_TOP,
                 vp.mode.name(),
                 egui::FontId::proportional(11.5),
-                Color32::from_gray(55),
+                if forma_render::dark_viewports() {
+                    Color32::from_gray(170)
+                } else {
+                    Color32::from_gray(55)
+                },
             );
         }
         let (w, c) = if active {
             (2.0, theme::accent())
         } else {
-            (1.0, Color32::from_gray(110))
+            (1.0, theme::border())
         };
         p.rect_stroke(vp.rect, 0.0, Stroke::new(w, c), StrokeKind::Inside);
     }

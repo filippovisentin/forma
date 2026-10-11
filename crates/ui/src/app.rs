@@ -436,6 +436,9 @@ impl eframe::App for FormaApp {
         }
         if let Some(look) = self.pending_look.take() {
             theme::set_look(&ctx, look);
+            // Viewport colours change too: rebuild the scene and the grids.
+            self.force_rebuild = true;
+            self.cplane_dirty = true;
             self.dirty_all();
         }
         self.agent_tick();
