@@ -680,8 +680,8 @@ void put_c2(const Handle(Geom2d_BSplineCurve)& c, std::vector<double>& out) {
 
 Handle(Geom_BSplineCurve) bspline3(const Handle(Geom_Curve)& c, double f, double l) {
   if (!c->IsPeriodic()) {  // edge ranges can overshoot the curve by rounding
-    f = std::max(f, c->FirstParameter());
-    l = std::min(l, c->LastParameter());
+    f = (std::max)(f, c->FirstParameter());
+    l = (std::min)(l, c->LastParameter());
   }
   Handle(Geom_BSplineCurve) b =
       GeomConvert::CurveToBSplineCurve(new Geom_TrimmedCurve(c, f, l));
@@ -691,8 +691,8 @@ Handle(Geom_BSplineCurve) bspline3(const Handle(Geom_Curve)& c, double f, double
 
 Handle(Geom2d_BSplineCurve) bspline2(const Handle(Geom2d_Curve)& c, double f, double l) {
   if (!c->IsPeriodic()) {
-    f = std::max(f, c->FirstParameter());
-    l = std::min(l, c->LastParameter());
+    f = (std::max)(f, c->FirstParameter());
+    l = (std::min)(l, c->LastParameter());
   }
   Handle(Geom2d_BSplineCurve) b =
       Geom2dConvert::CurveToBSplineCurve(new Geom2d_TrimmedCurve(c, f, l));

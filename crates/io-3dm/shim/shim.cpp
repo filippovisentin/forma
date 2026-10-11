@@ -2803,7 +2803,7 @@ unsigned char* f3dm_neutral_to_bytes(const double* s, size_t n, double tol, size
         ON_NurbsCurve* c = trims[(i + 1) % trims.size()].c2;
         const ON_3dPoint end = a->PointAtEnd(), start = c->PointAtStart();
         // Gaps well below the model tolerance are rounding, not holes.
-        if (end.DistanceTo(start) > 0.0 && end.DistanceTo(start) < std::max(1e-6, 0.5 * tol)) {
+        if (end.DistanceTo(start) > 0.0 && end.DistanceTo(start) < (std::max)(1e-6, 0.5 * tol)) {
           // Moving the start needs a curve clamped at its start.
           if (!c->SetStartPoint(end) && c->ClampEnd(0)) c->SetStartPoint(end);
           if (std::getenv("F3DM_DEBUG") && c->PointAtStart() != end)
