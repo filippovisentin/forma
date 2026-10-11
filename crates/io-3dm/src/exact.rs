@@ -134,6 +134,32 @@ pub fn capped(b: &Brep, tol: f64) -> Option<(Brep, usize)> {
     Some((out, usize::try_from(caps).unwrap_or(0)))
 }
 
+/// The exact geometry (pending transform applied) as a neutral stream for the
+/// solid kernel (`forma_geom::neutral`). `None` when a surface has no NURBS form
+/// that matches its trims.
+pub fn to_neutral(b: &Brep) -> Option<Vec<f64>> {
+    let b = baked(b)?;
+    let mut n = 0;
+    // SAFETY: buffer outlives the call; the stream is freed by take_stream.
+    unsafe {
+        take_stream(
+            ffi::f3dm_bytes_to_neutral(b.data.as_ptr(), b.data.len(), &mut n),
+            n,
+        )
+    }
+}
+
+/// A brep from a neutral stream (results of the solid kernel). `None` when the
+/// stream does not make a valid openNURBS brep.
+pub fn from_neutral(s: &[f64], tol: f64) -> Option<Brep> {
+    let mut len = 0;
+    // SAFETY: the stream outlives the call; owned bytes out.
+    made(
+        unsafe { ffi::f3dm_neutral_to_bytes(s.as_ptr(), s.len(), tol, &mut len) },
+        len,
+    )
+}
+
 /// Row-major 4×4 of an affine transform.
 pub fn xform16(x: &Xform) -> [f64; 16] {
     Brep {
@@ -751,6 +777,59 @@ pub fn polyhedron_brep(mesh: &Mesh, tol: f64, max_faces: usize) -> Option<Brep> 
 mod tests {
     use super::*;
     use forma_geom::CircleArc;
+
+    #[test]
+    fn neutral_round_trip_keeps_every_primitive() {
+        let base = Plane::from_normal(Point3::ORIGIN, Vec3::new(0.0, 0.0, 1.0));
+        let corners = [
+            Point3::new(0.0, 0.0, 0.0),
+            Point3::new(10.0, 0.0, 0.0),
+            Point3::new(10.0, 6.0, 0.0),
+            Point3::new(0.0, 6.0, 0.0),
+            Point3::new(0.0, 0.0, 4.0),
+            Point3::new(10.0, 0.0, 4.0),
+            Point3::new(10.0, 6.0, 4.0),
+            Point3::new(0.0, 6.0, 4.0),
+        ];
+        let cases = [
+            ("box", make_box(&corners).unwrap(), 240.0),
+            (
+                "cylinder",
+                make_cylinder(&base, 3.0, 10.0).unwrap(),
+                std::f64::consts::PI * 90.0,
+            ),
+            (
+                "sphere",
+                make_sphere(Point3::ORIGIN, 5.0).unwrap(),
+                4.0 / 3.0 * std::f64::consts::PI * 125.0,
+            ),
+            (
+                "cone",
+                make_cone(&base, 4.0, 9.0).unwrap(),
+                std::f64::consts::PI * 16.0 * 3.0,
+            ),
+            (
+                "torus",
+                make_torus(&base, 10.0, 2.0).unwrap(),
+                2.0 * std::f64::consts::PI.powi(2) * 10.0 * 4.0,
+            ),
+        ];
+        for (name, b, vol) in cases {
+            let s = to_neutral(&b).unwrap_or_else(|| panic!("{name}: no neutral form"));
+            let back = from_neutral(&s, 1e-6).unwrap_or_else(|| panic!("{name}: not rebuilt"));
+            assert_eq!(back.faces, b.faces, "{name}");
+            assert!(back.solid, "{name} stays closed");
+            let v = volume(&back.mesh);
+            assert!((v - vol).abs() / vol < 0.02, "{name}: volume {v} vs {vol}");
+        }
+        // Damaged streams are refused, not crashed on.
+        let s = to_neutral(&make_box(&corners).unwrap()).unwrap();
+        assert!(from_neutral(&s[..s.len() - 3], 1e-6).is_none());
+        let mut bad = s.clone();
+        bad[1] = 1e18;
+        assert!(from_neutral(&bad, 1e-6).is_none());
+        assert!(from_neutral(&[], 1e-6).is_none());
+    }
 
     fn volume(m: &Mesh) -> f64 {
         m.triangles

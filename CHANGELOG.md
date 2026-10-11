@@ -31,7 +31,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (off by default, this computer only, protected by a random key); without it they
   work on `.3dm` files, optionally limited to one folder (`--root`).
 
+- **Exact booleans and fillets on curved solids** (roadmap spike S3): `BooleanUnion`,
+  `BooleanDifference`, `BooleanIntersection`, `BooleanSplit`, `FilletEdge` and
+  `ChamferEdge` on polysurfaces now work on the exact NURBS faces and give exact
+  polysurfaces back: a round hole through a box or a wall, a box minus a sphere,
+  crossing cylinders, rolling-ball fillets on box edges and cylinder rims. They save to
+  `.3dm` as real Rhino polysurfaces. Meshes, and the few cases the exact path cannot do
+  yet (`Shell` and `OffsetSrf` of curved solids), still go through triangles as before.
+
 ### Fixed
+- `FilletEdge` / `ChamferEdge` no longer pick the seam of a cylinder or sphere (it cannot
+  be filleted) when a pick point is near both the seam and a real edge.
 - `Mesh` keeps the sharp edges of the polysurface (split at more than 30°, smooth
   across gentler bends): `DupEdge` finds the edges of a meshed box and `Explode`
   gives its faces (it used to weld everything into one smooth piece).

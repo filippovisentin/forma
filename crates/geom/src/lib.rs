@@ -36,8 +36,9 @@ pub use curvetools::{
 };
 pub use faces::MeshFace;
 pub use kernel::{
-    fillet_edges, offset_solid, rebuild_solid, shell_solid, solid_boolean, solid_info, BooleanOp,
-    KernelError, SolidInfo, SolidOptions, KERNEL_AVAILABLE,
+    exact_boolean, exact_fillet, exact_offset, exact_shell, exact_volume, fillet_edges,
+    offset_solid, rebuild_solid, shell_solid, solid_boolean, solid_info, BooleanOp, KernelError,
+    NeutralBrep, SolidInfo, SolidOptions, KERNEL_AVAILABLE,
 };
 pub use make2d::{make2d, outline_edges, Drawing, View2D};
 pub use meshtools::{

@@ -66,6 +66,9 @@ extern "C" {
         triangles: *mut u32,
     );
     fn fo_tess_free(t: *mut FoTess);
+    fn fo_shape_from_neutral(s: *const f64, n: usize, tol: f64) -> *mut FoShape;
+    fn fo_shape_to_neutral(s: *const FoShape, n: *mut usize) -> *mut f64;
+    fn fo_doubles_free(p: *mut f64);
 }
 
 struct Shape(*mut FoShape);
@@ -311,4 +314,154 @@ pub(super) fn info(m: &Mesh, opts: SolidOptions) -> Result<SolidInfo, KernelErro
 pub(super) fn rebuild(m: &Mesh, opts: SolidOptions) -> Result<Mesh, KernelError> {
     let s = to_shape(m, opts)?;
     to_mesh(&s, deflection(m, opts), opts)
+}
+
+// ----------------------------------------------------------------- exact solids (S3)
+
+fn from_neutral(s: &[f64], tol: f64) -> Result<Shape, KernelError> {
+    // SAFETY: the slice outlives the call.
+    wrap(
+        unsafe { fo_shape_from_neutral(s.as_ptr(), s.len(), tol) },
+        "reading the exact solid",
+    )
+}
+
+fn to_neutral(s: &Shape) -> Result<Vec<f64>, KernelError> {
+    let mut n = 0usize;
+    // SAFETY: `s` is a live handle; the buffer is copied and freed once.
+    unsafe {
+        let p = fo_shape_to_neutral(s.0, &mut n);
+        if p.is_null() {
+            return Err(last_error("writing the exact result"));
+        }
+        let v = std::slice::from_raw_parts(p, n).to_vec();
+        fo_doubles_free(p);
+        Ok(v)
+    }
+}
+
+/// Every solid of a result as its own stream.
+fn solid_streams(s: &Shape) -> Result<Vec<Vec<f64>>, KernelError> {
+    let parts = solids(s)?;
+    if parts.is_empty() {
+        return Err(KernelError::Failed("the result has no solid".into()));
+    }
+    parts.iter().map(to_neutral).collect()
+}
+
+pub(super) fn exact_boolean(
+    op: BooleanOp,
+    a: &[&[f64]],
+    b: &[&[f64]],
+    tol: f64,
+) -> Result<Vec<Vec<f64>>, KernelError> {
+    let sa = a
+        .iter()
+        .map(|s| from_neutral(s, tol))
+        .collect::<Result<Vec<_>, _>>()?;
+    let sb = b
+        .iter()
+        .map(|s| from_neutral(s, tol))
+        .collect::<Result<Vec<_>, _>>()?;
+    let pa: Vec<*const FoShape> = sa.iter().map(|s| s.0 as *const FoShape).collect();
+    let pb: Vec<*const FoShape> = sb.iter().map(|s| s.0 as *const FoShape).collect();
+    let code = match op {
+        BooleanOp::Union => 0,
+        BooleanOp::Difference => 1,
+        BooleanOp::Intersection => 2,
+        BooleanOp::Split => 3,
+    };
+    // SAFETY: the handle arrays outlive the call.
+    let r = wrap(
+        unsafe {
+            fo_boolean(
+                code,
+                pa.as_ptr(),
+                pa.len() as u32,
+                pb.as_ptr(),
+                pb.len() as u32,
+                tol,
+            )
+        },
+        "boolean",
+    )?;
+    solid_streams(&r)
+}
+
+pub(super) fn exact_fillet(
+    s: &[f64],
+    r: f64,
+    near: &[Point3],
+    chamfer: bool,
+    tol: f64,
+    pick: f64,
+) -> Result<Vec<Vec<f64>>, KernelError> {
+    if r <= tol {
+        return Err(KernelError::Failed("the radius must be positive".into()));
+    }
+    if near.is_empty() {
+        return Err(KernelError::Failed("no edge picked".into()));
+    }
+    let shape = from_neutral(s, tol)?;
+    let pts = points(near);
+    // SAFETY: `shape` and `pts` outlive the call.
+    let out = wrap(
+        unsafe {
+            fo_fillet_edges(
+                shape.0,
+                r,
+                pts.as_ptr(),
+                near.len() as u32,
+                pick,
+                c_int::from(chamfer),
+            )
+        },
+        if chamfer { "chamfer" } else { "fillet" },
+    )?;
+    solid_streams(&out)
+}
+
+pub(super) fn exact_shell(
+    s: &[f64],
+    thickness: f64,
+    near: &[Point3],
+    tol: f64,
+    pick: f64,
+) -> Result<Vec<Vec<f64>>, KernelError> {
+    if thickness <= tol {
+        return Err(KernelError::Failed("the thickness must be positive".into()));
+    }
+    let shape = from_neutral(s, tol)?;
+    let pts = points(near);
+    // SAFETY: `shape` and `pts` outlive the call.
+    let out = wrap(
+        unsafe {
+            fo_shell(
+                shape.0,
+                thickness,
+                pts.as_ptr(),
+                near.len() as u32,
+                pick,
+                tol,
+            )
+        },
+        "shell",
+    )?;
+    solid_streams(&out)
+}
+
+pub(super) fn exact_offset(s: &[f64], d: f64, tol: f64) -> Result<Vec<Vec<f64>>, KernelError> {
+    if d.abs() <= tol {
+        return Err(KernelError::Failed("the distance is too small".into()));
+    }
+    let shape = from_neutral(s, tol)?;
+    // SAFETY: `shape` is a live handle.
+    let out = wrap(unsafe { fo_offset(shape.0, d, tol) }, "offset")?;
+    solid_streams(&out)
+}
+
+pub(super) fn exact_volume(s: &[f64], tol: f64) -> Result<f64, KernelError> {
+    let shape = from_neutral(s, tol)?;
+    // SAFETY: `shape` is a live handle.
+    Ok(unsafe { fo_volume(shape.0) })
 }

@@ -2563,3 +2563,284 @@ double* f3dm_bytes_isocurves(const unsigned char* data, size_t len, const double
 }
 
 }  // extern "C"
+
+// ---------------------------------------------------------------------------
+// Neutral exact-brep stream, shared with forma-geom's OpenCascade shim (S3, see
+// forma_geom::neutral). All doubles:
+//   1 (version)
+//   nv, nv x (x y z)                                   vertices
+//   ne, ne x (v0 v1 curve3)                            edges, curve from v0 to v1
+//   nf, nf x (rev surface nloops loop...)              faces
+//     loop: kind (0 outer, 1 inner) ntrims trim...
+//       trim: edge (-1 singular) rev3d vertex curve2   curve along the loop
+//   curve: dim degree n knots[n+degree+1] n x (dim coords, weight)
+//   surface: du dv nu nv knots_u[nu+du+1] knots_v[nv+dv+1] (nu*nv) x (x y z w), u major
+// Knot vectors are full (OpenCascade style); openNURBS drops the first and last.
+
+static void neutral_knots(const double* k, int count, std::vector<double>& out) {
+  out.push_back(k[0]);
+  for (int i = 0; i < count; i++) out.push_back(k[i]);
+  out.push_back(k[count - 1]);
+}
+
+static bool neutral_curve(const ON_Curve& c, int dim, std::vector<double>& out) {
+  ON_NurbsCurve n;
+  if (!c.GetNurbForm(n) || n.CVCount() < 2) return false;
+  out.insert(out.end(), {double(dim), double(n.Degree()), double(n.CVCount())});
+  neutral_knots(n.m_knot, n.KnotCount(), out);
+  for (int i = 0; i < n.CVCount(); i++) {
+    ON_3dPoint p;
+    n.GetCV(i, p);
+    out.push_back(p.x);
+    out.push_back(p.y);
+    if (dim == 3) out.push_back(p.z);
+    out.push_back(n.Weight(i));
+  }
+  return true;
+}
+
+static bool neutral_surface(const ON_Surface& s, std::vector<double>& out) {
+  ON_NurbsSurface n;
+  if (s.GetNurbForm(n) != 1) return false;  // 2 = other parameters than the trims use
+  out.insert(out.end(), {double(n.Degree(0)), double(n.Degree(1)), double(n.CVCount(0)),
+                         double(n.CVCount(1))});
+  neutral_knots(n.m_knot[0], n.KnotCount(0), out);
+  neutral_knots(n.m_knot[1], n.KnotCount(1), out);
+  for (int i = 0; i < n.CVCount(0); i++) {
+    for (int j = 0; j < n.CVCount(1); j++) {
+      ON_3dPoint p;
+      n.GetCV(i, j, p);
+      out.insert(out.end(), {p.x, p.y, p.z, n.Weight(i, j)});
+    }
+  }
+  return true;
+}
+
+// Reader over a neutral stream; every read is bounds-checked.
+struct NeutralReader {
+  const double* s;
+  size_t n, k = 0;
+  bool ok = true;
+  double next() {
+    if (k >= n) {
+      ok = false;
+      return 0.0;
+    }
+    return s[k++];
+  }
+  int count(int max) {
+    const double v = next();
+    if (!(v >= 0 && v <= max)) {
+      ok = false;
+      return 0;
+    }
+    return int(v);
+  }
+};
+
+static const int NEUTRAL_MAX = 1 << 22;
+
+static void read_knots(NeutralReader& r, int full, ON_NurbsCurve& c) {
+  r.next();  // superfluous first knot
+  for (int i = 0; i < full - 2; i++) c.m_knot[i] = r.next();
+  r.next();
+}
+
+static ON_NurbsCurve* read_neutral_curve(NeutralReader& r, int want_dim) {
+  const int dim = r.count(3), deg = r.count(32), n = r.count(NEUTRAL_MAX);
+  if (!r.ok || dim != want_dim || deg < 1 || n < deg + 1) {
+    r.ok = false;
+    return nullptr;
+  }
+  ON_NurbsCurve* c = ON_NurbsCurve::New(dim, true, deg + 1, n);
+  read_knots(r, n + deg + 1, *c);
+  for (int i = 0; i < n; i++) {
+    double p[3] = {0, 0, 0};
+    for (int d = 0; d < dim; d++) p[d] = r.next();
+    const double w = r.next();
+    c->SetCV(i, ON_4dPoint(p[0] * w, p[1] * w, p[2] * w, w));
+  }
+  if (!r.ok || !c->IsValid()) {
+    delete c;
+    r.ok = false;
+    return nullptr;
+  }
+  return c;
+}
+
+static ON_NurbsSurface* read_neutral_surface(NeutralReader& r) {
+  const int du = r.count(32), dv = r.count(32), nu = r.count(1 << 16), nv = r.count(1 << 16);
+  if (!r.ok || du < 1 || dv < 1 || nu < du + 1 || nv < dv + 1 || double(nu) * nv > NEUTRAL_MAX) {
+    r.ok = false;
+    return nullptr;
+  }
+  ON_NurbsSurface* s = ON_NurbsSurface::New(3, true, du + 1, dv + 1, nu, nv);
+  for (int dir = 0; dir < 2; dir++) {
+    const int full = (dir ? nv + dv : nu + du) + 1;
+    r.next();
+    for (int i = 0; i < full - 2; i++) s->m_knot[dir][i] = r.next();
+    r.next();
+  }
+  for (int i = 0; i < nu; i++) {
+    for (int j = 0; j < nv; j++) {
+      const double x = r.next(), y = r.next(), z = r.next(), w = r.next();
+      s->SetCV(i, j, ON_4dPoint(x * w, y * w, z * w, w));
+    }
+  }
+  if (!r.ok || !s->IsValid()) {
+    delete s;
+    r.ok = false;
+    return nullptr;
+  }
+  return s;
+}
+
+extern "C" {
+
+// A brep (or extrusion / surface) as a neutral stream; null when some surface has
+// no NURBS form matching its trims.
+double* f3dm_bytes_to_neutral(const unsigned char* data, size_t len, size_t* n) {
+  *n = 0;
+  ON_Brep* b = brep_from_bytes(data, len);
+  if (!b) return nullptr;
+  if (!nurbify(b)) {
+    delete b;
+    return nullptr;
+  }
+  std::vector<double> out{1.0, double(b->m_V.Count())};
+  for (int i = 0; i < b->m_V.Count(); i++) {
+    const ON_3dPoint p = b->m_V[i].point;
+    out.insert(out.end(), {p.x, p.y, p.z});
+  }
+  out.push_back(double(b->m_E.Count()));
+  bool ok = true;
+  for (int i = 0; i < b->m_E.Count() && ok; i++) {
+    const ON_BrepEdge& e = b->m_E[i];
+    out.insert(out.end(), {double(e.m_vi[0]), double(e.m_vi[1])});
+    ok = neutral_curve(e, 3, out);
+  }
+  out.push_back(double(b->m_F.Count()));
+  for (int fi = 0; fi < b->m_F.Count() && ok; fi++) {
+    const ON_BrepFace& f = b->m_F[fi];
+    const ON_Surface* s = f.SurfaceOf();
+    out.push_back(f.m_bRev ? 1.0 : 0.0);
+    ok = s && neutral_surface(*s, out);
+    out.push_back(double(f.m_li.Count()));
+    for (int li = 0; li < f.m_li.Count() && ok; li++) {
+      const ON_BrepLoop& l = b->m_L[f.m_li[li]];
+      out.push_back(l.m_type == ON_BrepLoop::outer ? 0.0 : 1.0);
+      out.push_back(double(l.m_ti.Count()));
+      for (int ti = 0; ti < l.m_ti.Count() && ok; ti++) {
+        const ON_BrepTrim& t = b->m_T[l.m_ti[ti]];
+        const bool singular = t.m_type == ON_BrepTrim::singular || t.m_ei < 0;
+        out.insert(out.end(), {singular ? -1.0 : double(t.m_ei), t.m_bRev3d ? 1.0 : 0.0,
+                               double(t.m_vi[0])});
+        ok = neutral_curve(t, 2, out);
+      }
+    }
+  }
+  delete b;
+  if (!ok) return nullptr;
+  return to_malloc(out, n);
+}
+
+// A neutral stream back to brep bytes (null when it does not make a valid brep).
+unsigned char* f3dm_neutral_to_bytes(const double* s, size_t n, double tol, size_t* out_len) {
+  *out_len = 0;
+  NeutralReader r{s, n};
+  if (r.next() != 1.0) return nullptr;
+  ON_Brep* b = new ON_Brep();
+  const int nv = r.count(NEUTRAL_MAX);
+  for (int i = 0; i < nv && r.ok; i++) {
+    const double x = r.next(), y = r.next(), z = r.next();
+    b->NewVertex(ON_3dPoint(x, y, z), tol);
+  }
+  const int ne = r.count(NEUTRAL_MAX);
+  for (int i = 0; i < ne && r.ok; i++) {
+    const int v0 = r.count(nv - 1), v1 = r.count(nv - 1);
+    ON_NurbsCurve* c = read_neutral_curve(r, 3);
+    if (!r.ok) break;
+    const int ci = b->AddEdgeCurve(c);
+    ON_BrepEdge& e = b->NewEdge(b->m_V[v0], b->m_V[v1], ci);
+    e.m_tolerance = tol;
+  }
+  const int nf = r.count(NEUTRAL_MAX);
+  for (int fi = 0; fi < nf && r.ok; fi++) {
+    const bool rev = r.next() != 0.0;
+    ON_NurbsSurface* srf = read_neutral_surface(r);
+    if (!r.ok) break;
+    ON_BrepFace& f = b->NewFace(b->AddSurface(srf));
+    f.m_bRev = rev;
+    const int fidx = f.m_face_index;
+    const int nl = r.count(NEUTRAL_MAX);
+    for (int li = 0; li < nl && r.ok; li++) {
+      const bool outer = r.next() == 0.0;
+      ON_BrepLoop& l = b->NewLoop(outer ? ON_BrepLoop::outer : ON_BrepLoop::inner, b->m_F[fidx]);
+      const int lidx = l.m_loop_index;
+      const int nt = r.count(NEUTRAL_MAX);
+      struct T {
+        double ev, vv;
+        bool rev3d;
+        ON_NurbsCurve* c2;
+      };
+      std::vector<T> trims;
+      for (int ti = 0; ti < nt && r.ok; ti++) {
+        T t;
+        t.ev = r.next();
+        t.rev3d = r.next() != 0.0;
+        t.vv = r.next();
+        t.c2 = read_neutral_curve(r, 2);
+        if (r.ok) trims.push_back(t);
+      }
+      if (!r.ok) {
+        for (auto& t : trims) delete t.c2;
+        break;
+      }
+      // Close the tiny gaps another kernel leaves between consecutive trims
+      // (openNURBS checks loop continuity much more tightly).
+      for (size_t i = 0; i < trims.size(); i++) {
+        ON_NurbsCurve* a = trims[i].c2;
+        ON_NurbsCurve* c = trims[(i + 1) % trims.size()].c2;
+        const ON_3dPoint end = a->PointAtEnd(), start = c->PointAtStart();
+        // Gaps well below the model tolerance are rounding, not holes.
+        if (end.DistanceTo(start) > 0.0 && end.DistanceTo(start) < std::max(1e-6, 0.5 * tol)) {
+          // Moving the start needs a curve clamped at its start.
+          if (!c->SetStartPoint(end) && c->ClampEnd(0)) c->SetStartPoint(end);
+          if (std::getenv("F3DM_DEBUG") && c->PointAtStart() != end)
+            fprintf(stderr, "trim gap not closed: %g\n", c->PointAtStart().DistanceTo(end));
+        }
+      }
+      for (const T& tr : trims) {
+        const double ev = tr.ev, vv = tr.vv;
+        const bool rev3d = tr.rev3d;
+        ON_NurbsCurve* c2 = tr.c2;
+        const int c2i = b->AddTrimCurve(c2);
+        if (ev < 0) {
+          if (!(vv >= 0 && vv < nv)) {
+            r.ok = false;
+            break;
+          }
+          ON_BrepTrim& t = b->NewSingularTrim(b->m_V[int(vv)], b->m_L[lidx], ON_Surface::not_iso, c2i);
+          t.m_tolerance[0] = t.m_tolerance[1] = 0.0;
+        } else {
+          if (!(ev < ne)) {
+            r.ok = false;
+            break;
+          }
+          ON_BrepTrim& t = b->NewTrim(b->m_E[int(ev)], rev3d, b->m_L[lidx], c2i);
+          t.m_tolerance[0] = t.m_tolerance[1] = tol;
+        }
+      }
+    }
+  }
+  if (!r.ok || r.k != n) {
+    delete b;
+    return nullptr;
+  }
+  b->SetTrimIsoFlags();
+  b->SetTrimTypeFlags();
+  b->SetTolerancesBoxesAndFlags(true, true, true, true, true, true, true, true);
+  return brep_bytes(b, out_len);
+}
+
+}  // extern "C"
