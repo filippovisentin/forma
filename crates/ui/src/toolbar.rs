@@ -6,7 +6,7 @@ use crate::icons::{self, Icon};
 use crate::menus::{ALIGN, ARRAY_PREFILL, SET_VIEWS};
 use crate::tools::ToolKind;
 use crate::{theme, Act, FormaApp, SidePanel};
-use eframe::egui::{self, Color32, RichText, Stroke, StrokeKind};
+use eframe::egui::{self, RichText, Stroke, StrokeKind};
 use forma_render::DisplayMode;
 
 /// Rhino-style toolbar tabs above the viewports.
@@ -71,6 +71,7 @@ fn tools(ks: &[ToolKind]) -> Vec<Option<Item>> {
 
 /// The tooltip of a button: name, description, alias and shortcut.
 fn tooltip(ui: &mut egui::Ui, it: &Item) {
+    let colors = theme::ThemeColors::for_mode(theme::current_mode(ui.ctx()));
     ui.set_max_width(320.0);
     ui.label(RichText::new(it.name).strong());
     if !it.desc.is_empty() && it.desc != it.name {
@@ -86,27 +87,29 @@ fn tooltip(ui: &mut egui::Ui, it: &Item) {
         keys.push(format!("Shortcut: {k}"));
     }
     if !keys.is_empty() {
-        ui.label(RichText::new(keys.join("  ·  ")).small().color(theme::WEAK));
+        ui.label(
+            RichText::new(keys.join("  ·  "))
+                .small()
+                .color(colors.text_weak),
+        );
     }
 }
 
 impl FormaApp {
     fn icon_button(&self, ui: &mut egui::Ui, it: &Item, active: bool) -> bool {
+        let colors = theme::ThemeColors::for_mode(theme::current_mode(ui.ctx()));
         let (rect, resp) = ui.allocate_exact_size(egui::vec2(32.0, 32.0), egui::Sense::click());
         if resp.hovered() || active {
             let (fill, stroke) = if active {
-                (theme::ACCENT_BG, theme::ACCENT)
+                (colors.accent_bg, colors.accent)
             } else {
-                (
-                    Color32::from_rgb(229, 241, 251),
-                    Color32::from_rgb(160, 200, 236),
-                )
+                (colors.hover, colors.accent)
             };
             ui.painter().rect_filled(rect, 3.0, fill);
             ui.painter()
                 .rect_stroke(rect, 3.0, Stroke::new(1.0, stroke), StrokeKind::Inside);
         }
-        icons::paint(ui.painter(), rect.shrink(3.0), it.icon, theme::TEXT);
+        icons::paint(ui.painter(), rect.shrink(3.0), it.icon, colors.text);
         resp.on_hover_ui(|ui| tooltip(ui, it)).clicked()
     }
 
@@ -416,15 +419,16 @@ impl FormaApp {
 
     /// Tab strip and its command row (Rhino 8 style).
     pub(crate) fn ui_tabs(&mut self, ui: &mut egui::Ui) {
+        let colors = theme::ThemeColors::for_mode(theme::current_mode(ui.ctx()));
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 0.0;
             for (i, name) in TABS.iter().enumerate() {
                 let selected = self.tab == i;
                 let text = RichText::new(*name).size(12.5);
                 let (fill, border) = if selected {
-                    (Color32::WHITE, theme::BORDER)
+                    (colors.surface, colors.border)
                 } else {
-                    (theme::STRIP, theme::STRIP)
+                    (colors.strip, colors.strip)
                 };
                 let b = egui::Button::new(if selected { text.strong() } else { text })
                     .fill(fill)
@@ -443,8 +447,8 @@ impl FormaApp {
         let mut act: Option<Act> = None;
         let items = self.tab_items();
         let frame = egui::Frame::NONE
-            .fill(Color32::WHITE)
-            .stroke(Stroke::new(1.0, theme::BORDER))
+            .fill(colors.surface)
+            .stroke(Stroke::new(1.0, colors.border))
             .inner_margin(egui::Margin::symmetric(4, 2));
         frame.show(ui, |ui| {
             ui.set_width(ui.available_width());

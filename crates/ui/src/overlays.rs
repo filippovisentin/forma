@@ -444,8 +444,9 @@ impl FormaApp {
                 Color32::from_gray(55),
             );
         }
+        let colors = theme::ThemeColors::for_mode(theme::current_mode(p.ctx()));
         let (w, c) = if active {
-            (2.0, theme::ACCENT)
+            (2.0, colors.accent)
         } else {
             (1.0, Color32::from_gray(110))
         };

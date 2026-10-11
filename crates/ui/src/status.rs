@@ -5,7 +5,7 @@
 use crate::snap::SnapKind;
 use crate::tools::Tool;
 use crate::{theme, FormaApp};
-use eframe::egui::{self, Color32, Stroke, StrokeKind};
+use eframe::egui::{self, Color32, RichText, Stroke, StrokeKind};
 use forma_doc::LengthUnit;
 
 impl FormaApp {
@@ -34,6 +34,7 @@ impl FormaApp {
     }
 
     pub(crate) fn ui_status(&mut self, ui: &mut egui::Ui) {
+        let colors = theme::ThemeColors::for_mode(theme::current_mode(ui.ctx()));
         ui.horizontal(|ui| {
             let (plane_name, coords) = match &self.hover {
                 Some(h) => {
@@ -42,17 +43,30 @@ impl FormaApp {
                 }
                 None => ("CPlane", "x —   y —   z —".to_string()),
             };
-            ui.label(egui::RichText::new(plane_name).size(12.5));
+            ui.label(
+                egui::RichText::new(plane_name)
+                    .size(12.5)
+                    .color(colors.text_weak),
+            );
             let dist = match (&self.hover, self.tool.as_ref().and_then(Tool::base)) {
                 (Some(h), Some(b)) => Some(h.point.distance_to(b)),
                 _ => None,
             };
             ui.add_sized(
                 [250.0, 18.0],
-                egui::Label::new(egui::RichText::new(coords).monospace().size(12.5)),
+                egui::Label::new(
+                    egui::RichText::new(coords)
+                        .monospace()
+                        .size(12.5)
+                        .color(colors.text),
+                ),
             );
             if let Some(d) = dist {
-                ui.label(egui::RichText::new(format!("Distance {}", self.fmt_len(d))).size(12.5));
+                ui.label(
+                    egui::RichText::new(format!("Distance {}", self.fmt_len(d)))
+                        .size(12.5)
+                        .color(colors.text),
+                );
             }
             ui.separator();
             let units = match self.engine.doc().units {
@@ -62,7 +76,11 @@ impl FormaApp {
                 LengthUnit::Inches => "Inches",
                 LengthUnit::Feet => "Feet",
             };
-            ui.label(egui::RichText::new(units).size(12.5));
+            ui.label(
+                egui::RichText::new(units)
+                    .size(12.5)
+                    .color(colors.text_weak),
+            );
             ui.separator();
             // Current layer: colour swatch and a drop-down to change it.
             let doc = self.engine.doc();
@@ -72,7 +90,7 @@ impl FormaApp {
             ui.painter()
                 .rect_filled(sw, 1.0, Color32::from_rgb(r, g, b));
             ui.painter()
-                .rect_stroke(sw, 1.0, Stroke::new(1.0, theme::WEAK), StrokeKind::Inside);
+                .rect_stroke(sw, 1.0, Stroke::new(1.0, colors.border), StrokeKind::Inside);
             let mut pick: Option<String> = None;
             egui::ComboBox::from_id_salt("status-layer")
                 .selected_text(egui::RichText::new(cur.name.clone()).size(12.5))
@@ -90,11 +108,11 @@ impl FormaApp {
             }
             ui.separator();
             let pane = |ui: &mut egui::Ui, on: &mut bool, label: &str, tip: &str| {
-                let text = egui::RichText::new(label).size(12.5);
+                let text = RichText::new(label).size(12.5);
                 let text = if *on {
-                    text.strong().color(Color32::BLACK)
+                    text.strong().color(colors.text)
                 } else {
-                    text.color(theme::WEAK)
+                    text.color(colors.text_weak)
                 };
                 if ui
                     .add(egui::Button::new(text).frame(false))
@@ -138,7 +156,7 @@ impl FormaApp {
                 "Axis handles on the selection",
             );
             let filter = &mut self.filter;
-            ui.menu_button(egui::RichText::new("Filter").size(12.5), |ui| {
+            ui.menu_button(RichText::new("Filter").size(12.5), |ui| {
                 ui.checkbox(&mut filter.curves, "Curves");
                 ui.checkbox(&mut filter.surfaces, "Surfaces / meshes");
                 ui.checkbox(&mut filter.points, "Points");
@@ -146,20 +164,20 @@ impl FormaApp {
             ui.separator();
             let mins = self.saved_at.elapsed().as_secs() / 60;
             ui.label(
-                egui::RichText::new(format!("Minutes from last save: {mins}"))
+                RichText::new(format!("Minutes from last save: {mins}"))
                     .size(12.5)
-                    .color(theme::WEAK),
+                    .color(colors.text_weak),
             );
             ui.separator();
             let doc = self.engine.doc();
             ui.label(
-                egui::RichText::new(format!(
+                RichText::new(format!(
                     "{} objects · {} selected",
                     doc.len(),
                     self.engine.ctx.selection.len()
                 ))
                 .size(12.5)
-                .color(theme::WEAK),
+                .color(colors.text_weak),
             );
         });
     }

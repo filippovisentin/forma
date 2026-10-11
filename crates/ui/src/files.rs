@@ -1,7 +1,7 @@
 //! Open / Save dialogs, recent files and the "Save changes?" guard before New,
 //! Open and closing the window.
 
-use crate::{theme, FormaApp, Guarded, LogKind};
+use crate::{FormaApp, Guarded, LogKind};
 use eframe::egui::{self, Key, RichText};
 use std::path::Path;
 
@@ -79,11 +79,12 @@ impl FormaApp {
                     answer = Some(None);
                 }
             });
+            let colors = crate::ThemeColors::for_mode(crate::theme::current_mode(ctx));
             ui.add_space(2.0);
             ui.label(
                 RichText::new("Enter = Yes · Esc = Cancel")
                     .small()
-                    .color(theme::WEAK),
+                    .color(colors.text_weak),
             );
         });
         if answer.is_none() {

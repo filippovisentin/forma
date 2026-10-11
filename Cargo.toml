@@ -32,3 +32,4 @@ forma-render = { path = "crates/render" }
 forma-engine = { path = "crates/engine" }
 forma-ui = { path = "crates/ui" }
 forma-mcp = { path = "crates/mcp" }
+cargo-auditable = { version = "0.7" }

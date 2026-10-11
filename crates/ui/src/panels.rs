@@ -2,7 +2,7 @@
 
 use crate::tools::ToolKind;
 use crate::{theme, FormaApp, LogKind, SidePanel};
-use eframe::egui::{self, Color32, Pos2, Rect, Stroke, StrokeKind};
+use eframe::egui::{self, Color32, Pos2, Rect, RichText, Stroke, StrokeKind};
 
 /// Quick colours in the Properties panel.
 const SWATCHES: [[u8; 3]; 14] = [
@@ -35,6 +35,7 @@ pub(crate) struct PropEdit {
 impl FormaApp {
     /// Right panel with Properties, Layers and Help tabs.
     pub(crate) fn ui_side(&mut self, ui: &mut egui::Ui) {
+        let colors = theme::ThemeColors::for_mode(theme::current_mode(ui.ctx()));
         // Long texts are cut, never widen the panel (which would resize and
         // re-render all four views).
         ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
@@ -46,21 +47,15 @@ impl FormaApp {
                 (SidePanel::Help, "Help"),
             ] {
                 let selected = self.side_panel == p;
-                let text = egui::RichText::new(name).size(12.5);
+                let text = RichText::new(name).size(12.5);
+                let (fill, stroke_color) = if selected {
+                    (colors.surface, colors.border)
+                } else {
+                    (colors.panel, colors.panel)
+                };
                 let b = egui::Button::new(if selected { text.strong() } else { text })
-                    .fill(if selected {
-                        Color32::WHITE
-                    } else {
-                        theme::PANEL
-                    })
-                    .stroke(Stroke::new(
-                        1.0,
-                        if selected {
-                            theme::BORDER
-                        } else {
-                            theme::PANEL
-                        },
-                    ));
+                    .fill(fill)
+                    .stroke(Stroke::new(1.0, stroke_color));
                 if ui.add(b).clicked() {
                     self.side_panel = p;
                 }
@@ -495,15 +490,15 @@ impl FormaApp {
                     .next()
                     .unwrap_or(&layer.name)
                     .to_string();
+                let colors = theme::ThemeColors::for_mode(theme::current_mode(ui.ctx()));
                 let row = ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 4.0;
                     let (name_rect, name_resp) =
                         ui.allocate_exact_size(egui::vec2(130.0, 20.0), egui::Sense::click());
                     if i == current {
-                        ui.painter().rect_filled(name_rect, 2.0, theme::ACCENT_BG);
+                        ui.painter().rect_filled(name_rect, 2.0, colors.accent_bg);
                     } else if name_resp.hovered() {
-                        ui.painter()
-                            .rect_filled(name_rect, 2.0, Color32::from_rgb(235, 243, 251));
+                        ui.painter().rect_filled(name_rect, 2.0, colors.hover);
                     }
                     let indent = depth as f32 * 12.0;
                     if depth > 0 {
@@ -512,7 +507,7 @@ impl FormaApp {
                             egui::Align2::LEFT_CENTER,
                             "└",
                             egui::FontId::proportional(11.0),
-                            theme::WEAK,
+                            colors.text_weak,
                         );
                     }
                     ui.painter().text(
@@ -521,9 +516,9 @@ impl FormaApp {
                         &short,
                         egui::FontId::proportional(13.0),
                         if layer.visible {
-                            theme::TEXT
+                            colors.text
                         } else {
-                            theme::WEAK
+                            colors.text_weak
                         },
                     );
                     let name_resp = name_resp.on_hover_text(format!(
@@ -584,6 +579,7 @@ impl FormaApp {
                             ui.close();
                         }
                     });
+                    let colors = theme::ThemeColors::for_mode(theme::current_mode(ui.ctx()));
                     // Current check mark.
                     let (r, resp) =
                         ui.allocate_exact_size(egui::vec2(18.0, 18.0), egui::Sense::click());
@@ -593,7 +589,7 @@ impl FormaApp {
                             egui::Align2::CENTER_CENTER,
                             "✔",
                             egui::FontId::proportional(13.0),
-                            theme::TEXT,
+                            colors.text,
                         );
                     }
                     if resp.on_hover_text("Current layer").clicked() {

@@ -1,0 +1,79 @@
+# Dependabot configuration for automated dependency updates
+version: 2
+updates:
+  # Cargo.toml updates (Rust dependencies)
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Europe/Rome"
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+      - "rust"
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"
+    groups:
+      minor-and-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+      major:
+        patterns:
+          - "*"
+        update-types:
+          - "major"
+    # Auto-merge for patch and minor updates when CI passes
+    allow:
+      - dependency-type: "direct"
+      - dependency-type: "indirect"
+    automerge:
+      - update-types: ["patch", "minor"]
+        # Require CI to pass before merging
+        allowed-statuses: ["ci"]
+
+  # GitHub Actions updates
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Europe/Rome"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "github-actions"
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"
+    # Auto-merge for patch and minor updates when CI passes
+    automerge:
+      - update-types: ["patch", "minor"]
+        allowed-statuses: ["ci"]
+
+  # Cargo.lock updates (lockfile only)
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "daily"
+      time: "06:00"
+      timezone: "Europe/Rome"
+    open-pull-requests-limit: 3
+    labels:
+      - "dependencies"
+      - "rust"
+      - "lockfile"
+    target-branch: "main"
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"
+    # Auto-merge for patch and minor updates when CI passes
+    automerge:
+      - update-types: ["patch", "minor"]
+        allowed-statuses: ["ci"]

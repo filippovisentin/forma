@@ -399,9 +399,10 @@ impl FormaApp {
         let mut ok = false;
         let mut cancel = false;
         let modal = egui::Modal::new(egui::Id::new("forma-form")).show(ctx, |ui| {
+            let colors = crate::ThemeColors::for_mode(crate::theme::current_mode(ctx));
             ui.set_width(340.0);
             ui.label(RichText::new(f.form.title).strong());
-            ui.label(RichText::new(f.form.help).small().color(crate::theme::WEAK));
+            ui.label(RichText::new(f.form.help).small().color(colors.text_weak));
             ui.add_space(6.0);
             egui::Grid::new("form-grid")
                 .num_columns(2)

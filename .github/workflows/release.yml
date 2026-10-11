@@ -13,6 +13,7 @@ on:
 
 permissions:
   contents: write
+  id-token: write  # Required for cosign keyless signing
 
 jobs:
   windows:
@@ -33,11 +34,17 @@ jobs:
           path: .occt
           key: occt-7.8.1-static-${{ runner.os }}-v1
       - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-cyclonedx
+        run: cargo install cargo-cyclonedx --locked
+      - name: Generate SBOM
+        run: |
+          cargo cyclonedx -p forma -p forma-cli --features forma/occt,forma-cli/occt --output-file dist/sbom.json
+          cargo cyclonedx -p forma -p forma-cli --features forma/occt,forma-cli/occt --output-file dist/sbom.xml --format xml
       - name: Build
         shell: bash
         run: |
           set -o pipefail
-          if ! cargo build --release -p forma -p forma-cli --features forma/occt,forma-cli/occt 2>&1 | tee build.log; then
+          if ! cargo build --release -p forma -p forma-cli --features forma/occt,forma-cli/occt,forma/auditable,forma-cli/auditable 2>&1 | tee build.log; then
             msg=$(grep -E "error|LNK[0-9]|fatal" build.log | tail -30 | sed ':a;N;$!ba;s/%/%25/g;s/\r//g;s/\n/%0A/g')
             echo "::error title=release build::${msg}"
             exit 1
@@ -51,7 +58,34 @@ jobs:
           cp packaging/LEGGIMI.txt "packaging/Crea collegamento sul Desktop.bat" dist/Forma/
           cp LICENSE-MIT LICENSE-APACHE ATTRIBUTION.md dist/Forma/
           cp -r packaging/licenses dist/Forma/
+          # Include SBOMs in the package
+          cp dist/sbom.json dist/sbom.xml dist/Forma/
           cd dist && 7z a -tzip Forma-windows.zip Forma > /dev/null
+      - name: Sign Windows executables (EV certificate)
+        if: env.SIGNING_CERT_PFX != ''
+        env:
+          SIGNING_CERT_PFX: ${{ secrets.SIGNING_CERT_PFX }}
+          SIGNING_CERT_PASSWORD: ${{ secrets.SIGNING_CERT_PASSWORD }}
+        run: |
+          # Decode base64 certificate
+          [System.IO.File]::WriteAllBytes("cert.pfx", [System.Convert]::FromBase64String($env:SIGNING_CERT_PFX))
+          # Sign with signtool (requires Windows SDK)
+          $timestampUrl = "http://timestamp.digicert.com"
+          signtool sign /f cert.pfx /p $env:SIGNING_CERT_PASSWORD /tr $timestampUrl /td sha256 /fd sha256 dist/Forma/forma.exe
+          signtool sign /f cert.pfx /p $env:SIGNING_CERT_PASSWORD /tr $timestampUrl /td sha256 /fd sha256 dist/Forma/forma-cli.exe
+          # Re-package with signed binaries
+          cd dist && 7z a -tzip Forma-windows.zip Forma > /dev/null
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+      - name: Sign artifacts with cosign (keyless)
+        env:
+          COSIGN_EXPERIMENTAL: "true"
+        run: |
+          cosign sign-blob --yes --output-signature dist/forma.exe.sig dist/Forma/forma.exe
+          cosign sign-blob --yes --output-signature dist/forma-cli.exe.sig dist/Forma/forma-cli.exe
+          cosign sign-blob --yes --output-signature dist/Forma-windows.zip.sig dist/Forma-windows.zip
+          cosign sign-blob --yes --output-signature dist/sbom.json.sig dist/sbom.json
+          cosign sign-blob --yes --output-signature dist/sbom.xml.sig dist/sbom.xml
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
@@ -64,11 +98,30 @@ jobs:
           files: |
             dist/Forma-windows.zip
             dist/Forma/forma.exe
+            dist/Forma/forma-cli.exe
+            dist/sbom.json
+            dist/sbom.xml
+            dist/forma.exe.sig
+            dist/forma-cli.exe.sig
+            dist/Forma-windows.zip.sig
+            dist/sbom.json.sig
+            dist/sbom.xml.sig
           body: |
             **Download `Forma-windows.zip`**, extract it and double-click `forma.exe`.
             Open a `.3dm` with Ctrl+O or drag it onto the window.
 
-            Windows may show "Windows protected your PC" because the app is not signed:
-            click **More info → Run anyway**.
+            ${{ env.SIGNING_CERT_PFX != '' && '✅ Windows executables are code-signed with EV certificate (no SmartScreen warning).' || '⚠️ Windows executables are NOT code-signed. Windows may show "Windows protected your PC" — click **More info → Run anyway**.' }}
+
+            **Supply chain verification (cosign keyless signatures):**
+            - `forma.exe.sig` — signature for `forma.exe`
+            - `forma-cli.exe.sig` — signature for `forma-cli.exe`
+            - `Forma-windows.zip.sig` — signature for the zip package
+            - `sbom.json.sig` / `sbom.xml.sig` — signatures for SBOMs
+            
+            Verify with: `cosign verify-blob --signature <file>.sig <file>`
+
+            **SBOM (Software Bill of Materials):**
+            - `sbom.json` (CycloneDX JSON)
+            - `sbom.xml` (CycloneDX XML)
 
             Built from ${{ github.sha }}.

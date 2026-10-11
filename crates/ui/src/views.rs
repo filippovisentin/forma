@@ -156,12 +156,13 @@ impl FormaApp {
         self.ui_title_menu(ui);
         // Viewport tabs under the views.
         let tabs = Rect::from_min_max(egui::pos2(outer.min.x, full.max.y), outer.max);
+        let colors = theme::ThemeColors::for_mode(theme::current_mode(ui.ctx()));
         let mut child = ui.new_child(
             egui::UiBuilder::new()
                 .max_rect(tabs.shrink2(egui::vec2(4.0, 2.0)))
                 .layout(egui::Layout::left_to_right(egui::Align::Center)),
         );
-        child.painter().rect_filled(tabs, 0.0, theme::STRIP);
+        child.painter().rect_filled(tabs, 0.0, colors.strip);
         for i in [1usize, 0, 2, 3] {
             let name = self.viewports[i].name();
             let selected = self.active == i;

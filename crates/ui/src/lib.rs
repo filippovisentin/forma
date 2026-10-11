@@ -37,6 +37,9 @@ mod tools;
 mod viewport;
 mod views;
 
+// Re-export theme types for use across the crate
+pub use theme::{ThemeColors, ThemeMode};
+
 use eframe::egui::{self, Pos2};
 use forma_doc::ObjectId;
 use forma_engine::Engine;

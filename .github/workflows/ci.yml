@@ -18,6 +18,13 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-audit and cargo-deny
+        run: |
+          cargo install cargo-audit cargo-deny --locked
+      - name: Security audit (cargo-audit)
+        run: cargo audit --deny warnings
+      - name: License and dependency check (cargo-deny)
+        run: cargo deny check advisories bans licenses sources
       - name: cargo xtask ci
         shell: bash
         run: |
@@ -57,6 +64,13 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: occt
+      - name: Install cargo-audit and cargo-deny
+        run: |
+          cargo install cargo-audit cargo-deny --locked
+      - name: Security audit (cargo-audit)
+        run: cargo audit --deny warnings
+      - name: License and dependency check (cargo-deny)
+        run: cargo deny check advisories bans licenses sources
       - name: Build OCCT and the kernel shim
         shell: bash
         run: |

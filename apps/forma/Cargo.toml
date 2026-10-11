@@ -8,7 +8,14 @@ license.workspace = true
 # Solid kernel (BooleanUnion, FilletEdge, Shell…). Release builds turn it on; see
 # docs/adr/0004-occt-crates.md for build times and FORMA_OCCT_DIR.
 occt = ["forma-geom/occt"]
+# Embed SBOM in binary (cargo-auditable)
+auditable = ["cargo-auditable"]
 
 [dependencies]
 forma-ui.workspace = true
 forma-geom.workspace = true
+cargo-auditable = { workspace = true, optional = true }
+
+[profile.release]
+# Enable cargo-auditable to embed SBOM in release builds
+debug = false
