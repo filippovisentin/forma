@@ -80,6 +80,33 @@ impl FormaApp {
             }
             return;
         }
+        if first == "new" && line.split_whitespace().count() == 1 {
+            // Bare New (Ctrl+N, toolbar, typed): ask for the units.
+            self.new_model = Some(self.new_dialog(false));
+            return;
+        }
+        if first == "agentconnection" {
+            let ctx = self.egui_ctx.clone();
+            self.agent_command(&ctx, line);
+            return;
+        }
+        if first == "interface" {
+            let arg = line.split_whitespace().nth(1);
+            match arg.and_then(crate::theme::Look::parse) {
+                Some(look) => {
+                    self.pending_look = Some(look);
+                    self.log(LogKind::Normal, format!("interface: {}", look.name()));
+                }
+                None => self.log(
+                    LogKind::Error,
+                    format!(
+                        "Interface Classic|Graphite (now {})",
+                        crate::theme::look().name()
+                    ),
+                ),
+            }
+            return;
+        }
         if first == "namedview" {
             self.named_view(line);
             return;
@@ -127,6 +154,7 @@ impl FormaApp {
                 if saved || first == "open" || first == "new" {
                     self.saved_at = std::time::Instant::now();
                     self.saved_version = self.engine.doc().version();
+                    self.autosave_discard();
                     if let Some(p) = self.engine.doc().path.clone().filter(|_| first != "new") {
                         self.remember_file(&p);
                     }

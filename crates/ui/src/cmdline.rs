@@ -4,7 +4,7 @@
 use crate::complete::Entry;
 use crate::tools::OptAction;
 use crate::{theme, FormaApp, LogKind, CMD_ID};
-use eframe::egui::{self, Color32, RichText, Stroke};
+use eframe::egui::{self, RichText, Stroke};
 
 /// Rows shown by the autocomplete list.
 const AC_ROWS: usize = 12;
@@ -51,30 +51,32 @@ impl FormaApp {
         ui.set_min_height(ui.available_height());
         let log_height = (ui.available_height() - 28.0).max(16.0);
         let frame = egui::Frame::NONE
-            .fill(Color32::WHITE)
-            .stroke(Stroke::new(1.0, theme::BORDER))
+            .fill(theme::input())
+            .stroke(Stroke::new(1.0, theme::border()))
             .inner_margin(egui::Margin::symmetric(6, 2));
         // New output always shows, even after scrolling back (Rhino).
         let grew = self.log_count != self.log_seen;
         self.log_seen = self.log_count;
         frame.show(ui, |ui| {
-            let mut area = egui::ScrollArea::vertical()
+            let area = egui::ScrollArea::vertical()
                 .max_height(log_height)
                 .min_scrolled_height(log_height)
                 .stick_to_bottom(true)
                 .auto_shrink([false, false]);
-            if grew {
-                area = area.vertical_scroll_offset(f32::MAX);
-            }
             area.show(ui, |ui| {
                 ui.spacing_mut().item_spacing.y = 0.0;
                 for (kind, line) in &self.log {
                     let t = RichText::new(line).monospace().size(12.5);
                     match kind {
                         LogKind::Normal => ui.label(t),
-                        LogKind::Command => ui.label(t.color(theme::WEAK)),
-                        LogKind::Error => ui.label(t.color(Color32::from_rgb(190, 30, 30))),
+                        LogKind::Command => ui.label(t.color(theme::weak())),
+                        LogKind::Error => ui.label(t.color(theme::error())),
                     };
+                }
+                if grew {
+                    // Scroll to the last line (an offset of f32::MAX overshot and
+                    // left the history blank).
+                    ui.scroll_to_cursor(Some(egui::Align::BOTTOM));
                 }
             });
         });
@@ -88,18 +90,34 @@ impl FormaApp {
                 ui.label(mono(&format!("{prompt}:")));
             } else {
                 // Rhino: `Next point ( Close Undo ):` — each option is a link.
-                ui.label(mono(&format!("{prompt} (")));
+                // Graphite shows the options as chips instead.
+                let chips = theme::look() == theme::Look::Graphite;
+                ui.label(mono(&if chips {
+                    format!("{prompt}:")
+                } else {
+                    format!("{prompt} (")
+                }));
                 for (label, a) in &options {
-                    let link = egui::Link::new(mono(label).color(theme::ACCENT));
                     let tip = match a {
                         OptAction::Word(w) => format!("{w} (or type {})", &w[..1]),
                         OptAction::Value(n) => format!("Click, or type {n}=value"),
                     };
-                    if ui.add(link).on_hover_text(tip).clicked() {
+                    let r = if chips {
+                        ui.add(
+                            egui::Button::new(mono(label).size(12.0))
+                                .corner_radius(egui::CornerRadius::same(4))
+                                .stroke(Stroke::new(1.0, theme::border())),
+                        )
+                    } else {
+                        ui.add(egui::Link::new(mono(label).color(theme::accent())))
+                    };
+                    if r.on_hover_text(tip).clicked() {
                         clicked = Some(*a);
                     }
                 }
-                ui.label(mono("):"));
+                if !chips {
+                    ui.label(mono("):"));
+                }
             }
             let id = egui::Id::new(CMD_ID);
             let hint = self
@@ -109,7 +127,7 @@ impl FormaApp {
                 .map(|last| {
                     let short: String = last.chars().take(40).collect();
                     RichText::new(format!("Enter or right click: repeat {short}"))
-                        .color(Color32::from_gray(160))
+                        .color(theme::weak())
                 });
             let mut edit = egui::TextEdit::singleline(&mut self.command)
                 .id(id)
@@ -182,9 +200,9 @@ impl FormaApp {
                             ui.allocate_exact_size(egui::vec2(380.0, 20.0), egui::Sense::click());
                         if chosen || resp.hovered() {
                             let fill = if chosen {
-                                theme::ACCENT_BG
+                                theme::accent_bg()
                             } else {
-                                Color32::from_rgb(235, 243, 251)
+                                theme::hover()
                             };
                             ui.painter().rect_filled(rect, 2.0, fill);
                         }
@@ -194,7 +212,7 @@ impl FormaApp {
                             egui::Align2::LEFT_CENTER,
                             name,
                             egui::FontId::proportional(13.0),
-                            theme::TEXT,
+                            theme::text(),
                         );
                         let help: String = help.chars().take(48).collect();
                         p.text(
@@ -202,7 +220,7 @@ impl FormaApp {
                             egui::Align2::LEFT_CENTER,
                             help,
                             egui::FontId::proportional(11.5),
-                            theme::WEAK,
+                            theme::weak(),
                         );
                         if resp.clicked() {
                             run = Some(name.clone());
@@ -212,7 +230,7 @@ impl FormaApp {
                     ui.label(
                         RichText::new("↑↓ choose · Enter / Tab / Space accept · Esc clear")
                             .small()
-                            .color(theme::WEAK),
+                            .color(theme::weak()),
                     );
                 });
             });

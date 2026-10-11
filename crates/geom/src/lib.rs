@@ -36,8 +36,9 @@ pub use curvetools::{
 };
 pub use faces::MeshFace;
 pub use kernel::{
-    fillet_edges, offset_solid, rebuild_solid, shell_solid, solid_boolean, solid_info, BooleanOp,
-    KernelError, SolidInfo, SolidOptions, KERNEL_AVAILABLE,
+    exact_boolean, exact_fillet, exact_offset, exact_shell, exact_volume, fillet_edges,
+    offset_solid, rebuild_solid, shell_solid, solid_boolean, solid_info, BooleanOp, KernelError,
+    NeutralBrep, SolidInfo, SolidOptions, KERNEL_AVAILABLE,
 };
 pub use make2d::{make2d, outline_edges, Drawing, View2D};
 pub use meshtools::{
@@ -337,6 +338,20 @@ impl Mesh {
         out
     }
 
+    /// Drop triangles that refer to missing vertices, and per-vertex normals that do
+    /// not match the vertices. Meshes read from files go through this, so a damaged
+    /// file cannot make later indexing panic. Returns how many triangles were dropped.
+    pub fn drop_invalid_triangles(&mut self) -> usize {
+        let n = self.positions.len();
+        let before = self.triangles.len();
+        self.triangles
+            .retain(|t| t.iter().all(|&i| (i as usize) < n));
+        if !self.normals.is_empty() && self.normals.len() != n {
+            self.normals.clear();
+        }
+        before - self.triangles.len()
+    }
+
     /// Append another mesh, re-indexing its triangles.
     pub fn append(&mut self, other: &Mesh) {
         let base = self.positions.len() as u32;
@@ -403,6 +418,23 @@ impl Mesh {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn invalid_triangles_are_dropped() {
+        let mut m = Mesh {
+            positions: vec![
+                Point3::ORIGIN,
+                Point3::new(1.0, 0.0, 0.0),
+                Point3::new(0.0, 1.0, 0.0),
+            ],
+            normals: vec![Vec3::new(0.0, 0.0, 1.0)],
+            triangles: vec![[0, 1, 2], [0, 1, 3], [u32::MAX, 0, 1]],
+        };
+        assert_eq!(m.drop_invalid_triangles(), 2);
+        assert_eq!(m.triangles, vec![[0, 1, 2]]);
+        assert!(m.normals.is_empty());
+        assert!(m.triangle_normal(0).is_some());
+    }
 
     #[test]
     fn line_length_and_midpoint() {

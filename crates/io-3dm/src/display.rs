@@ -234,14 +234,20 @@ unsafe fn mesh_object(m: *mut ffi::Model, obj: c_int) -> Option<Mesh> {
     if ffi::f3dm_mesh_data(m, obj, &mut nv, &mut nt) == 0 || nv == 0 || nt == 0 {
         return None;
     }
-    let mut v = vec![0.0; nv as usize * 3];
-    let mut t = vec![0u32; nt as usize * 3];
+    let (Ok(nv), Ok(nt)) = (usize::try_from(nv), usize::try_from(nt)) else {
+        return None;
+    };
+    let mut v = vec![0.0; nv * 3];
+    let mut t = vec![0u32; nt * 3];
     ffi::f3dm_mesh_copy(m, v.as_mut_ptr(), t.as_mut_ptr());
-    Some(Mesh {
+    let mut mesh = Mesh {
         positions: v.chunks(3).map(|c| Point3::new(c[0], c[1], c[2])).collect(),
         normals: Vec::new(),
         triangles: t.chunks(3).map(|c| [c[0], c[1], c[2]]).collect(),
-    })
+    };
+    // Faces of a damaged file may point past the vertex list.
+    mesh.drop_invalid_triangles();
+    (!mesh.triangles.is_empty()).then_some(mesh)
 }
 
 /// A [`Brep`](forma_geom::Brep) for brep object `obj` of the model: display

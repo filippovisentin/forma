@@ -9,7 +9,9 @@
 //! gumball, labels), `views` (viewport layout and title menus), `cmdline`
 //! (history, prompt, autocomplete), `menus`, `toolbar`, `panels`, `status`.
 
+mod agent_link;
 mod app;
+mod autosave;
 mod capture;
 mod cmdline;
 mod commands;
@@ -30,6 +32,7 @@ mod perf;
 mod pick;
 mod settings;
 mod snap;
+mod start;
 mod status;
 mod theme;
 mod toolbar;
@@ -52,6 +55,7 @@ use viewport::Viewport;
 
 /// Start the desktop app, optionally opening a file.
 pub fn run(open: Option<String>) -> eframe::Result {
+    autosave::install_crash_log();
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("Forma")
@@ -68,6 +72,7 @@ pub fn run(open: Option<String>) -> eframe::Result {
         Box::new(move |cc| {
             let mut app = FormaApp::new(cc);
             if let Some(path) = open {
+                app.new_model = None; // a file was given: no "New model" dialog
                 app.run_engine(&format!("Open {path}"));
             }
             Ok(Box::new(app))
@@ -304,6 +309,8 @@ struct FormaApp {
     /// Closing was confirmed.
     allow_close: bool,
     pending_fit: bool,
+    /// A different interface look was chosen: applied at the start of the next frame.
+    pending_look: Option<theme::Look>,
     gumball_on: bool,
     gumball_hot: Option<(usize, gumball::Handle)>,
     gumball_drag: Option<GumballDrag>,
@@ -361,6 +368,16 @@ struct FormaApp {
     /// Persistent user settings, and when they were last compared / written.
     settings: Settings,
     settings_checked: std::time::Instant,
+    /// What the settings file holds (written when the settings differ from it).
+    settings_on_disk: Settings,
+    /// Periodic copy of unsaved changes, and recovery after a crash.
+    autosave: autosave::Autosave,
+    /// AI assistants' connection to this window (Tools ▸ Agent Connection), when on.
+    agent: Option<agent_link::AgentLink>,
+    /// For work that needs the context outside the frame callbacks.
+    egui_ctx: egui::Context,
+    /// The "New model" (units) dialog, when open.
+    new_model: Option<start::NewDialog>,
     /// Panel sizes (points), remembered between runs.
     side_width: f32,
     command_height: f32,

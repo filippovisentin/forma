@@ -139,7 +139,7 @@ impl FormaApp {
         }
         self.render_viewports(frame, ui.ctx().pixels_per_point());
         let painter = ui.painter();
-        painter.rect_filled(outer, 0.0, Color32::from_gray(150));
+        painter.rect_filled(outer, 0.0, theme::gap());
         for (i, r) in &rects {
             if let Some(id) = self.viewports[*i].texture {
                 painter.image(
@@ -161,7 +161,7 @@ impl FormaApp {
                 .max_rect(tabs.shrink2(egui::vec2(4.0, 2.0)))
                 .layout(egui::Layout::left_to_right(egui::Align::Center)),
         );
-        child.painter().rect_filled(tabs, 0.0, theme::STRIP);
+        child.painter().rect_filled(tabs, 0.0, theme::strip());
         for i in [1usize, 0, 2, 3] {
             let name = self.viewports[i].name();
             let selected = self.active == i;

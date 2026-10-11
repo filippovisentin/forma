@@ -28,6 +28,7 @@ macro_rules! impl_meta {
     };
 }
 
+pub mod agent;
 mod analysis;
 mod annotate;
 mod args;
@@ -288,6 +289,12 @@ impl Engine {
     }
 }
 
+/// Write a copy of `doc` as a Rhino file without changing the open document (its
+/// path, undo history and "modified" state stay as they are). Used for autosave.
+pub fn write_copy(doc: &Document, path: &std::path::Path) -> Result<(), CommandError> {
+    forma_io_3dm::write_document(path, doc).map_err(|e| CommandError::Invalid(e.to_string()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -299,7 +306,7 @@ mod tests {
         assert_eq!(e.missing_input("select"), Some("object ids"));
         assert_eq!(e.missing_input("SelAll"), None);
         assert_eq!(e.missing_input("Delete"), None);
-        assert_eq!(e.optional_args("New"), Some("[cm|mm|m]"));
+        assert_eq!(e.optional_args("New"), Some("[cm|mm|m|in|ft]"));
         assert_eq!(e.optional_args("Delete"), None);
         assert_eq!(e.optional_args("SelAll"), None);
     }
@@ -310,6 +317,21 @@ mod tests {
         assert_eq!(e.resolve("line"), Some("Line"));
         assert_eq!(e.resolve("SELALL"), Some("SelAll"));
         assert_eq!(e.resolve("nosuchcommand"), None);
+    }
+
+    #[test]
+    fn write_copy_leaves_the_document_alone() {
+        let mut e = Engine::new();
+        e.run_line("Line 0,0,0 100,0,0").unwrap();
+        let version = e.doc().version();
+        let path = std::env::temp_dir().join(format!("forma-copy-{}.3dm", std::process::id()));
+        write_copy(&e.doc().snapshot(), &path).unwrap();
+        assert_eq!(e.doc().path, None);
+        assert_eq!(e.doc().version(), version);
+        let mut back = Engine::new();
+        back.run_line(&format!("Open {}", path.display())).unwrap();
+        assert_eq!(back.doc().len(), 1);
+        let _ = std::fs::remove_file(path);
     }
 
     #[test]

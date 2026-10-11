@@ -78,8 +78,11 @@ impl Command for MeshCmd {
         for id in ids {
             let o = t.doc().object(id).expect("selected").clone();
             if let Geometry::Brep(b) = &o.geometry {
-                // Faces share their vertices, so the mesh is closed for solids.
-                made.push(t.add_like(Geometry::Mesh(b.mesh.welded(tol)), &o));
+                // Smooth across faces that meet at less than 30°, split (visible
+                // edges, flat shading) at sharper ones, like Rhino's render mesh.
+                // Closed solids stay closed: closedness is checked after welding.
+                let m = b.mesh.split_by_angle(30f64.to_radians(), tol);
+                made.push(t.add_like(Geometry::Mesh(m), &o));
             }
         }
         if made.is_empty() {
@@ -200,6 +203,17 @@ mod tests {
         };
         assert!(m.is_closed(1e-9));
         assert!((m.volume() - 6000.0).abs() < 1e-6);
+        // The box edges stay visible: DupEdge finds them, Explode gives the faces.
+        e.run_line("SelLast").unwrap();
+        e.run_line("DupEdge").unwrap();
+        e.run_line("Undo").unwrap();
+        e.run_line("SelNone").unwrap();
+        e.run_line("Select #2").unwrap();
+        e.run_line("Explode").unwrap();
+        assert_eq!(e.doc().len(), 7, "box + 6 mesh faces");
+        e.run_line("Undo").unwrap();
+        e.run_line("SelNone").unwrap();
+        e.run_line("Select #2").unwrap();
         e.run_line("MeshToNURB").unwrap();
         let Geometry::Brep(b) = last(&e) else {
             panic!()

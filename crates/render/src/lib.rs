@@ -8,6 +8,7 @@ mod scene;
 
 pub use camera::{Camera, StandardView};
 pub use glam;
+pub use scene::{dark_viewports, set_dark_viewports};
 pub use scene::{
     grid_lines, grid_lines_on_plane, grid_spacing, model_center, GridBounds, GridPlane, LineVertex,
     MeshVertex, Scene, SceneCache, SceneUpdate, EDGE_COLOR, HIGHLIGHT,
@@ -29,6 +30,14 @@ const BACKGROUND: wgpu::Color = wgpu::Color {
     r: 0.352,
     g: 0.352,
     b: 0.352,
+    a: 1.0,
+};
+
+/// Viewport background of the dark (Graphite) look, linear RGB.
+const BACKGROUND_DARK: wgpu::Color = wgpu::Color {
+    r: 0.0185,
+    g: 0.0197,
+    b: 0.0232,
     a: 1.0,
 };
 
@@ -519,7 +528,11 @@ impl Renderer {
                     depth_slice: None,
                     resolve_target: Some(&targets.output_view),
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(BACKGROUND),
+                        load: wgpu::LoadOp::Clear(if scene::dark_viewports() {
+                            BACKGROUND_DARK
+                        } else {
+                            BACKGROUND
+                        }),
                         store: wgpu::StoreOp::Discard,
                     },
                 })],

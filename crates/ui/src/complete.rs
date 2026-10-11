@@ -9,7 +9,15 @@ pub struct Entry {
 }
 
 /// Commands that only exist in the UI (views, display modes, toggles).
-pub const UI_COMMANDS: [(&str, &str); 29] = [
+pub const UI_COMMANDS: [(&str, &str); 31] = [
+    (
+        "AgentConnection",
+        "Let AI assistants edit this model through `forma-cli mcp --live`: AgentConnection On|Off",
+    ),
+    (
+        "Interface",
+        "Look of the window: Interface Classic (original, light) or Graphite (dark)",
+    ),
     (
         "ClippingPlane",
         "Section cut in every view: ClippingPlane <point> <up|down|north…>, Off",

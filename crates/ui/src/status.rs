@@ -15,10 +15,42 @@ impl FormaApp {
             ui.spacing_mut().item_spacing.x = 10.0;
             ui.spacing_mut().icon_spacing = 3.0;
             let disabled = self.snap.disabled;
-            for k in SnapKind::ALL {
-                ui.add_enabled_ui(!disabled, |ui| {
-                    ui.checkbox(self.snap.flag(k), egui::RichText::new(k.label()).size(12.5));
-                });
+            if crate::theme::look() == crate::theme::Look::Graphite {
+                // Graphite: snaps as toggle pills.
+                ui.spacing_mut().item_spacing.x = 4.0;
+                for k in SnapKind::ALL {
+                    ui.add_enabled_ui(!disabled, |ui| {
+                        let on = *self.snap.flag(k);
+                        let text = egui::RichText::new(k.label()).size(12.0);
+                        use crate::theme;
+                        let b = egui::Button::new(if on {
+                            text.strong().color(theme::text())
+                        } else {
+                            text.color(theme::weak())
+                        })
+                        .fill(if on {
+                            theme::accent_bg()
+                        } else {
+                            egui::Color32::TRANSPARENT
+                        })
+                        .stroke(egui::Stroke::new(
+                            1.0,
+                            if on { theme::accent() } else { theme::border() },
+                        ))
+                        .corner_radius(egui::CornerRadius::same(10))
+                        .min_size(egui::vec2(38.0, 20.0));
+                        if ui.add(b).clicked() {
+                            *self.snap.flag(k) = !on;
+                        }
+                    });
+                }
+                ui.spacing_mut().item_spacing.x = 10.0;
+            } else {
+                for k in SnapKind::ALL {
+                    ui.add_enabled_ui(!disabled, |ui| {
+                        ui.checkbox(self.snap.flag(k), egui::RichText::new(k.label()).size(12.5));
+                    });
+                }
             }
             ui.add_enabled_ui(!disabled, |ui| {
                 ui.checkbox(
@@ -72,7 +104,7 @@ impl FormaApp {
             ui.painter()
                 .rect_filled(sw, 1.0, Color32::from_rgb(r, g, b));
             ui.painter()
-                .rect_stroke(sw, 1.0, Stroke::new(1.0, theme::WEAK), StrokeKind::Inside);
+                .rect_stroke(sw, 1.0, Stroke::new(1.0, theme::weak()), StrokeKind::Inside);
             let mut pick: Option<String> = None;
             egui::ComboBox::from_id_salt("status-layer")
                 .selected_text(egui::RichText::new(cur.name.clone()).size(12.5))
@@ -92,9 +124,9 @@ impl FormaApp {
             let pane = |ui: &mut egui::Ui, on: &mut bool, label: &str, tip: &str| {
                 let text = egui::RichText::new(label).size(12.5);
                 let text = if *on {
-                    text.strong().color(Color32::BLACK)
+                    text.strong().color(theme::text())
                 } else {
-                    text.color(theme::WEAK)
+                    text.color(theme::weak())
                 };
                 if ui
                     .add(egui::Button::new(text).frame(false))
@@ -148,7 +180,7 @@ impl FormaApp {
             ui.label(
                 egui::RichText::new(format!("Minutes from last save: {mins}"))
                     .size(12.5)
-                    .color(theme::WEAK),
+                    .color(theme::weak()),
             );
             ui.separator();
             let doc = self.engine.doc();
@@ -159,7 +191,7 @@ impl FormaApp {
                     self.engine.ctx.selection.len()
                 ))
                 .size(12.5)
-                .color(theme::WEAK),
+                .color(theme::weak()),
             );
         });
     }

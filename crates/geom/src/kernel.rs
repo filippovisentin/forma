@@ -162,6 +162,100 @@ pub fn offset_solid(solid: &Mesh, distance: f64, opts: SolidOptions) -> Result<M
     }
 }
 
+/// Exact solids for the kernel: openNURBS breps written by `forma-io-3dm` as neutral
+/// streams of numbers (vertices, edges with NURBS curves, faces with NURBS surfaces
+/// and trim loops). The `exact_*` operations take and return such streams, so curved
+/// solids stay exact instead of going through triangles (spike S3).
+pub type NeutralBrep = Vec<f64>;
+
+/// Boolean between two groups of exact solids; one stream per resulting solid.
+pub fn exact_boolean(
+    op: BooleanOp,
+    a: &[&[f64]],
+    b: &[&[f64]],
+    tolerance: f64,
+) -> Result<Vec<NeutralBrep>, KernelError> {
+    #[cfg(feature = "occt")]
+    {
+        occt::exact_boolean(op, a, b, tolerance)
+    }
+    #[cfg(not(feature = "occt"))]
+    {
+        let _ = (op, a, b, tolerance);
+        Err(KernelError::Unavailable)
+    }
+}
+
+/// Fillet (or chamfer) the edges of an exact solid nearest to the points; a pick
+/// further than `pick_distance` from every edge is an error.
+pub fn exact_fillet(
+    solid: &[f64],
+    radius: f64,
+    near: &[Point3],
+    chamfer: bool,
+    tolerance: f64,
+    pick_distance: f64,
+) -> Result<Vec<NeutralBrep>, KernelError> {
+    #[cfg(feature = "occt")]
+    {
+        occt::exact_fillet(solid, radius, near, chamfer, tolerance, pick_distance)
+    }
+    #[cfg(not(feature = "occt"))]
+    {
+        let _ = (solid, radius, near, chamfer, tolerance, pick_distance);
+        Err(KernelError::Unavailable)
+    }
+}
+
+/// Hollow an exact solid, removing the faces nearest to the points.
+pub fn exact_shell(
+    solid: &[f64],
+    thickness: f64,
+    remove_near: &[Point3],
+    tolerance: f64,
+    pick_distance: f64,
+) -> Result<Vec<NeutralBrep>, KernelError> {
+    #[cfg(feature = "occt")]
+    {
+        occt::exact_shell(solid, thickness, remove_near, tolerance, pick_distance)
+    }
+    #[cfg(not(feature = "occt"))]
+    {
+        let _ = (solid, thickness, remove_near, tolerance, pick_distance);
+        Err(KernelError::Unavailable)
+    }
+}
+
+/// Offset every face of an exact solid (positive grows it).
+pub fn exact_offset(
+    solid: &[f64],
+    distance: f64,
+    tolerance: f64,
+) -> Result<Vec<NeutralBrep>, KernelError> {
+    #[cfg(feature = "occt")]
+    {
+        occt::exact_offset(solid, distance, tolerance)
+    }
+    #[cfg(not(feature = "occt"))]
+    {
+        let _ = (solid, distance, tolerance);
+        Err(KernelError::Unavailable)
+    }
+}
+
+/// Volume of an exact solid as the kernel sees it (for tests and checks).
+pub fn exact_volume(solid: &[f64], tolerance: f64) -> Result<f64, KernelError> {
+    #[cfg(feature = "occt")]
+    {
+        occt::exact_volume(solid, tolerance)
+    }
+    #[cfg(not(feature = "occt"))]
+    {
+        let _ = (solid, tolerance);
+        Err(KernelError::Unavailable)
+    }
+}
+
 /// Facts about the exact solid a closed mesh becomes.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SolidInfo {

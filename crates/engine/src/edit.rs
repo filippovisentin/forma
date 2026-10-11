@@ -272,15 +272,17 @@ simple_command!(
     New,
     "New",
     &[],
-    "New [cm|mm|m] — start an empty document (centimetres by default)"
+    "New [cm|mm|m|in|ft] — start an empty document (centimetres by default)"
 );
 impl Command for New {
     impl_meta!(New);
     fn run(&self, ctx: &mut Context, args: &mut Args) -> CommandResult {
         let units = match args.next_token().map(str::to_lowercase).as_deref() {
-            Some("mm") => LengthUnit::Millimeters,
-            None | Some("cm") => LengthUnit::Centimeters,
-            Some("m") => LengthUnit::Meters,
+            Some("mm" | "millimeters" | "millimetres") => LengthUnit::Millimeters,
+            None | Some("cm" | "centimeters" | "centimetres") => LengthUnit::Centimeters,
+            Some("m" | "meters" | "metres") => LengthUnit::Meters,
+            Some("in" | "inches") => LengthUnit::Inches,
+            Some("ft" | "feet") => LengthUnit::Feet,
             Some(u) => return Err(CommandError::BadInput(format!("unknown unit {u}"))),
         };
         let mut doc = Document::new();
@@ -289,7 +291,8 @@ impl Command for New {
         doc.absolute_tolerance = match units {
             LengthUnit::Millimeters => 0.001,
             LengthUnit::Centimeters => 0.01,
-            _ => 0.0001,
+            LengthUnit::Meters => 0.0001,
+            LengthUnit::Inches | LengthUnit::Feet => 0.001,
         };
         ctx.doc = doc;
         ctx.selection.clear();
@@ -425,6 +428,27 @@ impl Command for IncrementalSave {
 #[cfg(test)]
 mod tests {
     use crate::Engine;
+
+    #[test]
+    fn new_in_every_unit() {
+        let mut e = Engine::new();
+        for (arg, abbr, tol) in [
+            ("mm", "mm", 0.001),
+            ("Centimetres", "cm", 0.01),
+            ("m", "m", 0.0001),
+            ("in", "in", 0.001),
+            ("feet", "ft", 0.001),
+        ] {
+            e.run_line("Line 0,0 1,0").unwrap();
+            e.run_line(&format!("New {arg}")).unwrap();
+            assert_eq!(e.doc().units.abbreviation(), abbr);
+            assert!((e.doc().absolute_tolerance - tol).abs() < 1e-12);
+            assert!(e.doc().is_empty());
+        }
+        e.run_line("New").unwrap();
+        assert_eq!(e.doc().units.abbreviation(), "cm");
+        assert!(e.run_line("New lightyears").is_err());
+    }
 
     #[test]
     fn units_change_scales_the_model() {

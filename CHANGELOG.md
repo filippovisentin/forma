@@ -7,6 +7,67 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.1.0] — 2026-10-11
+
+### Added
+- **Autosave and crash recovery.** While a model has unsaved changes, a copy is
+  written every 2 minutes to `autosave.3dm` in the settings folder (in the
+  background, the open model is not touched). After a crash or power cut the app
+  offers to recover it at the next start; Save, Open, New and a normal exit delete it.
+- **Two interface looks**: View ▸ Interface ▸ Classic (the original light look) or
+  Graphite (new, dark chrome with a gold accent), or type `Interface Classic` /
+  `Interface Graphite`. The choice is kept between runs. Viewports keep their grey
+  background in both looks.
+- Crashes are written to `crash.log` in the settings folder (the Windows app has no
+  console), so they can be reported.
+
+- **New model dialog**: at start-up (and for File ▸ New, Ctrl+N or a bare `New`)
+  Forma asks for the units of the new model: millimetres, centimetres, metres,
+  inches or feet. The last choice is preselected; "Ask at every start" can be turned
+  off. `New` accepts `in` and `ft` too.
+
+- **AI assistants can work in Forma** (MCP server, [docs/AGENTS.md](docs/AGENTS.md)):
+  `forma-cli mcp` gives Claude Desktop, Claude Code and other MCP clients four tools:
+  run command lines, inspect the model, look up commands, render a view. With
+  `--live` they edit the model open in the app after Tools ▸ Agent Connection
+  (off by default, this computer only, protected by a random key); without it they
+  work on `.3dm` files, optionally limited to one folder (`--root`).
+
+- **Exact booleans and fillets on curved solids** (roadmap spike S3): `BooleanUnion`,
+  `BooleanDifference`, `BooleanIntersection`, `BooleanSplit`, `FilletEdge` and
+  `ChamferEdge` on polysurfaces now work on the exact NURBS faces and give exact
+  polysurfaces back: a round hole through a box or a wall, a box minus a sphere,
+  crossing cylinders, rolling-ball fillets on box edges and cylinder rims. They save to
+  `.3dm` as real Rhino polysurfaces. `Shell` and `OffsetSrf` stay exact as well (a
+  hollowed cylinder, a grown sphere): the kernel recognises planes, cylinders, cones,
+  spheres and tori in the NURBS faces. Meshes still go through triangles as before.
+
+- The Graphite look now has dark viewports too: dark background and grid, light edges,
+  and black or near-black objects (and their text and points) drawn light grey, like
+  Rhino's dark mode. Classic keeps the grey viewports.
+- Graphite layout (Classic stays as it was): the file name with a dot when it has
+  unsaved changes, the save state ("Autosaved 2 min ago") and the units at the right
+  of the menu bar; command options as clickable chips; object snaps as toggle pills;
+  tool previews and the cursor drawn light on the dark viewports.
+
+### Fixed
+- The command history no longer goes blank after a few commands (it scrolled past its
+  last line).
+- `FilletEdge` / `ChamferEdge` no longer pick the seam of a cylinder or sphere (it cannot
+  be filleted) when a pick point is near both the seam and a real edge.
+- `Mesh` keeps the sharp edges of the polysurface (split at more than 30°, smooth
+  across gentler bends): `DupEdge` finds the edges of a meshed box and `Explode`
+  gives its faces (it used to weld everything into one smooth piece).
+- `Cap` no longer "closes" a flat mesh (a disc, one face of a box) by doubling it
+  into a zero-volume solid; flat meshes have nothing to cap.
+- Recent files and other settings changed by the app are written to the settings
+  file (they were sometimes only kept in memory until another setting changed).
+- Saving never damages the previous file: `.3dm` files are written under a
+  temporary name and swapped in only when complete (a crash or a full disk during
+  Save used to leave a half-written model).
+- A damaged `.3dm` with mesh faces pointing at missing vertices no longer crashes
+  Forma: those faces are skipped on import.
+
 ## [1.0.0] — 2026-10-11
 
 First official release: exact solids and surfaces, tested in the app.

@@ -14,6 +14,27 @@ use forma_render::DisplayMode;
 const INK: Color32 = Color32::from_rgb(20, 20, 24);
 const YELLOW: Color32 = Color32::from_rgb(255, 200, 0);
 
+/// Tool previews and the cursor dot: dark ink, light on dark viewports.
+fn ink() -> Color32 {
+    if forma_render::dark_viewports() {
+        Color32::from_rgb(225, 225, 230)
+    } else {
+        INK
+    }
+}
+
+/// An object colour as drawn over the viewport: on dark viewports (Graphite)
+/// colours too dark to see are drawn light grey, like the rendered geometry.
+fn shown(rgb: [u8; 3]) -> Color32 {
+    let [r, g, b] = rgb;
+    let lum = 0.2126 * f32::from(r) + 0.7152 * f32::from(g) + 0.0722 * f32::from(b);
+    if forma_render::dark_viewports() && lum < 60.0 {
+        Color32::from_rgb(215, 215, 218)
+    } else {
+        Color32::from_rgb(r, g, b)
+    }
+}
+
 /// Look of a text label.
 #[derive(Clone, Copy)]
 enum Label {
@@ -109,8 +130,7 @@ impl FormaApp {
                 let c = if self.engine.ctx.selection.contains(&o.id) {
                     YELLOW
                 } else {
-                    let [r, g, b] = doc.display_color(o);
-                    Color32::from_rgb(r, g, b)
+                    shown(doc.display_color(o))
                 };
                 let r = Rect::from_center_size(sp, egui::vec2(6.0, 6.0));
                 p.rect_filled(r, 0.0, c);
@@ -134,8 +154,7 @@ impl FormaApp {
             let color = if self.engine.ctx.selection.contains(&o.id) {
                 YELLOW
             } else {
-                let [r, g, b] = doc.display_color(o);
-                Color32::from_rgb(r, g, b)
+                shown(doc.display_color(o))
             };
             let Some(sp) = pr.to_screen(l.position) else {
                 continue;
@@ -189,7 +208,7 @@ impl FormaApp {
     /// Tool preview everywhere; cursor, osnap tag, SmartTrack and the live
     /// measurement only in the view under the mouse.
     fn draw_tool(&self, p: &Painter, pr: &Projector, vi: usize, t: &Tool, h: &Hover) {
-        let st = Stroke::new(1.3, INK);
+        let st = Stroke::new(1.3, ink());
         for [a, b] in t.preview(h.point) {
             seg(p, pr, a, b, st);
         }
@@ -239,7 +258,7 @@ impl FormaApp {
             );
         }
         if !t.selecting {
-            p.circle_filled(s, 3.0, INK);
+            p.circle_filled(s, 3.0, ink());
         }
         if let Some(k) = h.snap {
             snap_marker(p, s, Some(k.label()));
@@ -257,7 +276,7 @@ impl FormaApp {
         let here = drag.is_some_and(|d| d.viewport == vi);
         if dist.abs() > 1e-9 {
             let v = f.normal * dist;
-            let st = Stroke::new(1.3, INK);
+            let st = Stroke::new(1.3, ink());
             for [a, b] in &f.outline {
                 seg(p, pr, *a + v, *b + v, st);
                 seg(p, pr, *a, *a + v, st);
@@ -308,7 +327,7 @@ impl FormaApp {
         }
         let Some(m) = d.motion else { return };
         let x: Xform = m.xform(d.center);
-        let st = Stroke::new(1.2, INK);
+        let st = Stroke::new(1.2, ink());
         let extrude = matches!(m, gumball::Motion::Extrude(..));
         // Solids grow from one face: no moved copy of the whole object.
         let push_pull = extrude && !d.faces.is_empty();
@@ -431,6 +450,8 @@ impl FormaApp {
             egui::FontId::proportional(if active { 13.5 } else { 13.0 }),
             if active {
                 Color32::BLACK
+            } else if forma_render::dark_viewports() {
+                Color32::from_gray(200)
             } else {
                 Color32::from_gray(45)
             },
@@ -441,13 +462,17 @@ impl FormaApp {
                 egui::Align2::RIGHT_TOP,
                 vp.mode.name(),
                 egui::FontId::proportional(11.5),
-                Color32::from_gray(55),
+                if forma_render::dark_viewports() {
+                    Color32::from_gray(170)
+                } else {
+                    Color32::from_gray(55)
+                },
             );
         }
         let (w, c) = if active {
-            (2.0, theme::ACCENT)
+            (2.0, theme::accent())
         } else {
-            (1.0, Color32::from_gray(110))
+            (1.0, theme::border())
         };
         p.rect_stroke(vp.rect, 0.0, Stroke::new(w, c), StrokeKind::Inside);
     }

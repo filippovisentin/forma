@@ -495,6 +495,25 @@ impl Document {
         Self::default()
     }
 
+    /// A copy of the model without its undo / redo history (for autosave: much
+    /// lighter than `clone` after a long session).
+    pub fn snapshot(&self) -> Document {
+        Document {
+            units: self.units,
+            absolute_tolerance: self.absolute_tolerance,
+            dim_style: self.dim_style,
+            path: self.path.clone(),
+            objects: self.objects.clone(),
+            layers: self.layers.clone(),
+            current_layer: self.current_layer,
+            next_id: self.next_id,
+            next_rev: self.next_rev,
+            version: self.version,
+            undo: Vec::new(),
+            redo: Vec::new(),
+        }
+    }
+
     /// Changes on every edit, undo and redo; cheap change detection for the UI.
     pub fn version(&self) -> u64 {
         self.version
@@ -1032,6 +1051,21 @@ mod tests {
         assert_eq!(doc.len(), 0);
         assert!(doc.redo());
         assert_eq!(doc.len(), 2);
+    }
+
+    #[test]
+    fn snapshot_keeps_the_model_not_the_history() {
+        let mut doc = Document::new();
+        let mut t = doc.begin();
+        t.add(line());
+        t.commit();
+        doc.path = Some("a.3dm".into());
+        let s = doc.snapshot();
+        assert_eq!(s.len(), 1);
+        assert_eq!(s.version(), doc.version());
+        assert_eq!(s.path.as_deref(), Some("a.3dm"));
+        assert!(!s.can_undo());
+        assert!(doc.can_undo());
     }
 
     #[test]

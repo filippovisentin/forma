@@ -235,6 +235,11 @@ impl Command for Cap {
             let Geometry::Mesh(m) = g else {
                 continue;
             };
+            if mesh_is_flat(m, tol) {
+                // Its border is the outline of the mesh itself, not a hole: a cap
+                // would only double the face (Rhino: nothing to cap).
+                continue;
+            }
             let (capped, n) = cap_planar_holes(m, tol);
             if n > 0 {
                 t.replace(id, Geometry::Mesh(capped));
@@ -249,6 +254,20 @@ impl Command for Cap {
         t.commit();
         Ok(format!("{caps} cap(s) added"))
     }
+}
+
+/// All vertices of the mesh lie on one plane (within `tol`).
+fn mesh_is_flat(m: &forma_geom::Mesh, tol: f64) -> bool {
+    let Some(normal) = (0..m.triangles.len())
+        .filter_map(|t| m.triangle_normal(t))
+        .next()
+    else {
+        return true; // no area at all
+    };
+    let o = m.positions[m.triangles[0][0] as usize];
+    m.positions
+        .iter()
+        .all(|p| (*p - o).dot(normal).abs() <= tol)
 }
 
 /// Selected curves (objects, in id order).
@@ -596,6 +615,36 @@ mod tests {
         );
         assert!((s.bounding_box().unwrap().max.z - 20.0).abs() < 1e-9);
         assert!(e.run_line("ExtrudeSrf 20").is_err()); // closed solids cannot be extruded
+    }
+
+    #[test]
+    fn cap_leaves_flat_meshes_alone() {
+        let mut e = Engine::new();
+        e.run_line("Circle 0,0 10").unwrap();
+        e.run_line("SelLast").unwrap();
+        e.run_line("Extrude 20").unwrap();
+        e.run_line("SelLast").unwrap();
+        e.run_line("Mesh").unwrap();
+        e.run_line("SelLast").unwrap();
+        e.run_line("Explode").unwrap(); // side tube + two discs
+        e.run_line("SelLast").unwrap();
+        e.run_line("Cap").unwrap();
+        // Only the tube's two round holes; the discs stay single flat meshes.
+        let flat_closed = e.doc().objects().filter(|o| {
+            matches!(&o.geometry, Geometry::Mesh(m)
+                if m.is_closed(1e-6) && m.bounding_box().is_some_and(|b| (b.max.z - b.min.z).abs() < 1e-9))
+        });
+        assert_eq!(flat_closed.count(), 0);
+        let mut e = Engine::new();
+        e.run_line("MeshBox 0,0,0 10,10,0 10").unwrap();
+        e.run_line("SelLast").unwrap();
+        e.run_line("Explode").unwrap();
+        e.run_line("SelNone").unwrap();
+        e.run_line("Select #2").unwrap();
+        assert!(
+            e.run_line("Cap").is_err(),
+            "a single flat face has nothing to cap"
+        );
     }
 
     #[test]

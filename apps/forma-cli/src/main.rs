@@ -5,13 +5,14 @@
 //! forma-cli commands
 //! forma-cli info model.3dm
 //! forma-cli render model.3dm out.png [--view perspective|top|front|right] [--size 1600x1000]
+//! forma-cli mcp [--open model.3dm] [--root folder] [--live]
 //! ```
 
 use std::process::ExitCode;
 
 fn usage() -> ExitCode {
     eprintln!(
-        "usage:\n  forma-cli run [--script <text>] [--file <path>] [--dump]\n  forma-cli commands"
+        "usage:\n  forma-cli run [--script <text>] [--file <path>] [--dump]\n  forma-cli commands\n  forma-cli info <model.3dm>\n  forma-cli render <model.3dm> <out.png> [--view perspective|top|front|right] [--size WxH]\n  forma-cli mcp [--open <model.3dm>] [--root <folder>] [--live]   (MCP server for AI agents, stdio)"
     );
     ExitCode::from(2)
 }
@@ -31,6 +32,7 @@ fn main() -> ExitCode {
             None => usage(),
         },
         Some("render") => render(&args[1..]),
+        Some("mcp") => mcp(&args[1..]),
         Some("run") => {
             let mut script = String::new();
             let mut dump = false;
@@ -170,6 +172,43 @@ fn render(args: &[String]) -> ExitCode {
         }
         Err(e) => {
             eprintln!("png: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// MCP server on stdin / stdout (ADR 0007).
+fn mcp(args: &[String]) -> ExitCode {
+    let mut opts = forma_mcp::Options::default();
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "--open" => opts.open = it.next().cloned(),
+            "--root" => opts.root = it.next().map(std::path::PathBuf::from),
+            "--live" => opts.live = true,
+            _ => return usage(),
+        }
+    }
+    let mut server = match forma_mcp::Server::new(&opts) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("forma mcp: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    // stdout carries the protocol; messages for people go to stderr.
+    eprintln!(
+        "forma mcp: ready ({})",
+        if opts.live {
+            "live: the open Forma app"
+        } else {
+            "files"
+        }
+    );
+    match server.serve(std::io::stdin().lock(), std::io::stdout().lock()) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("forma mcp: {e}");
             ExitCode::FAILURE
         }
     }

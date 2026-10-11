@@ -49,16 +49,16 @@ impl FormaApp {
                 let text = egui::RichText::new(name).size(12.5);
                 let b = egui::Button::new(if selected { text.strong() } else { text })
                     .fill(if selected {
-                        Color32::WHITE
+                        theme::input()
                     } else {
-                        theme::PANEL
+                        theme::panel()
                     })
                     .stroke(Stroke::new(
                         1.0,
                         if selected {
-                            theme::BORDER
+                            theme::border()
                         } else {
-                            theme::PANEL
+                            theme::panel()
                         },
                     ));
                 if ui.add(b).clicked() {
@@ -500,10 +500,9 @@ impl FormaApp {
                     let (name_rect, name_resp) =
                         ui.allocate_exact_size(egui::vec2(130.0, 20.0), egui::Sense::click());
                     if i == current {
-                        ui.painter().rect_filled(name_rect, 2.0, theme::ACCENT_BG);
+                        ui.painter().rect_filled(name_rect, 2.0, theme::accent_bg());
                     } else if name_resp.hovered() {
-                        ui.painter()
-                            .rect_filled(name_rect, 2.0, Color32::from_rgb(235, 243, 251));
+                        ui.painter().rect_filled(name_rect, 2.0, theme::hover());
                     }
                     let indent = depth as f32 * 12.0;
                     if depth > 0 {
@@ -512,7 +511,7 @@ impl FormaApp {
                             egui::Align2::LEFT_CENTER,
                             "└",
                             egui::FontId::proportional(11.0),
-                            theme::WEAK,
+                            theme::weak(),
                         );
                     }
                     ui.painter().text(
@@ -521,9 +520,9 @@ impl FormaApp {
                         &short,
                         egui::FontId::proportional(13.0),
                         if layer.visible {
-                            theme::TEXT
+                            theme::text()
                         } else {
-                            theme::WEAK
+                            theme::weak()
                         },
                     );
                     let name_resp = name_resp.on_hover_text(format!(
@@ -593,7 +592,7 @@ impl FormaApp {
                             egui::Align2::CENTER_CENTER,
                             "✔",
                             egui::FontId::proportional(13.0),
-                            theme::TEXT,
+                            theme::text(),
                         );
                     }
                     if resp.on_hover_text("Current layer").clicked() {
