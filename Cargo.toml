@@ -11,6 +11,7 @@ members = [
     "crates/engine",
     "crates/ui",
     "crates/mcp",
+    "crates/script",
     "apps/forma",
     "apps/forma-cli",
     "xtask",
@@ -32,3 +33,4 @@ forma-render = { path = "crates/render" }
 forma-engine = { path = "crates/engine" }
 forma-ui = { path = "crates/ui" }
 forma-mcp = { path = "crates/mcp" }
+forma-script = { path = "crates/script" }

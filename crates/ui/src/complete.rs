@@ -9,7 +9,11 @@ pub struct Entry {
 }
 
 /// Commands that only exist in the UI (views, display modes, toggles).
-pub const UI_COMMANDS: [(&str, &str); 31] = [
+pub const UI_COMMANDS: [(&str, &str); 32] = [
+    (
+        "RunPythonScript",
+        "Run a Python script: RunPythonScript [file.py] (import forma; forma.run(\"Box …\"))",
+    ),
     (
         "AgentConnection",
         "Let AI assistants edit this model through `forma-cli mcp --live`: AgentConnection On|Off",

@@ -40,6 +40,8 @@ impl FormaApp {
         let mut clear_recent = false;
         let view_names: Vec<String> = self.named_views.iter().map(|v| v.0.clone()).collect();
         let mut restore_view: Option<String> = None;
+        let mut run_script: Option<std::path::PathBuf> = None;
+        let mut open_scripts = false;
         let item = |ui: &mut egui::Ui, act: &mut Option<Act>, label: &str, key: &str, a: Act| {
             let b = egui::Button::new(label).shortcut_text(key);
             if ui.add(b).clicked() {
@@ -555,6 +557,23 @@ impl FormaApp {
                 ui.checkbox(&mut self.snap.ortho, "Ortho (F8)");
                 ui.checkbox(&mut self.snap.planar, "Planar");
                 ui.separator();
+                ui.menu_button("Scripts (Python)", |ui| {
+                    item(ui, &mut act, "Run Python Script…", "", Act::Submit("RunPythonScript"));
+                    if ui.button("Open Scripts Folder").clicked() {
+                        open_scripts = true;
+                        ui.close();
+                    }
+                    let scripts = crate::scripting::script_commands();
+                    if !scripts.is_empty() {
+                        ui.separator();
+                    }
+                    for (name, path) in scripts {
+                        if ui.button(name).on_hover_text(path.display().to_string()).clicked() {
+                            run_script = Some(path);
+                            ui.close();
+                        }
+                    }
+                });
                 if self.agent.is_some() {
                     item(ui, &mut act, "✓ Agent Connection (AI assistants)", "", Act::Submit("AgentConnection Off"));
                 } else {
@@ -587,6 +606,12 @@ impl FormaApp {
         });
         if let Some(a) = act {
             self.act(ui.ctx(), a);
+        }
+        if let Some(p) = run_script {
+            self.run_python_file(&p);
+        }
+        if open_scripts {
+            self.open_scripts_folder();
         }
         if let Some(n) = restore_view {
             self.named_view(&format!("NamedView {n}"));

@@ -85,6 +85,18 @@ impl FormaApp {
             self.new_model = Some(self.new_dialog(false));
             return;
         }
+        if first == "runpythonscript" || first == "runpython" {
+            self.run_python_command(line);
+            return;
+        }
+        // A Python script of the scripts folder, by name (engine commands win).
+        if self.engine.resolve(&first).is_none() {
+            if let Some(path) = crate::scripting::script_for(&first) {
+                self.run_python_file(&path);
+                self.set_last(line);
+                return;
+            }
+        }
         if first == "agentconnection" {
             let ctx = self.egui_ctx.clone();
             self.agent_command(&ctx, line);

@@ -7,6 +7,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- **Python scripts inside the app** ([docs/SCRIPTING.md](docs/SCRIPTING.md), ADR 0008):
+  `RunPythonScript`, the `forma` module (`run`, `objects`, `selection`, `select`,
+  `units`), every `.py` in the scripts folder is a command named after it (Tools ▸
+  Scripts), one Undo per script, `forma-cli python`, and the MCP tool `forma_python`
+  (in the open app too, over the agent connection). No Python installation needed.
+
 ## [1.1.0] — 2026-10-11
 
 ### Added

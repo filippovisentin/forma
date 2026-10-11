@@ -16,6 +16,8 @@ pub const RUN: &str = "run";
 pub const INSPECT: &str = "inspect";
 /// The app writes a copy of its model to a temporary file and answers its path.
 pub const SNAPSHOT: &str = "snapshot";
+/// Run Python source in the app (forma-script); the reply is what it printed.
+pub const PYTHON: &str = "python";
 
 /// A plain-text summary of the document for an agent: units, layers, the
 /// objects (up to `limit`, with id, kind, layer, name and bounding box) and the

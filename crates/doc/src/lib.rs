@@ -696,6 +696,21 @@ impl Document {
     }
 
     /// Undo the last committed transaction. Returns false if there was nothing to undo.
+    /// Number of undo steps (see [`Document::group_undo_since`]).
+    pub fn undo_depth(&self) -> usize {
+        self.undo.len()
+    }
+
+    /// Merge every undo step added since `depth` into one, so a script or macro
+    /// that ran many commands is undone with a single Undo.
+    pub fn group_undo_since(&mut self, depth: usize) {
+        if self.undo.len() <= depth + 1 {
+            return;
+        }
+        let merged: Vec<Change> = self.undo.drain(depth..).flatten().collect();
+        self.undo.push(merged);
+    }
+
     pub fn undo(&mut self) -> bool {
         let Some(changes) = self.undo.pop() else {
             return false;
@@ -1066,6 +1081,28 @@ mod tests {
         assert_eq!(s.path.as_deref(), Some("a.3dm"));
         assert!(!s.can_undo());
         assert!(doc.can_undo());
+    }
+
+    #[test]
+    fn grouped_steps_undo_together() {
+        let mut doc = Document::new();
+        let mut t = doc.begin();
+        t.add(line());
+        t.commit();
+        let mark = doc.undo_depth();
+        for _ in 0..3 {
+            let mut t = doc.begin();
+            t.add(line());
+            t.commit();
+        }
+        doc.group_undo_since(mark);
+        assert_eq!(doc.undo_depth(), mark + 1);
+        assert!(doc.undo());
+        assert_eq!(doc.len(), 1, "the three grouped adds went at once");
+        assert!(doc.redo());
+        assert_eq!(doc.len(), 4);
+        doc.group_undo_since(99); // nothing to group
+        assert_eq!(doc.undo_depth(), 2);
     }
 
     #[test]

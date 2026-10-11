@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 forma-engine.workspace = true
+forma-script.workspace = true
 forma-render.workspace = true
 # PNG for the render tool (ADR 0005); JSON-RPC messages (ADR 0007).
 png = "0.18"

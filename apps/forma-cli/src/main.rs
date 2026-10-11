@@ -6,13 +6,14 @@
 //! forma-cli info model.3dm
 //! forma-cli render model.3dm out.png [--view perspective|top|front|right] [--size 1600x1000]
 //! forma-cli mcp [--open model.3dm] [--root folder] [--live]
+//! forma-cli python script.py [--open model.3dm] [--save out.3dm]
 //! ```
 
 use std::process::ExitCode;
 
 fn usage() -> ExitCode {
     eprintln!(
-        "usage:\n  forma-cli run [--script <text>] [--file <path>] [--dump]\n  forma-cli commands\n  forma-cli info <model.3dm>\n  forma-cli render <model.3dm> <out.png> [--view perspective|top|front|right] [--size WxH]\n  forma-cli mcp [--open <model.3dm>] [--root <folder>] [--live]   (MCP server for AI agents, stdio)"
+        "usage:\n  forma-cli run [--script <text>] [--file <path>] [--dump]\n  forma-cli commands\n  forma-cli info <model.3dm>\n  forma-cli render <model.3dm> <out.png> [--view perspective|top|front|right] [--size WxH]\n  forma-cli mcp [--open <model.3dm>] [--root <folder>] [--live]   (MCP server for AI agents, stdio)\n  forma-cli python <script.py> [--open <model.3dm>] [--save <out.3dm>]"
     );
     ExitCode::from(2)
 }
@@ -33,6 +34,7 @@ fn main() -> ExitCode {
         },
         Some("render") => render(&args[1..]),
         Some("mcp") => mcp(&args[1..]),
+        Some("python") => python(&args[1..]),
         Some("run") => {
             let mut script = String::new();
             let mut dump = false;
@@ -212,4 +214,47 @@ fn mcp(args: &[String]) -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// Run a Python script (`import forma`) on a new or opened model, optionally saving it.
+fn python(args: &[String]) -> ExitCode {
+    let Some(script) = args.first() else {
+        return usage();
+    };
+    let (mut open, mut save) = (None, None);
+    let mut it = args[1..].iter();
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "--open" => open = it.next().cloned(),
+            "--save" => save = it.next().cloned(),
+            _ => return usage(),
+        }
+    }
+    let src = match std::fs::read_to_string(script) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("{script}: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let mut engine = forma_engine::Engine::new();
+    let first = open.map_or_else(|| "New cm".to_string(), |p| format!("Open {p}"));
+    if let Err(e) = engine.run_line(&first) {
+        eprintln!("{e}");
+        return ExitCode::FAILURE;
+    }
+    let mut host = forma_script::EngineHost::new(&mut engine);
+    let result = host.run_script(&src, script);
+    print!("{}", host.out);
+    if let Err(e) = result {
+        eprintln!("{e}");
+        return ExitCode::FAILURE;
+    }
+    if let Some(out) = save {
+        if let Err(e) = engine.run_line(&format!("Save {out}")) {
+            eprintln!("{e}");
+            return ExitCode::FAILURE;
+        }
+    }
+    ExitCode::SUCCESS
 }

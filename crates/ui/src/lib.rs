@@ -30,6 +30,7 @@ mod overlays;
 mod panels;
 mod perf;
 mod pick;
+mod scripting;
 mod settings;
 mod snap;
 mod start;

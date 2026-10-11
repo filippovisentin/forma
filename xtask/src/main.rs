@@ -16,10 +16,11 @@ const LAYERS: &[(&str, u8)] = &[
     ("forma-io-mesh", 2),
     ("forma-render", 2),
     ("forma-engine", 3),
-    ("forma-ui", 4),
-    ("forma-mcp", 4),
-    ("forma", 5),
-    ("forma-cli", 5),
+    ("forma-script", 4),
+    ("forma-ui", 5),
+    ("forma-mcp", 5),
+    ("forma", 6),
+    ("forma-cli", 6),
 ];
 
 const MANIFESTS: &[&str] = &[
@@ -31,6 +32,7 @@ const MANIFESTS: &[&str] = &[
     "crates/engine",
     "crates/ui",
     "crates/mcp",
+    "crates/script",
     "apps/forma",
     "apps/forma-cli",
 ];

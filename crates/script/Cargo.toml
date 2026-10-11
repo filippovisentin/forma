@@ -1,0 +1,12 @@
+[package]
+name = "forma-script"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+forma-engine.workspace = true
+# Python interpreter inside the app (ADR 0008). 0.4: later releases do not
+# build against their own parser fork today.
+rustpython = { version = "0.4.0", default-features = false, features = ["stdlib", "freeze-stdlib"] }
+rustpython-vm = "0.4.0"

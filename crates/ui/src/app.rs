@@ -50,8 +50,12 @@ fn completer(engine: &Engine) -> Completer {
     let ui = UI_COMMANDS
         .iter()
         .map(|(n, h)| (n.to_string(), h.to_string()));
+    // Python scripts in the scripts folder are commands too.
+    let scripts = crate::scripting::script_commands()
+        .into_iter()
+        .map(|(n, p)| (n, format!("Python script {}", p.display())));
     // UI descriptions first: they describe the interactive tool.
-    Completer::new(tools.chain(sel).chain(ui).chain(engine_cmds))
+    Completer::new(tools.chain(sel).chain(ui).chain(scripts).chain(engine_cmds))
 }
 
 impl FormaApp {
