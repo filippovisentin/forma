@@ -137,6 +137,7 @@ impl FormaApp {
             track_points: Vec::new(),
             settings: Settings::load(),
             settings_checked: Instant::now(),
+            autosave: crate::autosave::Autosave::at_startup(),
             side_width: 280.0,
             command_height: 92.0,
         };
@@ -418,7 +419,7 @@ impl eframe::App for FormaApp {
             self.run_engine(&format!("Open {p}"));
         }
         self.handle_close(&ctx);
-        if self.confirm.is_none() {
+        if self.confirm.is_none() && self.autosave.offer.is_none() {
             self.handle_keyboard(&ctx);
         }
         self.sync(frame);
@@ -489,6 +490,7 @@ impl eframe::App for FormaApp {
             .frame(egui::Frame::NONE.fill(Color32::from_gray(150)))
             .show(ui, |ui| self.ui_viewports(ui, frame));
         self.ui_confirm(&ctx);
+        self.ui_recover(&ctx);
         self.ui_form(&ctx);
         self.poll_capture(&ctx);
 
@@ -505,5 +507,6 @@ impl eframe::App for FormaApp {
         // Minutes-from-last-save counter.
         ctx.request_repaint_after(Duration::from_secs(30));
         self.save_settings(false);
+        self.autosave_tick();
     }
 }

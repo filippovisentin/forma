@@ -10,6 +10,7 @@
 //! (history, prompt, autocomplete), `menus`, `toolbar`, `panels`, `status`.
 
 mod app;
+mod autosave;
 mod capture;
 mod cmdline;
 mod commands;
@@ -52,6 +53,7 @@ use viewport::Viewport;
 
 /// Start the desktop app, optionally opening a file.
 pub fn run(open: Option<String>) -> eframe::Result {
+    autosave::install_crash_log();
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("Forma")
@@ -361,6 +363,8 @@ struct FormaApp {
     /// Persistent user settings, and when they were last compared / written.
     settings: Settings,
     settings_checked: std::time::Instant,
+    /// Periodic copy of unsaved changes, and recovery after a crash.
+    autosave: autosave::Autosave,
     /// Panel sizes (points), remembered between runs.
     side_width: f32,
     command_height: f32,

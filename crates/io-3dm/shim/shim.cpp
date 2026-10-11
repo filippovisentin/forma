@@ -628,8 +628,11 @@ int f3dm_mesh_data(F3dmModel* m, int obj, int* nv, int* nt) {
     m->scratch_mesh_v.push_back(p.y);
     m->scratch_mesh_v.push_back(p.z);
   }
+  const int vcount = mesh->m_V.Count();
   for (int i = 0; i < mesh->m_F.Count(); i++) {
     const ON_MeshFace& f = mesh->m_F[i];
+    // A damaged file may hold faces that point past the vertex list.
+    if (!f.IsValid(vcount)) continue;
     m->scratch_mesh_t.insert(m->scratch_mesh_t.end(), {(unsigned)f.vi[0], (unsigned)f.vi[1], (unsigned)f.vi[2]});
     if (f.IsQuad()) {
       m->scratch_mesh_t.insert(m->scratch_mesh_t.end(), {(unsigned)f.vi[0], (unsigned)f.vi[2], (unsigned)f.vi[3]});

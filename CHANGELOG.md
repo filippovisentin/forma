@@ -7,6 +7,21 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- **Autosave and crash recovery.** While a model has unsaved changes, a copy is
+  written every 2 minutes to `autosave.3dm` in the settings folder (in the
+  background, the open model is not touched). After a crash or power cut the app
+  offers to recover it at the next start; Save, Open, New and a normal exit delete it.
+- Crashes are written to `crash.log` in the settings folder (the Windows app has no
+  console), so they can be reported.
+
+### Fixed
+- Saving never damages the previous file: `.3dm` files are written under a
+  temporary name and swapped in only when complete (a crash or a full disk during
+  Save used to leave a half-written model).
+- A damaged `.3dm` with mesh faces pointing at missing vertices no longer crashes
+  Forma: those faces are skipped on import.
+
 ## [1.0.0] — 2026-10-11
 
 First official release: exact solids and surfaces, tested in the app.

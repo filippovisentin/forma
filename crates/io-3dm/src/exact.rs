@@ -376,7 +376,8 @@ unsafe fn take_stream(p: *mut f64, n: usize) -> Option<Vec<f64>> {
 /// A curve stream (count, then segments) as one Forma curve: line, arc,
 /// polyline or polycurve of lines and arcs, or a NURBS curve.
 pub(crate) fn curve_from_stream(s: &[f64]) -> Option<Geometry> {
-    let count = *s.first()? as usize;
+    // Every segment takes at least one value: a bogus count cannot over-allocate.
+    let count = (*s.first()? as usize).min(s.len());
     let mut k = 1;
     let mut parts = Vec::with_capacity(count);
     for _ in 0..count {

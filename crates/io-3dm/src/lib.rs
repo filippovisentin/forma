@@ -639,6 +639,28 @@ mod tests {
     }
 
     #[test]
+    fn saving_replaces_the_file_in_one_step() {
+        let path = tmp("replace.3dm");
+        std::fs::write(&path, b"previous contents").unwrap();
+        let mut doc = forma_doc::Document::new();
+        let mut t = doc.begin();
+        t.add(forma_doc::Geometry::Line(forma_geom::LineCurve::new(
+            Point3::ORIGIN,
+            Point3::new(1.0, 0.0, 0.0),
+        )));
+        t.commit();
+        write_document(&path, &doc).unwrap();
+        assert_eq!(read_summary(&path).unwrap().objects.len(), 1);
+        let mut tmp_name = path.file_name().unwrap().to_os_string();
+        tmp_name.push(".forma-tmp");
+        assert!(!path.with_file_name(tmp_name).exists());
+        // A failed write leaves the old file alone and no temporary behind.
+        let dir = tmp("no-such-dir").join("x.3dm");
+        assert!(write_document(&dir, &doc).is_err());
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
     fn missing_file_is_an_error() {
         assert!(matches!(
             read_summary("/definitely/not/here.3dm"),

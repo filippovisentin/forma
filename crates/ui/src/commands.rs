@@ -127,6 +127,7 @@ impl FormaApp {
                 if saved || first == "open" || first == "new" {
                     self.saved_at = std::time::Instant::now();
                     self.saved_version = self.engine.doc().version();
+                    self.autosave_discard();
                     if let Some(p) = self.engine.doc().path.clone().filter(|_| first != "new") {
                         self.remember_file(&p);
                     }

@@ -53,9 +53,33 @@ unsafe fn write_mesh(w: &Writer, layer: c_int, m: &forma_geom::Mesh) -> c_int {
 /// needed), meshes as meshes. Annotations are written in a simplified form
 /// Rhino can display: text and text dots become text dots, dimensions become their
 /// lines plus a text dot with the measured value (not editable Rhino dimensions).
+///
+/// The file is written next to `path` under a temporary name and then renamed over
+/// it, so a crash or a full disk never leaves the previous file half overwritten.
 pub fn write_document(path: impl AsRef<Path>, doc: &Document) -> Result<(), Error> {
     let path = path.as_ref();
-    let cpath = c_path(path)?;
+    let tmp = temp_path(path);
+    let result = write_to(&tmp, path, doc).and_then(|()| {
+        std::fs::rename(&tmp, path)
+            .map_err(|e| Error::WriteFailed(format!("{}: {e}", path.display())))
+    });
+    if result.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    result
+}
+
+/// `model.3dm` → `model.3dm.forma-tmp` in the same folder (a rename within one
+/// folder replaces the target in one step).
+fn temp_path(path: &Path) -> std::path::PathBuf {
+    let mut name = path.file_name().unwrap_or_default().to_os_string();
+    name.push(".forma-tmp");
+    path.with_file_name(name)
+}
+
+/// Write `doc` to `file`; `path` is the name used in error messages.
+fn write_to(file: &Path, path: &Path, doc: &Document) -> Result<(), Error> {
+    let cpath = c_path(file)?;
     // SAFETY: plain values in, owned handle out.
     let w =
         Writer(unsafe { ffi::f3dm_writer_new(units(doc.units).to_on(), doc.absolute_tolerance) });
