@@ -144,7 +144,7 @@ fn exact_pieces(
 /// Curves joined end to end into exact NURBS curves (used when one of them is
 /// a NURBS curve: lines and arcs join it exactly). Groups that do not touch
 /// stay apart; each group's curves are turned to run the same way.
-fn join_nurbs(curves: Vec<geom::NurbsCurve>, tol: f64) -> Vec<geom::NurbsCurve> {
+pub(crate) fn join_nurbs(curves: Vec<geom::NurbsCurve>, tol: f64) -> Vec<geom::NurbsCurve> {
     let mut left = curves;
     let mut out = Vec::new();
     while let Some(first) = (!left.is_empty()).then(|| left.remove(0)) {

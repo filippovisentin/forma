@@ -323,6 +323,111 @@ impl Command for DupEdge {
     }
 }
 
+/// Exact boolean of closed planar curves (largest first): every curve is cut at
+/// its exact crossings with the others, the pieces on the right side of the
+/// other regions are kept, and they are joined into closed curves. `None` when
+/// that does not give closed curves (touching or overlapping edges): the caller
+/// falls back to the polygon boolean.
+fn exact_region_boolean(
+    curves: &[Geometry],
+    polys: &[Vec<Point3>],
+    op: RegionOp,
+    plane: &Plane,
+    tol: f64,
+) -> Option<Vec<NurbsCurve>> {
+    let ns: Vec<NurbsCurve> = curves
+        .iter()
+        .map(Geometry::to_nurbs)
+        .collect::<Option<_>>()?;
+    let chains: Vec<forma_geom::Chain> = curves
+        .iter()
+        .map(Geometry::to_chain)
+        .collect::<Option<_>>()?;
+    // Exact crossing parameters on each curve.
+    let mut cuts: Vec<Vec<f64>> = vec![Vec::new(); ns.len()];
+    for i in 0..ns.len() {
+        for j in 0..ns.len() {
+            if i == j {
+                continue;
+            }
+            for x in forma_geom::crossings(&chains[i], &chains[j], plane, tol) {
+                // Alternating projections onto both curves converge on the crossing.
+                let mut t = ns[i].closest_param(x);
+                for _ in 0..60 {
+                    let p = ns[i].point_at(t);
+                    let q = ns[j].point_at(ns[j].closest_param(p));
+                    let t2 = ns[i].closest_param(q);
+                    if (t2 - t).abs() < 1e-13 {
+                        break;
+                    }
+                    t = t2;
+                }
+                cuts[i].push(t);
+            }
+        }
+        cuts[i].sort_by(f64::total_cmp);
+        cuts[i].dedup_by(|a, b| (*a - *b).abs() < 1e-9);
+    }
+    let inside = |p: Point3, j: usize| forma_geom::point_in_polygon(p, &polys[j], plane);
+    let mut kept: Vec<NurbsCurve> = Vec::new();
+    for (i, n) in ns.iter().enumerate() {
+        let (a, b) = n.domain();
+        let pieces: Vec<NurbsCurve> = match cuts[i].as_slice() {
+            [] => vec![n.clone()],
+            [t] => {
+                // One crossing: the curve from it round to it again.
+                let parts: Vec<NurbsCurve> =
+                    [n.sub(*t, b), n.sub(a, *t)].into_iter().flatten().collect();
+                vec![NurbsCurve::join(&parts, tol.max(1e-6))?]
+            }
+            ts => {
+                let mut v: Vec<NurbsCurve> =
+                    ts.windows(2).filter_map(|w| n.sub(w[0], w[1])).collect();
+                let last = *ts.last().expect("cuts");
+                let parts: Vec<NurbsCurve> = [n.sub(last, b), n.sub(a, ts[0])]
+                    .into_iter()
+                    .flatten()
+                    .collect();
+                v.push(NurbsCurve::join(&parts, tol.max(1e-6))?);
+                v
+            }
+        };
+        for piece in pieces {
+            let (p0, p1) = piece.domain();
+            let mid = piece.point_at((p0 + p1) / 2.0);
+            let others = (0..ns.len()).filter(|j| *j != i);
+            let keep = match op {
+                RegionOp::Union => others.clone().all(|j| !inside(mid, j)),
+                RegionOp::Intersection => others.clone().all(|j| inside(mid, j)),
+                RegionOp::Difference if i == 0 => others.clone().all(|j| !inside(mid, j)),
+                RegionOp::Difference => {
+                    inside(mid, 0) && others.clone().filter(|j| *j != 0).all(|j| !inside(mid, j))
+                }
+            };
+            if keep {
+                kept.push(piece);
+            }
+        }
+    }
+    if kept.is_empty() {
+        return None;
+    }
+    let joined = crate::curves::join_nurbs(kept, tol.max(1e-6));
+    joined
+        .iter()
+        .all(|c| c.start().distance_to(c.end()) <= tol.max(1e-6))
+        .then_some(joined)
+}
+
+/// A boolean result as document geometry: polylines stay polylines.
+fn region_geometry(c: NurbsCurve) -> Geometry {
+    if c.degree == 1 && !c.is_rational() {
+        Geometry::Polyline(c.points)
+    } else {
+        Geometry::Nurbs(c)
+    }
+}
+
 simple_command!(
     CurveBoolean,
     "CurveBoolean",
@@ -379,12 +484,20 @@ impl Command for CurveBoolean {
         if result.is_empty() {
             return Err(CommandError::Invalid("CurveBoolean: empty result".into()));
         }
-        let n = result.len();
-        let mut t = ctx.doc.begin();
-        let ids: Vec<ObjectId> = result
-            .into_iter()
-            .map(|p| t.add(Geometry::Polyline(p)))
+        // Exact curves when the exact boolean agrees with the polygon one.
+        let geoms: Vec<Geometry> = loops
+            .iter()
+            .filter_map(|(id, _, _)| ctx.doc.object(*id).map(|o| o.geometry.clone()))
             .collect();
+        let out: Vec<Geometry> = match exact_region_boolean(&geoms, &polys, op, &plane, tol) {
+            Some(exact) if exact.len() == result.len() => {
+                exact.into_iter().map(region_geometry).collect()
+            }
+            _ => result.into_iter().map(Geometry::Polyline).collect(),
+        };
+        let n = out.len();
+        let mut t = ctx.doc.begin();
+        let ids: Vec<ObjectId> = out.into_iter().map(|g| t.add(g)).collect();
         if delete {
             for (id, _, _) in &loops {
                 t.remove(*id);
@@ -704,6 +817,66 @@ mod tests {
     use crate::Engine;
     use forma_doc::Geometry;
     use forma_geom::Point3;
+
+    #[test]
+    fn curve_booleans_of_free_form_curves_are_exact() {
+        let mut e = Engine::new();
+        // Rectangle minus a circle on its edge: a NURBS curve whose round part
+        // is exactly on the circle.
+        e.run_line("Rectangle 0,0,0 100,60,0").unwrap();
+        e.run_line("Circle 100,30,0 20").unwrap();
+        e.run_line("SelAll").unwrap();
+        e.run_line("CurveBoolean difference").unwrap();
+        let g = &e.doc().objects().last().unwrap().geometry;
+        let Geometry::Nurbs(n) = g else {
+            panic!("{}", g.kind())
+        };
+        let (t0, t1) = n.domain();
+        let mut on_circle = 0;
+        for i in 0..=400 {
+            let p = n.point_at(t0 + (t1 - t0) * f64::from(i) / 400.0);
+            let r = p.distance_to(Point3::new(100.0, 30.0, 0.0));
+            if (r - 20.0).abs() < 1e-6 {
+                on_circle += 1;
+            } else {
+                // Elsewhere it runs along the rectangle.
+                let edge = p.x.abs() < 1e-6
+                    || p.y.abs() < 1e-6
+                    || (p.y - 60.0).abs() < 1e-6
+                    || (p.x - 100.0).abs() < 1e-6;
+                assert!(edge && r > 20.0 - 1e-6, "{p:?}");
+            }
+        }
+        assert!(on_circle > 50);
+        // Two circles: the lens.
+        let mut f = Engine::new();
+        f.run_line("Circle 0,0,0 30").unwrap();
+        f.run_line("Circle 40,0,0 30").unwrap();
+        f.run_line("SelAll").unwrap();
+        f.run_line("CurveBoolean intersection").unwrap();
+        let Geometry::Nurbs(lens) = &f.doc().objects().last().unwrap().geometry else {
+            panic!()
+        };
+        let (t0, t1) = lens.domain();
+        for i in 0..=200 {
+            let p = lens.point_at(t0 + (t1 - t0) * f64::from(i) / 200.0);
+            let (a, b) = (
+                p.distance_to(Point3::ORIGIN),
+                p.distance_to(Point3::new(40.0, 0.0, 0.0)),
+            );
+            assert!((a - 30.0).abs() < 1e-6 || (b - 30.0).abs() < 1e-6, "{p:?}");
+        }
+        // Only straight edges: still a polyline.
+        let mut g = Engine::new();
+        g.run_line("Rectangle 0,0,0 50,50,0").unwrap();
+        g.run_line("Rectangle 30,20,0 90,80,0").unwrap();
+        g.run_line("SelAll").unwrap();
+        g.run_line("CurveBoolean union").unwrap();
+        assert_eq!(
+            g.doc().objects().last().unwrap().geometry.kind(),
+            "polyline"
+        );
+    }
 
     fn points(e: &Engine) -> Vec<Point3> {
         e.doc()

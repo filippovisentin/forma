@@ -26,7 +26,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   Explode: pieces are cut from the original NURBS (knot insertion) at the exact
   crossings, joins are exact (lines and arcs become part of one NURBS curve; Explode
   cuts it again at its corners), offsets are smooth NURBS curves within tolerance, and
-  fillets touch the curve exactly. Before, these tools turned NURBS into polylines.
+  fillets touch the curve exactly. CurveBoolean (union, intersection, difference) cuts
+  the curves at their exact crossings and joins the right pieces, so round and free-form
+  edges stay exact (straight-only results are still polylines). Before, these tools
+  turned NURBS into polylines.
 - **Command area like Rhino**: drag its edge to resize it (a grip shows where;
   double-click it for compact / tall), dock it at the top or bottom, or float it as a
   window you can move and resize (View ▸ Command Area, or `CommandArea
