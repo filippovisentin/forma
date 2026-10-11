@@ -6,7 +6,7 @@ Avvio
   "Ulteriori informazioni" -> "Esegui comunque" (l'app non è firmata).
   "Crea collegamento sul Desktop.bat" aggiunge Forma al Desktop e al menu Start.
   All'avvio Forma chiede le unità del nuovo modello (mm, cm, m, pollici, piedi);
-  "Chiedi a ogni avvio" si può togliere. File > Nuovo / Ctrl+N la ripropone.
+  "Ask at every start" si può togliere. File > New / Ctrl+N la ripropone.
 
 Novità della 1.1
   Salvataggio automatico ogni 2 minuti delle modifiche non salvate; dopo un
@@ -14,9 +14,9 @@ Novità della 1.1
   rovina mai il file precedente (scrive prima un file temporaneo).
   Booleane, FilletEdge, ChamferEdge, Shell e OffsetSrf su solidi curvi (cilindri,
   sfere, tori) restano polisuperfici esatte, non mesh.
-  Vista > Interfaccia: Classic (originale, chiara) o Graphite (scura, con viste
+  View > Interface: Classic (originale, chiara) o Graphite (scura, con viste
   scure, stato del salvataggio nella barra dei menu, opzioni e snap a pulsanti).
-  Assistenti AI (Claude): Strumenti > Agent Connection, poi forma-cli.exe mcp --live
+  Assistenti AI (Claude): Tools > Agent Connection, poi forma-cli.exe mcp --live
   (istruzioni in docs/AGENTS.md sul sito del progetto).
 
 Interfaccia (come Rhino 8)
