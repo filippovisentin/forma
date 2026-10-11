@@ -30,6 +30,58 @@ pub(crate) const ALIGN: [(&str, &str); 7] = [
     ("Centers", "Align center"),
 ];
 
+use crate::icons::{has_drawing, Icon};
+
+/// The icon of a menu action, when it has a drawing.
+fn icon_for_act(a: &Act) -> Option<Icon> {
+    let icon = match a {
+        Act::Tool(k) => Icon::Tool(*k),
+        Act::Open => Icon::Named("Open"),
+        Act::Save | Act::SaveAs => Icon::Named("Save"),
+        Act::Help => Icon::Named("Help"),
+        Act::Clip(c) => Icon::Named(c),
+        Act::Cmd(c) | Act::Submit(c) => {
+            let w: &'static str = c.split_whitespace().next().unwrap_or("");
+            Icon::Named(match w.to_ascii_lowercase().as_str() {
+                "ze" | "zea" => "ZoomExtents",
+                "zs" => "ZoomSelected",
+                "top" => "Top",
+                "front" => "Front",
+                "right" => "Right",
+                "perspective" => "Perspective",
+                "back" => "Back",
+                "bottom" => "Bottom",
+                "left" => "Left",
+                "ask" => "Ask",
+                _ => w,
+            })
+        }
+        _ => return None,
+    };
+    let name = match icon {
+        Icon::Tool(k) => k.name(),
+        Icon::Named(n) => n,
+    };
+    has_drawing(name).then_some(icon)
+}
+
+/// A menu entry with its command's icon at the left (space kept when it has none,
+/// so the labels line up), like the menus of Rhino and AutoCAD.
+fn iconic_button(ui: &mut egui::Ui, label: &str, key: &str, icon: Option<Icon>) -> egui::Response {
+    let r = ui.add(egui::Button::new(format!("      {label}")).shortcut_text(key));
+    if let Some(icon) = icon {
+        let h = 16.0;
+        let at = egui::pos2(r.rect.left() + 4.0, r.rect.center().y - h / 2.0);
+        crate::icons::paint(
+            ui.painter(),
+            egui::Rect::from_min_size(at, egui::vec2(h, h)),
+            icon,
+            crate::theme::text(),
+        );
+    }
+    r
+}
+
 /// A Rectangular array asks for its numbers on the command line.
 pub(crate) const ARRAY_PREFILL: Act = Act::Form(&crate::dialogs::ARRAY);
 
@@ -43,14 +95,17 @@ impl FormaApp {
         let mut run_script: Option<std::path::PathBuf> = None;
         let mut open_scripts = false;
         let item = |ui: &mut egui::Ui, act: &mut Option<Act>, label: &str, key: &str, a: Act| {
-            let b = egui::Button::new(label).shortcut_text(key);
-            if ui.add(b).clicked() {
+            if iconic_button(ui, label, key, icon_for_act(&a)).clicked() {
                 *act = Some(a);
                 ui.close();
             }
         };
         let tool = |ui: &mut egui::Ui, act: &mut Option<Act>, label: &str, k: ToolKind| {
-            if ui.button(label).on_hover_text(k.tooltip()).clicked() {
+            let icon = has_drawing(k.name()).then_some(Icon::Tool(k));
+            if iconic_button(ui, label, "", icon)
+                .on_hover_text(k.tooltip())
+                .clicked()
+            {
                 *act = Some(Act::Tool(k));
                 ui.close();
             }

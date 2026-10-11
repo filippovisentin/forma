@@ -25,8 +25,8 @@ pub(crate) const TABS: [&str; 10] = [
 
 /// A toolbar button.
 #[derive(Clone, Copy)]
-struct Item {
-    icon: Icon,
+pub(crate) struct Item {
+    pub(crate) icon: Icon,
     /// Command name (bold first line of the tooltip).
     name: &'static str,
     desc: &'static str,
@@ -94,6 +94,63 @@ fn tooltip(ui: &mut egui::Ui, it: &Item) {
     }
 }
 
+/// Groups of the left tool bar.
+pub(crate) const SIDEBAR: [&[ToolKind]; 7] = [
+    &[
+        ToolKind::Point,
+        ToolKind::Line,
+        ToolKind::Polyline,
+        ToolKind::Curve,
+        ToolKind::Circle,
+        ToolKind::Arc,
+        ToolKind::Ellipse,
+        ToolKind::Rectangle,
+        ToolKind::Polygon,
+        ToolKind::InterpCrv,
+    ],
+    &[
+        ToolKind::OnSel("PlanarSrf"),
+        ToolKind::Extrude,
+        ToolKind::OnSel("Loft"),
+        ToolKind::Revolve,
+        ToolKind::Sweep1,
+        ToolKind::OnSel("Cap"),
+    ],
+    &[
+        ToolKind::Box,
+        ToolKind::Sphere,
+        ToolKind::Cylinder,
+        ToolKind::ExtrudeSrf,
+    ],
+    &[
+        ToolKind::Move,
+        ToolKind::Copy,
+        ToolKind::Rotate,
+        ToolKind::Scale,
+        ToolKind::Mirror,
+        ToolKind::Orient,
+        ToolKind::ArrayLinear,
+        ToolKind::ArrayPolar,
+    ],
+    &[
+        ToolKind::Join,
+        ToolKind::Explode,
+        ToolKind::Trim,
+        ToolKind::Split,
+        ToolKind::Extend,
+        ToolKind::Offset,
+        ToolKind::Fillet,
+        ToolKind::Chamfer,
+    ],
+    &[
+        ToolKind::OnSel("Group"),
+        ToolKind::OnSel("Hide"),
+        ToolKind::OnSel("Lock"),
+        ToolKind::MatchProperties,
+    ],
+    &[ToolKind::Distance, ToolKind::OnSel("Area")],
+];
+
 impl FormaApp {
     fn icon_button(&self, ui: &mut egui::Ui, it: &Item, active: bool) -> bool {
         let (rect, resp) = ui.allocate_exact_size(egui::vec2(32.0, 32.0), egui::Sense::click());
@@ -117,57 +174,7 @@ impl FormaApp {
 
     /// Left sidebar: Rhino's main palette, two columns of tools.
     pub(crate) fn ui_toolbar(&mut self, ui: &mut egui::Ui) {
-        use ToolKind as K;
-        let groups: [&[ToolKind]; 7] = [
-            &[
-                K::Point,
-                K::Line,
-                K::Polyline,
-                K::Curve,
-                K::Circle,
-                K::Arc,
-                K::Ellipse,
-                K::Rectangle,
-                K::Polygon,
-                K::InterpCrv,
-            ],
-            &[
-                K::OnSel("PlanarSrf"),
-                K::Extrude,
-                K::OnSel("Loft"),
-                K::Revolve,
-                K::Sweep1,
-                K::OnSel("Cap"),
-            ],
-            &[K::Box, K::Sphere, K::Cylinder, K::ExtrudeSrf],
-            &[
-                K::Move,
-                K::Copy,
-                K::Rotate,
-                K::Scale,
-                K::Mirror,
-                K::Orient,
-                K::ArrayLinear,
-                K::ArrayPolar,
-            ],
-            &[
-                K::Join,
-                K::Explode,
-                K::Trim,
-                K::Split,
-                K::Extend,
-                K::Offset,
-                K::Fillet,
-                K::Chamfer,
-            ],
-            &[
-                K::OnSel("Group"),
-                K::OnSel("Hide"),
-                K::OnSel("Lock"),
-                K::MatchProperties,
-            ],
-            &[K::Distance, K::OnSel("Area")],
-        ];
+        let groups = SIDEBAR;
         let mut start = None;
         egui::ScrollArea::vertical().show(ui, |ui| {
             ui.spacing_mut().item_spacing = egui::vec2(1.0, 1.0);
@@ -196,225 +203,232 @@ impl FormaApp {
 
     /// Buttons of a toolbar tab; `None` = separator.
     fn tab_items(&self) -> Vec<Option<Item>> {
-        use ToolKind as K;
-        let mut v = Vec::new();
-        match self.tab {
-            0 => {
-                v.push(named("New", "New", "New model", "Ctrl+N", Act::Cmd("New")));
-                v.push(named(
-                    "Open",
-                    "Open",
-                    "Open a Rhino model",
-                    "Ctrl+O",
-                    Act::Open,
-                ));
-                v.push(named("Save", "Save", "Save the model", "Ctrl+S", Act::Save));
-                v.push(None);
-                v.push(named(
-                    "Cut",
-                    "Cut",
-                    "Cut to the clipboard",
-                    "Ctrl+X",
-                    Act::Clip("Cut"),
-                ));
-                v.push(named(
-                    "CopyToClipboard",
-                    "CopyToClipboard",
-                    "Copy to the clipboard",
-                    "Ctrl+C",
-                    Act::Clip("CopyToClipboard"),
-                ));
-                v.push(named(
-                    "Paste",
-                    "Paste",
-                    "Paste from the clipboard",
-                    "Ctrl+V",
-                    Act::Clip("Paste"),
-                ));
-                v.push(None);
-                v.push(named(
-                    "Undo",
-                    "Undo",
-                    "Undo the last action",
-                    "Ctrl+Z",
-                    Act::Cmd("Undo"),
-                ));
-                v.push(named("Redo", "Redo", "Redo", "Ctrl+Y", Act::Cmd("Redo")));
-                v.push(None);
-                v.push(named(
-                    "SelAll",
-                    "SelAll",
-                    "Select all objects",
-                    "Ctrl+A",
-                    Act::Cmd("SelAll"),
-                ));
-                v.push(tool(K::OnSel("Delete")));
-                v.push(None);
-                v.push(tool(K::OnSel("Hide")));
-                v.push(named(
-                    "Show",
-                    "Show",
-                    "Show hidden objects",
-                    "Ctrl+Alt+H",
-                    Act::Cmd("Show"),
-                ));
-                v.push(tool(K::OnSel("Lock")));
-                v.push(named(
-                    "Unlock",
-                    "Unlock",
-                    "Unlock all objects",
-                    "Ctrl+Alt+L",
-                    Act::Cmd("Unlock"),
-                ));
-                v.push(None);
-                v.push(named(
-                    "ZoomExtents",
-                    "ZEA",
-                    "Zoom extents in all views",
-                    "",
-                    Act::Submit("zea"),
-                ));
-                v.push(named(
-                    "ZoomSelected",
-                    "ZS",
-                    "Zoom to the selected objects",
-                    "",
-                    Act::Submit("zs"),
-                ));
-                v.push(None);
-                v.push(named(
-                    "Layer",
-                    "Layers",
-                    "Layers panel",
-                    "",
-                    Act::Panel(SidePanel::Layers),
-                ));
-                v.push(named(
-                    "What",
-                    "Properties",
-                    "Properties panel",
-                    "F3",
-                    Act::Panel(SidePanel::Properties),
-                ));
-                v.push(named(
-                    "Help",
-                    "Help",
-                    "Commands, keys and mouse",
-                    "",
-                    Act::Help,
-                ));
+        tab_items_for(self.tab)
+    }
+}
+
+/// The buttons of toolbar tab `tab` (`None` = separator).
+pub(crate) fn tab_items_for(tab: usize) -> Vec<Option<Item>> {
+    use ToolKind as K;
+    let mut v = Vec::new();
+    match tab {
+        0 => {
+            v.push(named("New", "New", "New model", "Ctrl+N", Act::Cmd("New")));
+            v.push(named(
+                "Open",
+                "Open",
+                "Open a Rhino model",
+                "Ctrl+O",
+                Act::Open,
+            ));
+            v.push(named("Save", "Save", "Save the model", "Ctrl+S", Act::Save));
+            v.push(None);
+            v.push(named(
+                "Cut",
+                "Cut",
+                "Cut to the clipboard",
+                "Ctrl+X",
+                Act::Clip("Cut"),
+            ));
+            v.push(named(
+                "CopyToClipboard",
+                "CopyToClipboard",
+                "Copy to the clipboard",
+                "Ctrl+C",
+                Act::Clip("CopyToClipboard"),
+            ));
+            v.push(named(
+                "Paste",
+                "Paste",
+                "Paste from the clipboard",
+                "Ctrl+V",
+                Act::Clip("Paste"),
+            ));
+            v.push(None);
+            v.push(named(
+                "Undo",
+                "Undo",
+                "Undo the last action",
+                "Ctrl+Z",
+                Act::Cmd("Undo"),
+            ));
+            v.push(named("Redo", "Redo", "Redo", "Ctrl+Y", Act::Cmd("Redo")));
+            v.push(None);
+            v.push(named(
+                "SelAll",
+                "SelAll",
+                "Select all objects",
+                "Ctrl+A",
+                Act::Cmd("SelAll"),
+            ));
+            v.push(tool(K::OnSel("Delete")));
+            v.push(None);
+            v.push(tool(K::OnSel("Hide")));
+            v.push(named(
+                "Show",
+                "Show",
+                "Show hidden objects",
+                "Ctrl+Alt+H",
+                Act::Cmd("Show"),
+            ));
+            v.push(tool(K::OnSel("Lock")));
+            v.push(named(
+                "Unlock",
+                "Unlock",
+                "Unlock all objects",
+                "Ctrl+Alt+L",
+                Act::Cmd("Unlock"),
+            ));
+            v.push(None);
+            v.push(named(
+                "ZoomExtents",
+                "ZEA",
+                "Zoom extents in all views",
+                "",
+                Act::Submit("zea"),
+            ));
+            v.push(named(
+                "ZoomSelected",
+                "ZS",
+                "Zoom to the selected objects",
+                "",
+                Act::Submit("zs"),
+            ));
+            v.push(None);
+            v.push(named(
+                "Layer",
+                "Layers",
+                "Layers panel",
+                "",
+                Act::Panel(SidePanel::Layers),
+            ));
+            v.push(named(
+                "What",
+                "Properties",
+                "Properties panel",
+                "F3",
+                Act::Panel(SidePanel::Properties),
+            ));
+            v.push(named(
+                "Help",
+                "Help",
+                "Commands, keys and mouse",
+                "",
+                Act::Help,
+            ));
+        }
+        1 => {
+            for (n, c) in SET_VIEWS {
+                v.push(named(n, n, "Set the active view", "", Act::Submit(c)));
             }
-            1 => {
-                for (n, c) in SET_VIEWS {
-                    v.push(named(n, n, "Set the active view", "", Act::Submit(c)));
-                }
-                v.push(None);
+            v.push(None);
+            v.push(named(
+                "ZoomExtents",
+                "ZE",
+                "Zoom extents in the active view",
+                "",
+                Act::Submit("ze"),
+            ));
+            v.push(named(
+                "ZoomSelected",
+                "ZS",
+                "Zoom to the selected objects",
+                "",
+                Act::Submit("zs"),
+            ));
+            v.push(named(
+                "Isolate",
+                "MaxViewport",
+                "Maximize / restore the active view (double-click a view title)",
+                "",
+                Act::Maximize,
+            ));
+        }
+        2 => {
+            for (m, n) in [
+                (DisplayMode::Wireframe, "Wireframe"),
+                (DisplayMode::Shaded, "Shaded"),
+            ] {
                 v.push(named(
-                    "ZoomExtents",
-                    "ZE",
-                    "Zoom extents in the active view",
+                    n,
+                    m.name(),
+                    "Display mode of the active view",
                     "",
-                    Act::Submit("ze"),
+                    Act::Mode(m),
                 ));
-                v.push(named(
-                    "ZoomSelected",
-                    "ZS",
-                    "Zoom to the selected objects",
-                    "",
-                    Act::Submit("zs"),
-                ));
-                v.push(named(
-                    "Isolate",
-                    "MaxViewport",
-                    "Maximize / restore the active view (double-click a view title)",
-                    "",
-                    Act::Maximize,
-                ));
-            }
-            2 => {
-                for (m, n) in [
-                    (DisplayMode::Wireframe, "Wireframe"),
-                    (DisplayMode::Shaded, "Shaded"),
-                ] {
-                    v.push(named(
-                        n,
-                        m.name(),
-                        "Display mode of the active view",
-                        "",
-                        Act::Mode(m),
-                    ));
-                }
-            }
-            3 => {
-                for (n, desc, key) in [
-                    ("SelAll", "Select all objects", "Ctrl+A"),
-                    ("SelNone", "Select none", "Esc"),
-                    ("Invert", "Invert the selection", ""),
-                    ("SelLast", "Select the last created objects", ""),
-                    ("SelCrv", "Select all curves", ""),
-                    ("SelMesh", "Select all surfaces / meshes", ""),
-                    ("SelPt", "Select all points", ""),
-                ] {
-                    v.push(named(n, n, desc, key, Act::Cmd(n)));
-                }
-                v.push(tool(K::OnSel("SelGroup")));
-            }
-            4 => {
-                v.push(tool(K::OnSel("Hide")));
-                v.push(named(
-                    "Show",
-                    "Show",
-                    "Show all hidden objects",
-                    "Ctrl+Alt+H",
-                    Act::Cmd("Show"),
-                ));
-                v.push(tool(K::OnSel("Isolate")));
-                v.push(named(
-                    "Unisolate",
-                    "Unisolate",
-                    "Show everything again",
-                    "",
-                    Act::Cmd("Unisolate"),
-                ));
-                v.push(None);
-                v.push(tool(K::OnSel("Lock")));
-                v.push(named(
-                    "Unlock",
-                    "Unlock",
-                    "Unlock all objects",
-                    "Ctrl+Alt+L",
-                    Act::Cmd("Unlock"),
-                ));
-                v.push(None);
-                v.push(tool(K::OnSel("Group")));
-                v.push(tool(K::OnSel("Ungroup")));
-            }
-            5 => {
-                v.extend(tools(&ToolKind::TRANSFORMS));
-                v.push(named(
-                    "Array",
-                    "Array",
-                    "Rectangular array (nx ny nz spacing)",
-                    "",
-                    ARRAY_PREFILL,
-                ));
-            }
-            6 => {
-                v.extend(tools(&ToolKind::CURVES));
-                v.push(None);
-                v.extend(tools(&ToolKind::CURVE_TOOLS));
-            }
-            7 => v.extend(tools(&ToolKind::SURFACES)),
-            8 => v.extend(tools(&ToolKind::SOLIDS)),
-            _ => {
-                v.extend(tools(&ToolKind::ANALYZE));
-                v.push(None);
-                v.push(tool(K::MatchProperties));
             }
         }
-        v
+        3 => {
+            for (n, desc, key) in [
+                ("SelAll", "Select all objects", "Ctrl+A"),
+                ("SelNone", "Select none", "Esc"),
+                ("Invert", "Invert the selection", ""),
+                ("SelLast", "Select the last created objects", ""),
+                ("SelCrv", "Select all curves", ""),
+                ("SelMesh", "Select all surfaces / meshes", ""),
+                ("SelPt", "Select all points", ""),
+            ] {
+                v.push(named(n, n, desc, key, Act::Cmd(n)));
+            }
+            v.push(tool(K::OnSel("SelGroup")));
+        }
+        4 => {
+            v.push(tool(K::OnSel("Hide")));
+            v.push(named(
+                "Show",
+                "Show",
+                "Show all hidden objects",
+                "Ctrl+Alt+H",
+                Act::Cmd("Show"),
+            ));
+            v.push(tool(K::OnSel("Isolate")));
+            v.push(named(
+                "Unisolate",
+                "Unisolate",
+                "Show everything again",
+                "",
+                Act::Cmd("Unisolate"),
+            ));
+            v.push(None);
+            v.push(tool(K::OnSel("Lock")));
+            v.push(named(
+                "Unlock",
+                "Unlock",
+                "Unlock all objects",
+                "Ctrl+Alt+L",
+                Act::Cmd("Unlock"),
+            ));
+            v.push(None);
+            v.push(tool(K::OnSel("Group")));
+            v.push(tool(K::OnSel("Ungroup")));
+        }
+        5 => {
+            v.extend(tools(&ToolKind::TRANSFORMS));
+            v.push(named(
+                "Array",
+                "Array",
+                "Rectangular array (nx ny nz spacing)",
+                "",
+                ARRAY_PREFILL,
+            ));
+        }
+        6 => {
+            v.extend(tools(&ToolKind::CURVES));
+            v.push(None);
+            v.extend(tools(&ToolKind::CURVE_TOOLS));
+        }
+        7 => v.extend(tools(&ToolKind::SURFACES)),
+        8 => v.extend(tools(&ToolKind::SOLIDS)),
+        _ => {
+            v.extend(tools(&ToolKind::ANALYZE));
+            v.push(None);
+            v.push(tool(K::MatchProperties));
+        }
     }
+    v
+}
 
+impl FormaApp {
     /// Tab strip and its command row (Rhino 8 style).
     pub(crate) fn ui_tabs(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
