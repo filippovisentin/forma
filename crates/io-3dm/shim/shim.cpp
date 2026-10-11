@@ -2357,3 +2357,206 @@ unsigned char* f3dm_make_to_point(const double* stream, size_t n, const double* 
 }
 
 }  // extern "C"
+
+extern "C" {
+
+// Face `i` without its trims: its whole underlying surface (Untrim).
+unsigned char* f3dm_bytes_untrimmed(const unsigned char* data, size_t len, int i,
+                                    size_t* out_len) {
+  *out_len = 0;
+  ON_Brep* b = brep_from_bytes(data, len);
+  if (!b || i < 0 || i >= b->m_F.Count()) {
+    delete b;
+    return nullptr;
+  }
+  const ON_Surface* s = b->m_F[i].SurfaceOf();
+  ON_Surface* copy = s ? s->DuplicateSurface() : nullptr;
+  const bool rev = b->m_F[i].m_bRev;
+  delete b;
+  if (!copy) return nullptr;
+  ON_Brep* out = new ON_Brep();
+  ON_Surface* srf = copy;
+  if (!out->Create(srf)) {
+    delete srf;
+    delete out;
+    return nullptr;
+  }
+  if (rev) out->Flip();
+  return brep_bytes(out, out_len);
+}
+
+// The brep with each face's surface shrunk to its trims (ShrinkTrimmedSrf).
+unsigned char* f3dm_bytes_shrunk(const unsigned char* data, size_t len, size_t* out_len) {
+  *out_len = 0;
+  ON_Brep* b = brep_from_bytes(data, len);
+  if (!b) return nullptr;
+  b->ShrinkSurfaces();
+  b->Compact();
+  return brep_bytes(b, out_len);
+}
+
+// Validity report of the exact object (Check): returns 1 when valid; the
+// openNURBS log (UTF-8, truncated to cap) goes into buf.
+int f3dm_bytes_check(const unsigned char* data, size_t len, char* buf, int cap) {
+  ON_Geometry* g = from_bytes(data, len);
+  if (!g) {
+    if (buf && cap > 0) {
+      const char* msg = "the object could not be read";
+      std::strncpy(buf, msg, cap - 1);
+      buf[cap - 1] = 0;
+    }
+    return 0;
+  }
+  ON_wString text;
+  ON_TextLog log(text);
+  const bool ok = g->IsValid(&log);
+  delete g;
+  const ON_String s(text);
+  if (buf && cap > 0) {
+    std::strncpy(buf, static_cast<const char*>(s), cap - 1);
+    buf[cap - 1] = 0;
+  }
+  return ok ? 1 : 0;
+}
+
+// Closest (u, v) on face `fi` to p: best of a 24×24 grid, refined by Newton
+// steps on the surface. Returns the distance.
+static double face_closest_uv(const ON_BrepFace& f, const ON_3dPoint& p, double* u, double* v) {
+  const ON_Interval du = f.Domain(0), dv = f.Domain(1);
+  double best = 1e300;
+  for (int i = 0; i <= 24; i++)
+    for (int j = 0; j <= 24; j++) {
+      const double s = du.ParameterAt(i / 24.0), t = dv.ParameterAt(j / 24.0);
+      const double d = f.PointAt(s, t).DistanceTo(p);
+      if (d < best) {
+        best = d;
+        *u = s;
+        *v = t;
+      }
+    }
+  for (int it = 0; it < 20; it++) {
+    ON_3dPoint q;
+    ON_3dVector su, sv;
+    if (!f.Ev1Der(*u, *v, q, su, sv)) break;
+    const ON_3dVector r = p - q;
+    // Solve [su·su su·sv; su·sv sv·sv] [du dv] = [r·su r·sv].
+    const double a = su * su, b = su * sv, c = sv * sv, e = r * su, g = r * sv;
+    const double det = a * c - b * b;
+    if (std::fabs(det) < 1e-30) break;
+    double nu = *u + (e * c - g * b) / det, nv = *v + (a * g - b * e) / det;
+    nu = (std::max)(du.Min(), (std::min)(du.Max(), nu));
+    nv = (std::max)(dv.Min(), (std::min)(dv.Max(), nv));
+    const bool done = std::fabs(nu - *u) < 1e-12 * (1 + du.Length()) &&
+                      std::fabs(nv - *v) < 1e-12 * (1 + dv.Length());
+    *u = nu;
+    *v = nv;
+    if (done) break;
+  }
+  return f.PointAt(*u, *v).DistanceTo(p);
+}
+
+// True when (u, v) lies inside the trimmed region of the face (even-odd test
+// against its trims sampled into polygons).
+static bool inside_face(const ON_Brep* b, const ON_BrepFace& f, double u, double v) {
+  bool in = false;
+  for (int li = 0; li < f.m_li.Count(); li++) {
+    const ON_BrepLoop& l = b->m_L[f.m_li[li]];
+    std::vector<ON_2dPoint> poly;
+    for (int ti = 0; ti < l.m_ti.Count(); ti++) {
+      const ON_BrepTrim& t = b->m_T[l.m_ti[ti]];
+      const ON_Interval d = t.Domain();
+      for (int k = 0; k < 24; k++) {
+        const ON_3dPoint q = t.PointAt(d.ParameterAt(k / 24.0));
+        poly.push_back(ON_2dPoint(q.x, q.y));
+      }
+    }
+    for (size_t i = 0, n = poly.size(); i < n; i++) {
+      const ON_2dPoint a = poly[i], c = poly[(i + 1) % n];
+      if ((a.y > v) != (c.y > v)) {
+        const double x = a.x + (v - a.y) / (c.y - a.y) * (c.x - a.x);
+        if (u < x) in = !in;
+      }
+    }
+  }
+  return in;
+}
+
+// Isocurves through the point of the brep nearest to p (ExtractIsocurve):
+// dir 0 = along u, 1 = along v, 2 = both; only the parts inside the trims.
+// Output: a curve stream (see f3dm_bytes_edges).
+double* f3dm_bytes_isocurves(const unsigned char* data, size_t len, const double* xyz, int dir,
+                             size_t* n) {
+  *n = 0;
+  ON_Brep* b = brep_from_bytes(data, len);
+  if (!b) return nullptr;
+  const ON_3dPoint p(xyz);
+  int face = -1;
+  double fu = 0, fv = 0, best = 1e300;
+  for (int fi = 0; fi < b->m_F.Count(); fi++) {
+    double u = 0, v = 0;
+    const double d = face_closest_uv(b->m_F[fi], p, &u, &v);
+    if (d < best) {
+      best = d;
+      face = fi;
+      fu = u;
+      fv = v;
+    }
+  }
+  std::vector<double> out{0.0};
+  int count = 0;
+  if (face >= 0) {
+    const ON_BrepFace& f = b->m_F[face];
+    for (int d = 0; d < 2; d++) {
+      if (dir != 2 && dir != d) continue;
+      // An isocurve along u has constant v (ON: IsoCurve(0, v)).
+      const double c = d == 0 ? fv : fu;
+      ON_Curve* iso = f.SurfaceOf()->IsoCurve(d, c);
+      if (!iso) continue;
+      const ON_Interval dom = iso->Domain();
+      // Parts inside the trims, found by sampling and bisection.
+      const int samples = 200;
+      auto in_at = [&](double t) {
+        return d == 0 ? inside_face(b, f, t, c) : inside_face(b, f, c, t);
+      };
+      auto edge = [&](double a, double z) {
+        const bool ia = in_at(a);
+        for (int k = 0; k < 40; k++) {
+          const double m = 0.5 * (a + z);
+          if (in_at(m) == ia) a = m;
+          else z = m;
+        }
+        return 0.5 * (a + z);
+      };
+      double start = 0;
+      bool was = in_at(dom[0]);
+      if (was) start = dom[0];
+      for (int k = 1; k <= samples; k++) {
+        const double t0 = dom.ParameterAt((k - 1.0) / samples), t1 = dom.ParameterAt(1.0 * k / samples);
+        const bool now = in_at(t1);
+        if (now && !was) start = edge(t0, t1);
+        if (!now && was || (now && k == samples)) {
+          const double end = now ? dom[1] : edge(t0, t1);
+          if (end - start > 1e-9 * dom.Length()) {
+            ON_Curve* piece = iso->DuplicateCurve();
+            // The whole curve is kept as it is (Trim refuses the full domain).
+            const bool whole = start <= dom[0] + 1e-12 * dom.Length() &&
+                               end >= dom[1] - 1e-12 * dom.Length();
+            if (whole || piece->Trim(ON_Interval(start, end))) {
+              const size_t before = out.size();
+              push_curve(*piece, out);
+              if (out.size() > before) count++;
+            }
+            delete piece;
+          }
+        }
+        was = now;
+      }
+      delete iso;
+    }
+  }
+  delete b;
+  out[0] = count;
+  return to_malloc(out, n);
+}
+
+}  // extern "C"

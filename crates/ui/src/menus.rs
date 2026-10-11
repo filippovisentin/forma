@@ -129,7 +129,9 @@ impl FormaApp {
                     item(ui, &mut act, "Previous Selection", "", Act::Cmd("SelPrev"));
                     ui.separator();
                     item(ui, &mut act, "Curves", "", Act::Cmd("SelCrv"));
-                    item(ui, &mut act, "Surfaces / Meshes", "", Act::Cmd("SelMesh"));
+                    item(ui, &mut act, "Surfaces", "", Act::Cmd("SelSrf"));
+                    item(ui, &mut act, "Polysurfaces", "", Act::Cmd("SelPolysrf"));
+                    item(ui, &mut act, "Meshes", "", Act::Cmd("SelMesh"));
                     item(ui, &mut act, "Points", "", Act::Cmd("SelPt"));
                     ui.menu_button("Curve Filters", |ui| {
                         item(ui, &mut act, "Open Curves", "", Act::Cmd("SelOpenCrv"));
@@ -396,11 +398,12 @@ impl FormaApp {
                 tool(ui, &mut act, "Pipe", K::Seq(&q::PIPE));
                 ui.separator();
                 tool(ui, &mut act, "Offset Surface (solids)", K::Seq(&q::OFFSET_SRF));
-                ui.label(
-                    egui::RichText::new("Surfaces are meshes until the NURBS kernel lands")
-                        .small()
-                        .weak(),
-                );
+                ui.separator();
+                tool(ui, &mut act, "Extract Isocurve", K::Seq(&q::EXTRACT_ISO));
+                tool(ui, &mut act, "Untrim", K::OnSel("Untrim"));
+                tool(ui, &mut act, "Shrink Trimmed Surface", K::OnSel("ShrinkTrimmedSrf"));
+                tool(ui, &mut act, "Duplicate Edges", K::Seq(&q::DUPEDGE));
+                tool(ui, &mut act, "Duplicate Border", K::Seq(&q::DUPBORDER));
             });
             ui.menu_button("Solid", |ui| {
                 tool(ui, &mut act, "Box", K::Box);
@@ -431,6 +434,8 @@ impl FormaApp {
                     ui.close();
                 }
                 tool(ui, &mut act, "Cap Planar Holes", K::OnSel("Cap"));
+                tool(ui, &mut act, "Create Solid from Surfaces", K::OnSel("CreateSolid"));
+                tool(ui, &mut act, "Merge Coplanar Faces", K::OnSel("MergeAllCoplanarFaces"));
                 ui.separator();
                 ui.menu_button("Boolean", |ui| {
                     tool(ui, &mut act, "Union", K::Seq(&q::BOOLEAN_UNION));
@@ -446,6 +451,9 @@ impl FormaApp {
                 tool(ui, &mut act, "Offset Solid", K::Seq(&q::OFFSET_SRF));
             });
             ui.menu_button("Mesh", |ui| {
+                tool(ui, &mut act, "Mesh from Surfaces", K::OnSel("Mesh"));
+                tool(ui, &mut act, "Mesh to Polysurface", K::OnSel("MeshToNURB"));
+                ui.separator();
                 tool(ui, &mut act, "Weld (smooth)", K::Seq(&q::WELD));
                 tool(ui, &mut act, "Unweld (show edges)", K::Seq(&q::UNWELD));
                 tool(ui, &mut act, "Explode into Faces", K::Explode);
@@ -562,6 +570,7 @@ impl FormaApp {
                 });
                 tool(ui, &mut act, "Bounding Box", K::OnSel("BoundingBox"));
                 tool(ui, &mut act, "Object Details (What)", K::OnSel("What"));
+                tool(ui, &mut act, "Check Objects", K::OnSel("Check"));
             });
             ui.menu_button("Help", |ui| {
                 item(ui, &mut act, "Commands, keys and mouse", "F1", Act::Help);

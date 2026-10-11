@@ -645,6 +645,77 @@ pub fn make_to_point(
     )
 }
 
+/// Face `i` without its trims (Untrim): its whole underlying surface.
+pub fn untrimmed(b: &Brep, i: usize) -> Option<Brep> {
+    let b = baked(b)?;
+    let mut len = 0;
+    // SAFETY: buffer outlives the call; owned bytes out.
+    made(
+        unsafe {
+            ffi::f3dm_bytes_untrimmed(
+                b.data.as_ptr(),
+                b.data.len(),
+                c_int::try_from(i).ok()?,
+                &mut len,
+            )
+        },
+        len,
+    )
+}
+
+/// The surfaces shrunk to their trims (ShrinkTrimmedSrf).
+pub fn shrunk(b: &Brep) -> Option<Brep> {
+    let b = baked(b)?;
+    let mut len = 0;
+    // SAFETY: buffer outlives the call; owned bytes out.
+    made(
+        unsafe { ffi::f3dm_bytes_shrunk(b.data.as_ptr(), b.data.len(), &mut len) },
+        len,
+    )
+}
+
+/// openNURBS validity check (Check): valid, and the report when it is not.
+pub fn check(b: &Brep) -> (bool, String) {
+    let Some(b) = baked(b) else {
+        return (false, "the transformed object could not be made".into());
+    };
+    let mut buf = vec![0u8; 4096];
+    // SAFETY: buffer of the given capacity.
+    let ok = unsafe {
+        ffi::f3dm_bytes_check(b.data.as_ptr(), b.data.len(), buf.as_mut_ptr().cast(), 4096)
+    } != 0;
+    let end = buf.iter().position(|c| *c == 0).unwrap_or(buf.len());
+    (ok, String::from_utf8_lossy(&buf[..end]).trim().to_string())
+}
+
+/// Isocurves through the point of the surface nearest to `p` (inside the
+/// trims): `dir` 0 along u, 1 along v, 2 both.
+pub fn isocurves(b: &Brep, p: Point3, dir: u8) -> Vec<Geometry> {
+    let Some(b) = baked(b) else {
+        return Vec::new();
+    };
+    let xyz = [p.x, p.y, p.z];
+    let mut n = 0;
+    // SAFETY: buffers outlive the call; the stream is freed by take_stream.
+    let Some(s) = (unsafe {
+        take_stream(
+            ffi::f3dm_bytes_isocurves(
+                b.data.as_ptr(),
+                b.data.len(),
+                xyz.as_ptr(),
+                c_int::from(dir),
+                &mut n,
+            ),
+            n,
+        )
+    }) else {
+        return Vec::new();
+    };
+    let count = s.first().map_or(0, |c| *c as usize);
+    let mut k = 1;
+    (0..count).map_while(|_| read_segment(&s, &mut k)).collect()
+}
+
 /// Exact polysurface with the flat faces of `mesh` (see
 /// [`Mesh::polyhedron`]); `None` when the mesh is not a clean polyhedron of at
 /// most `max_faces` faces.
@@ -1065,6 +1136,45 @@ mod tests {
             "{}",
             volume(&pyr.mesh)
         );
+    }
+
+    #[test]
+    fn untrim_shrink_check_and_isocurves() {
+        let p = |x, y| Point3::new(x, y, 0.0);
+        let outer = Geometry::Polyline(vec![
+            p(0.0, 0.0),
+            p(10.0, 0.0),
+            p(10.0, 10.0),
+            p(0.0, 10.0),
+            p(0.0, 0.0),
+        ]);
+        let hole = Geometry::Arc(CircleArc::circle(
+            Plane::from_normal(p(5.0, 5.0), Vec3::Z),
+            2.0,
+        ));
+        let s = make_planar(&outer, &[&hole], Vec3::Z, None).unwrap();
+        let full = untrimmed(&s, 0).expect("untrimmed");
+        let area = |b: &Brep| -> f64 {
+            b.mesh
+                .triangles
+                .iter()
+                .map(|t| {
+                    let [a, b2, c] = t.map(|i| b.mesh.positions[i as usize]);
+                    (b2 - a).cross(c - a).length() / 2.0
+                })
+                .sum()
+        };
+        assert!((area(&full) - 100.0).abs() < 1e-6, "{}", area(&full));
+        assert!(shrunk(&s).is_some());
+        let (ok, _) = check(&s);
+        assert!(ok);
+        // Isocurves of a sphere through a point on its equator.
+        let sph = make_sphere(Point3::ORIGIN, 10.0).unwrap();
+        let isos = isocurves(&sph, Point3::new(0.0, 7.0, 7.0), 2);
+        assert_eq!(isos.len(), 2, "{isos:?}");
+        // The plate with a hole: the line across the middle is cut in two.
+        let cut = isocurves(&s, p(5.0, 5.0), 0);
+        assert_eq!(cut.len(), 2, "{cut:?}");
     }
 
     #[test]

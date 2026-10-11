@@ -7,6 +7,32 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.9.1] — 2026-10-11
+
+### Added
+- Exact `Loft` (smooth NURBS through the curves, or `Loft straight` with ruled faces),
+  `ExtrudeCrvAlongCrv`, `ExtrudeCrvToPoint`.
+- `Untrim`, `ShrinkTrimmedSrf`, `CreateSolid`, `ExtractIsocurve`, `Check`.
+- Curved surfaces show isocurves (wireframe views too); Cen and Quad snaps on round
+  edges of polysurfaces.
+- Menus: Surface → Extract Isocurve / Untrim / Shrink; Solid → Create Solid, Merge
+  Coplanar Faces; Mesh → Mesh from Surfaces / Mesh to Polysurface; Analyze → Check;
+  Edit → Select → Surfaces / Polysurfaces / Meshes.
+
+### Fixed (found by testing the app)
+- Crash when moving the mouse after starting `Cone` or `TCone`.
+- A command typed with its arguments now runs exactly like a script line (optional
+  arguments too); the interactive tool starts only when something is missing.
+- Fast typing: the last characters before Enter are no longer lost.
+- At a "select objects" prompt, SelAll / SelLast / Select work; other commands cancel
+  the tool and run.
+- Clicking in a shaded view picks the solid in front, not curves hidden behind it.
+- BooleanDifference / BooleanSplit act on two preselected solids.
+- `ExtrudeCrvAlongCrv` keeps the preselected profile and asks for the path.
+- The command history follows new output; selection is cleared on Open; zooming in
+  close no longer hides the model; no dark spots at the poles of round surfaces;
+  edges on faces are no longer dashed; `What` prints clean numbers.
+
 ## [0.9.0] — 2026-10-11
 
 ### Added

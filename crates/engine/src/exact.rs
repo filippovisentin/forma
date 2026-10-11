@@ -282,3 +282,238 @@ impl Command for MeshSphere {
         Ok(format!("added #{} mesh sphere", ids[0].0))
     }
 }
+
+/// Selected exact surfaces and polysurfaces.
+fn selected_breps(
+    ctx: &Context,
+    cmd: &str,
+) -> Result<Vec<(forma_doc::ObjectId, forma_geom::Brep)>, CommandError> {
+    let out: Vec<_> = ctx
+        .selected(cmd)?
+        .into_iter()
+        .filter_map(|id| match &ctx.doc.object(id)?.geometry {
+            Geometry::Brep(b) => Some((id, b.clone())),
+            _ => None,
+        })
+        .collect();
+    if out.is_empty() {
+        return Err(CommandError::Invalid(format!(
+            "{cmd}: select surfaces or polysurfaces"
+        )));
+    }
+    Ok(out)
+}
+
+simple_command!(
+    Untrim,
+    "Untrim",
+    &["UntrimAll"],
+    "Untrim — remove the trims (holes and cut outlines) of the selected surfaces: each face becomes its whole underlying surface"
+);
+impl Command for Untrim {
+    impl_meta!(Untrim);
+    fn run(&self, ctx: &mut Context, _args: &mut Args) -> CommandResult {
+        let breps = selected_breps(ctx, "Untrim")?;
+        let mut t = ctx.doc.begin();
+        let mut n = 0;
+        let mut made = Vec::new();
+        for (id, b) in breps {
+            let faces: Vec<forma_geom::Brep> = (0..b.faces)
+                .filter_map(|i| forma_io_3dm::exact::untrimmed(&b, i))
+                .collect();
+            if faces.is_empty() {
+                continue;
+            }
+            let like = t.doc().object(id).expect("selected").clone();
+            t.remove(id);
+            n += faces.len();
+            for f in faces {
+                made.push(t.add_like(Geometry::Brep(f), &like));
+            }
+        }
+        if n == 0 {
+            return Err(CommandError::Invalid("Untrim: nothing to untrim".into()));
+        }
+        t.commit();
+        ctx.selection = made.into_iter().collect();
+        Ok(format!("{n} untrimmed surface(s)"))
+    }
+}
+
+simple_command!(
+    ShrinkTrimmedSrf,
+    "ShrinkTrimmedSrf",
+    &["ShrinkTrimmedSrfToEdge"],
+    "ShrinkTrimmedSrf — shrink the underlying surfaces of the selected surfaces close to their trims (lighter files)"
+);
+impl Command for ShrinkTrimmedSrf {
+    impl_meta!(ShrinkTrimmedSrf);
+    fn run(&self, ctx: &mut Context, _args: &mut Args) -> CommandResult {
+        let breps = selected_breps(ctx, "ShrinkTrimmedSrf")?;
+        let mut t = ctx.doc.begin();
+        let mut n = 0;
+        for (id, b) in breps {
+            if let Some(s) = forma_io_3dm::exact::shrunk(&b) {
+                t.replace(id, Geometry::Brep(s));
+                n += 1;
+            }
+        }
+        t.commit();
+        Ok(format!("{n} surface(s) shrunk"))
+    }
+}
+
+simple_command!(
+    Check,
+    "Check",
+    &["CheckObject"],
+    "Check — test the selected surfaces and polysurfaces for validity (what Rhino would reject)"
+);
+impl Command for Check {
+    impl_meta!(Check);
+    fn run(&self, ctx: &mut Context, _args: &mut Args) -> CommandResult {
+        let breps = selected_breps(ctx, "Check")?;
+        let mut out = Vec::new();
+        let mut bad = 0;
+        for (id, b) in &breps {
+            let (ok, log) = forma_io_3dm::exact::check(b);
+            if ok {
+                out.push(format!("#{} is valid", id.0));
+            } else {
+                bad += 1;
+                let first = log.lines().take(3).collect::<Vec<_>>().join(" / ");
+                out.push(format!("#{} is NOT valid: {first}", id.0));
+            }
+        }
+        out.insert(
+            0,
+            format!("{} object(s) checked, {bad} with problems", breps.len()),
+        );
+        Ok(out.join("\n"))
+    }
+}
+
+simple_command!(
+    ExtractIsocurve,
+    "ExtractIsocurve",
+    &["ExtractIso"],
+    "ExtractIsocurve #id <point> [u|v|both] — curves along the surface through the point (only inside the trims)"
+);
+impl Command for ExtractIsocurve {
+    impl_meta!(ExtractIsocurve);
+    fn run(&self, ctx: &mut Context, args: &mut Args) -> CommandResult {
+        let tok = args
+            .next_token()
+            .ok_or(CommandError::MissingInput("surface #id"))?;
+        let id = crate::edit::parse_ids(vec![tok])?[0];
+        let p = args.point("point on the surface", ctx.last_point)?;
+        let dir = if args.keyword("u") {
+            0
+        } else if args.keyword("v") {
+            1
+        } else {
+            let _ = args.keyword("both");
+            2
+        };
+        let Some(Geometry::Brep(b)) = ctx.doc.object(id).map(|o| &o.geometry) else {
+            return Err(CommandError::Invalid(format!(
+                "#{} is not a surface or polysurface",
+                id.0
+            )));
+        };
+        let curves = forma_io_3dm::exact::isocurves(b, p, dir);
+        if curves.is_empty() {
+            return Err(CommandError::Invalid(
+                "ExtractIsocurve: no isocurve there".into(),
+            ));
+        }
+        let n = curves.len();
+        let ids = crate::create::finish(ctx, curves, true)?;
+        Ok(format!("{n} isocurve(s) #{}", ids[0].0))
+    }
+}
+
+simple_command!(
+    CreateSolid,
+    "CreateSolid",
+    &[],
+    "CreateSolid — join the selected surfaces into closed solids (they must enclose a volume)"
+);
+impl Command for CreateSolid {
+    impl_meta!(CreateSolid);
+    fn run(&self, ctx: &mut Context, _args: &mut Args) -> CommandResult {
+        let breps = selected_breps(ctx, "CreateSolid")?;
+        let tol = ctx.doc.absolute_tolerance.max(1e-9);
+        let refs: Vec<&forma_geom::Brep> = breps.iter().map(|(_, b)| b).collect();
+        let (pieces, _) = forma_io_3dm::exact::join(&refs, tol)
+            .ok_or_else(|| CommandError::Invalid("CreateSolid: could not join".into()))?;
+        let solids: Vec<forma_geom::Brep> = pieces.into_iter().filter(|b| b.solid).collect();
+        if solids.is_empty() {
+            return Err(CommandError::Invalid(
+                "CreateSolid: the surfaces do not close a volume (use Cap or add the missing faces)"
+                    .into(),
+            ));
+        }
+        let like = ctx.doc.object(breps[0].0).expect("selected").clone();
+        let mut t = ctx.doc.begin();
+        // Only the surfaces that went into a solid are replaced.
+        for (id, _) in &breps {
+            t.remove(*id);
+        }
+        let n = solids.len();
+        let ids: Vec<_> = solids
+            .into_iter()
+            .map(|s| t.add_like(Geometry::Brep(s), &like))
+            .collect();
+        t.commit();
+        ctx.selection = ids.into_iter().collect();
+        Ok(format!("{n} solid(s)"))
+    }
+}
+
+#[cfg(test)]
+mod more_tests {
+    use crate::Engine;
+    use forma_doc::Geometry;
+
+    #[test]
+    fn untrim_check_isocurve_create_solid() {
+        let mut e = Engine::new();
+        e.run_line("Rectangle 0,0 10,10").unwrap();
+        e.run_line("Circle 5,5 2").unwrap();
+        e.run_line("SelAll").unwrap();
+        e.run_line("PlanarSrf").unwrap();
+        e.run_line("SelLast").unwrap();
+        let r = e.run_line("Check").unwrap();
+        assert!(r.contains("is valid"), "{r}");
+        e.run_line("Untrim").unwrap();
+        let Geometry::Brep(b) = &e.doc().objects().last().unwrap().geometry else {
+            panic!()
+        };
+        assert!((b.mesh.area() - 100.0).abs() < 1e-6);
+        e.run_line("ShrinkTrimmedSrf").unwrap();
+        e.run_line("New").unwrap();
+        e.run_line("Sphere 0,0,0 10").unwrap();
+        e.run_line("ExtractIsocurve #1 0,7,7 both").unwrap();
+        assert_eq!(e.doc().len(), 3);
+        // A box exploded then rebuilt with CreateSolid.
+        e.run_line("New").unwrap();
+        e.run_line("Box 0,0 10,10 10").unwrap();
+        e.run_line("SelAll").unwrap();
+        e.run_line("Explode").unwrap();
+        e.run_line("SelAll").unwrap();
+        e.run_line("CreateSolid").unwrap();
+        assert_eq!(e.doc().len(), 1);
+        e.run_line("SelAll").unwrap();
+        e.run_line("Explode").unwrap();
+        e.run_line("SelNone").unwrap();
+        let ids: Vec<String> = e
+            .doc()
+            .objects()
+            .take(3)
+            .map(|o| format!("#{}", o.id.0))
+            .collect();
+        e.run_line(&format!("Select {}", ids.join(" "))).unwrap();
+        assert!(e.run_line("CreateSolid").is_err());
+    }
+}

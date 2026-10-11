@@ -12,7 +12,7 @@ is in `Help` and `forma-cli commands`.
 
 ## Summary
 
-279 Rhino commands: **194 ✓**, **44 partial**, **25 ✗**, **16 needs kernel**.
+279 Rhino commands: **204 ✓**, **38 partial**, **25 ✗**, **12 needs kernel**.
 
 ## Drawing: points and lines
 
@@ -92,7 +92,7 @@ is in `Help` and `forma-cli commands`.
 | DupBorder | ✓ | `DupBorder` exact naked edges of surfaces, borders of meshes |
 | DupFaceBorder | ✓ | `DupFaceBorder #id <point>` exact face border |
 | Intersect | partial | `Intersect` curve–curve points only |
-| ExtractIsocurve | needs kernel |  |
+| ExtractIsocurve | ✓ | `ExtractIsocurve #id <point> [u|v|both]`, only inside the trims |
 | ExtractPt | ✓ | `ExtractPt` |
 | ProjectToCPlane | ✓ | `ProjectToCPlane` |
 | Silhouette | ✓ | `Silhouette [direction]` (active view in the app) |
@@ -103,20 +103,20 @@ is in `Help` and `forma-cli commands`.
 | Rhino command | Forma | Notes |
 |---|---|---|
 | PlanarSrf | ✓ | `PlanarSrf` exact trimmed planes, with holes |
-| Plane | partial | `Plane <c1> <c2>` — mesh |
+| Plane | ✓ | `Plane <c1> <c2>` exact trimmed plane |
 | SrfPt | partial | `SrfPt` 3 or 4 corners — mesh |
 | EdgeSrf | partial | `EdgeSrf` 2–4 curves (Coons patch) — mesh |
-| Loft | partial | `Loft` — mesh, no style options |
+| Loft | ✓ | `Loft [straight]` exact: one smooth NURBS surface through the curves, or ruled faces |
 | Revolve | ✓ | `Revolve` exact surfaces of revolution (profile closing on the axis → solid) |
 | RailRevolve | ✗ |  |
 | Sweep1 | partial | `Sweep1` — mesh, rotation-minimising frames |
 | Sweep2 | partial | `Sweep2 #rail1 #rail2` — mesh, profile scaled between the rails |
 | NetworkSrf | needs kernel |  |
 | Patch | needs kernel |  |
-| ExtrudeCrv | partial | `Extrude` / `ExtrudeCrv` — closed curves give closed meshes |
-| ExtrudeCrvAlongCrv | partial | `ExtrudeCrvAlongCrv #path` — mesh |
+| ExtrudeCrv | ✓ | `Extrude` / `ExtrudeCrv` exact; closed planar curves give closed solids, nested curves walls with holes |
+| ExtrudeCrvAlongCrv | ✓ | `ExtrudeCrvAlongCrv #path` exact (translational sweep), closed planar profiles capped |
 | ExtrudeCrvTapered | partial | `ExtrudeCrvTapered <distance> <draft°>` — mesh |
-| ExtrudeCrvToPoint | partial | `ExtrudeCrvToPoint <apex>` — mesh, closed planar curves capped |
+| ExtrudeCrvToPoint | ✓ | `ExtrudeCrvToPoint <apex>` exact, closed planar curves give closed solids |
 | ExtrudeSrf | ✓ | `ExtrudeSrf` exact (closed solid) |
 | Pipe | partial | `Pipe <radius> [open]` — mesh |
 | OffsetSrf | partial | `OffsetSrf <distance>` on closed meshes (OpenCascade), mesh result |
@@ -126,8 +126,8 @@ is in `Help` and `forma-cli commands`.
 | ExtendSrf | needs kernel |  |
 | Rebuild (surfaces) | needs kernel |  |
 | Split / Trim (surfaces) | needs kernel |  |
-| ShrinkTrimmedSrf | needs kernel |  |
-| Untrim | needs kernel |  |
+| ShrinkTrimmedSrf | ✓ | `ShrinkTrimmedSrf` |
+| Untrim | ✓ | `Untrim` whole underlying surface of each face |
 | ExtractSrf | partial | `Explode` gives the exact faces; face picking with Ctrl+Shift+click |
 
 ## Solids
@@ -155,7 +155,7 @@ is in `Help` and `forma-cli commands`.
 | ChamferEdge | partial | `ChamferEdge #id <distance> <points near edges>` exact for flat-faced solids |
 | Shell | partial | `Shell #id <thickness> <points on removed faces>` exact for flat-faced solids |
 | MergeAllFaces | ✓ | `MergeAllCoplanarFaces` (flat-faced polysurfaces) |
-| CreateSolid | needs kernel |  |
+| CreateSolid | ✓ | `CreateSolid` joins surfaces that enclose a volume |
 | Wirecut | needs kernel |  |
 
 ## Mesh
@@ -314,7 +314,7 @@ is in `Help` and `forma-cli commands`.
 | DraftAngleAnalysis | ✗ |  |
 | ClosestPt | ✓ | `ClosestPt <point>` adds points on the selected objects |
 | CrvDeviation | ✗ |  |
-| List / Check | partial | `List` (= `What`); no validity check |
+| List / Check | ✓ | `List` (= `What`); `Check` validity of surfaces and polysurfaces |
 
 ## Dimensions and annotation
 

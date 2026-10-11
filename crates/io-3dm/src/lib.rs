@@ -265,6 +265,22 @@ pub(crate) mod ffi {
             tol: f64,
             len: *mut usize,
         ) -> *mut u8;
+        pub fn f3dm_bytes_untrimmed(
+            data: *const u8,
+            len: usize,
+            i: c_int,
+            out: *mut usize,
+        ) -> *mut u8;
+        pub fn f3dm_bytes_shrunk(data: *const u8, len: usize, out: *mut usize) -> *mut u8;
+        pub fn f3dm_bytes_check(data: *const u8, len: usize, buf: *mut c_char, cap: c_int)
+            -> c_int;
+        pub fn f3dm_bytes_isocurves(
+            data: *const u8,
+            len: usize,
+            xyz: *const f64,
+            dir: c_int,
+            n: *mut usize,
+        ) -> *mut f64;
         pub fn f3dm_make_polyhedron(
             pts: *const f64,
             npts: c_int,

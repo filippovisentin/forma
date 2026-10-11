@@ -1861,7 +1861,28 @@ pub static SWEEP2: Seq = Seq {
 };
 
 /// Every sequence tool (for typed names, help and tests).
+pub static EXTRACT_ISO: Seq = Seq {
+    name: "ExtractIsocurve",
+    tip: "ExtractIsocurve — curves along a surface through a point",
+    sel: false,
+    steps: &[
+        In::Object("Surface or polysurface"),
+        In::SurfacePoint("Click the point on the surface"),
+        In::Choice("Direction", &["Both", "U", "V"]),
+    ],
+    emit: |v, _| {
+        format!(
+            "ExtractIsocurve #{} {} {}",
+            v[0].o(),
+            fmt_p(v[1].p()),
+            v[2].t().to_lowercase()
+        )
+    },
+    preview: none,
+};
+
 pub static ALL: &[&Seq] = &[
+    &EXTRACT_ISO,
     &HATCH_SOLID,
     &SWEEP2,
     &LINE_BOTH_SIDES,
