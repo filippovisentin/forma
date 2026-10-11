@@ -4,7 +4,7 @@
 //! only records the transform, applied to the exact object when it is written,
 //! so a polysurface stays a polysurface when it goes back to Rhino.
 
-use crate::{Mesh, Point3, Xform};
+use crate::{CircleArc, Mesh, Point3, Xform};
 use std::sync::Arc;
 
 #[derive(Clone, PartialEq)]
@@ -28,6 +28,10 @@ pub struct Brep {
     /// Corners of the exact object and the midpoints of its edges (snapping).
     pub vertices: Vec<Point3>,
     pub edge_mids: Vec<Point3>,
+    /// Circles and arcs among the edges (centre and quadrant snaps).
+    pub arcs: Vec<CircleArc>,
+    /// Isocurves across curved faces, for wireframe display (polylines).
+    pub wires: Vec<Vec<Point3>>,
 }
 
 impl std::fmt::Debug for Brep {
@@ -69,6 +73,17 @@ impl Brep {
             face_ends: self.face_ends.clone(),
             vertices: self.vertices.iter().map(|p| x.point(*p)).collect(),
             edge_mids: self.edge_mids.iter().map(|p| x.point(*p)).collect(),
+            // Arcs stay arcs only under shape-keeping maps.
+            arcs: if x.is_similarity() {
+                self.arcs.iter().map(|a| a.transformed(x)).collect()
+            } else {
+                Vec::new()
+            },
+            wires: self
+                .wires
+                .iter()
+                .map(|w| w.iter().map(|p| x.point(*p)).collect())
+                .collect(),
         }
     }
 }
@@ -123,6 +138,8 @@ mod tests {
             face_ends: vec![1],
             vertices: Vec::new(),
             edge_mids: Vec::new(),
+            arcs: Vec::new(),
+            wires: Vec::new(),
         };
         assert_eq!(b.face_of_triangle(0), Some(0));
         assert_eq!(b.face_of_triangle(1), None);

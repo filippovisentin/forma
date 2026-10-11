@@ -166,14 +166,12 @@ impl FormaApp {
             dialog = dialog.set_directory(dir);
         }
         let Some(p) = dialog.save_file() else {
-            return false;
-        };
-        if path.is_some() && !self.saved_by_forma {
             self.log(
                 LogKind::Normal,
-                "note: surfaces imported from Rhino are saved as meshes in this version",
+                "Save cancelled (or `Save <path>` to save without the dialog)",
             );
-        }
+            return false;
+        };
         self.run_engine(&format!("Save {}", p.display()));
         self.saved_at != before
     }

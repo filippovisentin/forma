@@ -1535,10 +1535,7 @@ static void push_curve(const ON_Curve& c, std::vector<double>& out) {
 
 // Edge curves of a brep as a segment stream: count, then one segment per edge.
 // `which`: 0 all edges, 1 naked (border) edges only.
-double* f3dm_bytes_edges(const unsigned char* data, size_t len, int which, size_t* n) {
-  *n = 0;
-  ON_Brep* b = brep_from_bytes(data, len);
-  if (!b) return nullptr;
+static std::vector<double> edges_stream(const ON_Brep* b, int which) {
   std::vector<double> out{0.0};
   int count = 0;
   for (int i = 0; i < b->m_E.Count(); i++) {
@@ -1549,8 +1546,32 @@ double* f3dm_bytes_edges(const unsigned char* data, size_t len, int which, size_
     push_curve(e, out);
     if (out.size() > before) count++;
   }
-  delete b;
   out[0] = count;
+  return out;
+}
+
+static double* to_malloc(const std::vector<double>& out, size_t* n) {
+  double* r = static_cast<double*>(std::malloc(out.size() * sizeof(double)));
+  if (!r) return nullptr;
+  std::memcpy(r, out.data(), out.size() * sizeof(double));
+  *n = out.size();
+  return r;
+}
+
+// Edge stream of a brep object of a model (see f3dm_bytes_edges).
+double* f3dm_object_edges(const F3dmModel* m, int obj, size_t* n) {
+  *n = 0;
+  const ON_Brep* b = brep_of(m, obj);
+  if (!b) return nullptr;
+  return to_malloc(edges_stream(b, 0), n);
+}
+
+double* f3dm_bytes_edges(const unsigned char* data, size_t len, int which, size_t* n) {
+  *n = 0;
+  ON_Brep* b = brep_from_bytes(data, len);
+  if (!b) return nullptr;
+  std::vector<double> out = edges_stream(b, which);
+  delete b;
   double* r = static_cast<double*>(std::malloc(out.size() * sizeof(double)));
   if (!r) return nullptr;
   std::memcpy(r, out.data(), out.size() * sizeof(double));
@@ -1836,6 +1857,47 @@ static int reverse_edge(ON_Brep* b, int ei) {
   return ni;
 }
 
+// Direction in which trim `ti` runs along its edge, seen from the face's
+// outside (+1 / -1).
+static int trim_sense(const ON_Brep* b, int ti) {
+  const ON_BrepTrim& t = b->m_T[ti];
+  const ON_BrepFace* f = t.Face();
+  const int s = t.m_bRev3d ? -1 : 1;
+  return (f && f->m_bRev) ? -s : s;
+}
+
+// Makes the faces of each connected piece face the same way: across a shared
+// edge the two trims must run in opposite directions. Faces are flipped
+// (breadth first from the first face of each piece) where they do not.
+static void orient_faces(ON_Brep* b) {
+  const int nf = b->m_F.Count();
+  std::vector<int> state(nf, 0);  // 0 unvisited, 1 done
+  for (int seed = 0; seed < nf; seed++) {
+    if (state[seed]) continue;
+    state[seed] = 1;
+    std::vector<int> queue{seed};
+    while (!queue.empty()) {
+      const int fi = queue.back();
+      queue.pop_back();
+      const ON_BrepFace& f = b->m_F[fi];
+      for (int li = 0; li < f.m_li.Count(); li++) {
+        const ON_BrepLoop& l = b->m_L[f.m_li[li]];
+        for (int k = 0; k < l.m_ti.Count(); k++) {
+          const int ti = l.m_ti[k];
+          const int ei = b->m_T[ti].m_ei;
+          if (ei < 0 || b->m_E[ei].m_ti.Count() != 2) continue;
+          const int other = b->m_E[ei].m_ti[0] == ti ? b->m_E[ei].m_ti[1] : b->m_E[ei].m_ti[0];
+          const int gi = b->m_T[other].Face() ? b->m_T[other].Face()->m_face_index : -1;
+          if (gi < 0 || gi == fi || state[gi]) continue;
+          if (trim_sense(b, ti) == trim_sense(b, other)) b->FlipFace(b->m_F[gi]);
+          state[gi] = 1;
+          queue.push_back(gi);
+        }
+      }
+    }
+  }
+}
+
 // Joins coincident naked edges of a brep (Rhino's Join): coincident vertices
 // are merged, then naked edges lying on top of each other become one edge.
 // Returns the number of edges joined.
@@ -1885,6 +1947,15 @@ static int join_naked_edges(ON_Brep* b, double tol) {
   }
   b->Compact();
   b->SetTolerancesBoxesAndFlags(false, false, false, false, true, true, true, true);
+  orient_faces(b);
+  if (std::getenv("F3DM_DEBUG")) {
+    for (int i = 0; i < b->m_E.Count(); i++) {
+      const ON_BrepEdge& e = b->m_E[i];
+      if (e.m_ti.Count() == 1)
+        fprintf(stderr, "naked edge %d v%d-v%d len %g\n", i, e.m_vi[0], e.m_vi[1],
+                e.PointAtStart().DistanceTo(e.PointAtEnd()));
+    }
+  }
   return joined;
 }
 
@@ -1969,6 +2040,320 @@ unsigned char* f3dm_make_revolved(const double* stream, size_t n, const double* 
   }
   join_naked_edges(all, tol);
   return brep_bytes(all, len);
+}
+
+}  // extern "C"
+
+extern "C" {
+
+// One closed or open curve from a segment stream as a single ON_Curve
+// (a polycurve when it has several segments). Caller owns the result.
+static ON_Curve* stream_curve(const double* s, size_t n, size_t* k) {
+  ON_SimpleArray<ON_Curve*> segs;
+  if (!read_loop(s, n, k, segs)) {
+    for (int i = 0; i < segs.Count(); i++) delete segs[i];
+    return nullptr;
+  }
+  if (segs.Count() == 1) return segs[0];
+  ON_PolyCurve* pc = new ON_PolyCurve(segs.Count());
+  for (int i = 0; i < segs.Count(); i++) pc->Append(segs[i]);
+  return pc;
+}
+
+// Solves the dense system a·x = b (n×n, m right-hand sides) in place.
+static bool solve(std::vector<double>& a, std::vector<double>& b, int n, int m) {
+  for (int c = 0; c < n; c++) {
+    int p = c;
+    for (int r = c + 1; r < n; r++)
+      if (std::fabs(a[r * n + c]) > std::fabs(a[p * n + c])) p = r;
+    if (std::fabs(a[p * n + c]) < 1e-14) return false;
+    if (p != c) {
+      for (int j = 0; j < n; j++) std::swap(a[c * n + j], a[p * n + j]);
+      for (int j = 0; j < m; j++) std::swap(b[c * m + j], b[p * m + j]);
+    }
+    for (int r = 0; r < n; r++) {
+      if (r == c) continue;
+      const double f = a[r * n + c] / a[c * n + c];
+      if (f == 0.0) continue;
+      for (int j = c; j < n; j++) a[r * n + j] -= f * a[c * n + j];
+      for (int j = 0; j < m; j++) b[r * m + j] -= f * b[c * m + j];
+    }
+  }
+  for (int r = 0; r < n; r++)
+    for (int j = 0; j < m; j++) b[r * m + j] /= a[r * n + r];
+  return true;
+}
+
+// Makes two NURBS curves compatible (same degree, knots and CV count) by
+// building the ruled surface between them and reading back its two edges.
+static bool make_compatible(ON_NurbsCurve& a, ON_NurbsCurve& b) {
+  ON_NurbsSurface s;
+  if (!s.CreateRuledSurface(a, b)) return false;
+  const ON_Interval v = s.Domain(1);
+  ON_Curve* ca = s.IsoCurve(0, v[0]);
+  ON_Curve* cb = s.IsoCurve(0, v[1]);
+  const ON_NurbsCurve* na = ON_NurbsCurve::Cast(ca);
+  const ON_NurbsCurve* nb = ON_NurbsCurve::Cast(cb);
+  const bool ok = na && nb;
+  if (ok) {
+    a = *na;
+    b = *nb;
+  }
+  delete ca;
+  delete cb;
+  return ok;
+}
+
+// Loft through `count` curves (segment streams, one after the other). With
+// `straight`, ruled faces between neighbouring curves joined into a
+// polysurface; else one smooth NURBS surface through all of them (cubic
+// across, chord-length parameters).
+unsigned char* f3dm_make_loft(const double* stream, size_t n, int count, int straight, double tol,
+                              size_t* len) {
+  *len = 0;
+  size_t k = 0;
+  std::vector<ON_Curve*> curves;
+  for (int i = 0; i < count; i++) {
+    ON_Curve* c = stream_curve(stream, n, &k);
+    if (!c) break;
+    curves.push_back(c);
+  }
+  auto cleanup = [&]() {
+    for (ON_Curve* c : curves) delete c;
+  };
+  if (static_cast<int>(curves.size()) != count || count < 2) {
+    cleanup();
+    return nullptr;
+  }
+  // Same running direction as the first curve (open curves).
+  for (size_t i = 1; i < curves.size(); i++) {
+    const ON_3dPoint a0 = curves[i - 1]->PointAtStart(), a1 = curves[i - 1]->PointAtEnd();
+    const ON_3dPoint b0 = curves[i]->PointAtStart(), b1 = curves[i]->PointAtEnd();
+    if (!curves[i]->IsClosed() && a0.DistanceTo(b1) + a1.DistanceTo(b0) < a0.DistanceTo(b0) + a1.DistanceTo(b1))
+      curves[i]->Reverse();
+  }
+  ON_Brep* out = nullptr;
+  if (straight || count == 2) {
+    out = new ON_Brep();
+    for (size_t i = 0; i + 1 < curves.size(); i++) {
+      // One ruled face per pair of matching segments when both are polycurves
+      // with the same number of segments (keeps creases as edges).
+      const ON_PolyCurve* pa = ON_PolyCurve::Cast(curves[i]);
+      const ON_PolyCurve* pb = ON_PolyCurve::Cast(curves[i + 1]);
+      std::vector<std::pair<const ON_Curve*, const ON_Curve*>> pairs;
+      if (pa && pb && pa->Count() == pb->Count()) {
+        for (int s = 0; s < pa->Count(); s++) pairs.push_back({pa->SegmentCurve(s), pb->SegmentCurve(s)});
+      } else {
+        pairs.push_back({curves[i], curves[i + 1]});
+      }
+      for (auto& pr : pairs) {
+        ON_NurbsSurface* ns = ON_NurbsSurface::New();
+        if (!ns->CreateRuledSurface(*pr.first, *pr.second)) {
+          delete ns;
+          continue;
+        }
+        ON_Surface* s = ns;
+        ON_Brep f;
+        if (f.Create(s)) out->Append(f);
+        else delete s;
+      }
+    }
+    if (out->m_F.Count() == 0) {
+      delete out;
+      cleanup();
+      return nullptr;
+    }
+    join_naked_edges(out, tol);
+  } else {
+    // Compatible NURBS forms: same degree, domain and knots.
+    std::vector<ON_NurbsCurve> nc(curves.size());
+    for (size_t i = 0; i < curves.size(); i++) {
+      if (!curves[i]->GetNurbForm(nc[i])) {
+        cleanup();
+        return nullptr;
+      }
+      nc[i].SetDomain(0.0, 1.0);
+    }
+    for (int pass = 0; pass < 2; pass++)
+      for (size_t i = 1; i < nc.size(); i++)
+        if (!make_compatible(nc[0], nc[i])) {
+          cleanup();
+          return nullptr;
+        }
+    const int cvs = nc[0].CVCount();
+    for (auto& c : nc)
+      if (c.CVCount() != cvs || c.Order() != nc[0].Order()) {
+        cleanup();
+        return nullptr;
+      }
+    // Chord-length parameters across the curves (averaged over the columns).
+    const int rows = count;
+    std::vector<double> t(rows, 0.0);
+    for (int j = 0; j < cvs; j++) {
+      std::vector<double> d(rows, 0.0);
+      double total = 0.0;
+      for (int i = 1; i < rows; i++) {
+        ON_3dPoint p, q;
+        nc[i - 1].GetCV(j, p);
+        nc[i].GetCV(j, q);
+        d[i] = p.DistanceTo(q);
+        total += d[i];
+      }
+      double acc = 0.0;
+      for (int i = 1; i < rows; i++) {
+        acc += total > 0 ? d[i] / total : 1.0 / (rows - 1);
+        t[i] += acc / cvs;
+      }
+    }
+    t[rows - 1] = 1.0;
+    const int deg = (std::min)(3, rows - 1);
+    // Knots by averaging (openNURBS convention: no repeated end knots).
+    std::vector<double> knots(rows + deg - 1);
+    for (int i = 0; i < deg; i++) {
+      knots[i] = 0.0;
+      knots[rows + deg - 2 - i] = 1.0;
+    }
+    for (int j = 1; j < rows - deg; j++) {
+      double s = 0.0;
+      for (int i = j; i < j + deg; i++) s += t[i];
+      knots[deg - 1 + j] = s / deg;
+    }
+    // Basis matrix at the parameters.
+    std::vector<double> a(rows * rows, 0.0);
+    for (int i = 0; i < rows; i++) {
+      for (int j = 0; j < rows; j++) {
+        ON_NurbsCurve basis(1, false, deg + 1, rows);
+        for (int q = 0; q < rows + deg - 1; q++) basis.SetKnot(q, knots[q]);
+        for (int q = 0; q < rows; q++) basis.SetCV(q, ON_3dPoint(q == j ? 1.0 : 0.0, 0, 0));
+        double v = 0.0;
+        basis.Evaluate(t[i], 0, 1, &v);
+        a[i * rows + j] = v;
+      }
+    }
+    const bool rational = nc[0].IsRational();
+    // Right-hand sides: homogeneous control points, one column per CV.
+    std::vector<double> b(rows * cvs * 4, 0.0);
+    for (int i = 0; i < rows; i++)
+      for (int j = 0; j < cvs; j++) {
+        ON_4dPoint h;
+        nc[i].GetCV(j, h);
+        if (!rational) h.w = 1.0;
+        double* r = &b[(i * cvs + j) * 4];
+        r[0] = h.x;
+        r[1] = h.y;
+        r[2] = h.z;
+        r[3] = h.w;
+      }
+    if (!solve(a, b, rows, cvs * 4)) {
+      cleanup();
+      return nullptr;
+    }
+    bool any_rational = rational;
+    ON_NurbsSurface* ns =
+        ON_NurbsSurface::New(3, any_rational, nc[0].Order(), deg + 1, cvs, rows);
+    for (int q = 0; q < nc[0].KnotCount(); q++) ns->SetKnot(0, q, nc[0].Knot(q));
+    for (int q = 0; q < rows + deg - 1; q++) ns->SetKnot(1, q, knots[q]);
+    for (int i = 0; i < rows; i++)
+      for (int j = 0; j < cvs; j++) {
+        const double* r = &b[(i * cvs + j) * 4];
+        if (any_rational) ns->SetCV(j, i, ON_4dPoint(r[0], r[1], r[2], r[3]));
+        else ns->SetCV(j, i, ON_3dPoint(r[0], r[1], r[2]));
+      }
+    ON_Surface* s = ns;
+    out = new ON_Brep();
+    if (!out->Create(s)) {
+      delete s;
+      delete out;
+      cleanup();
+      return nullptr;
+    }
+    join_naked_edges(out, tol);  // closed curves: the seam edges become one
+  }
+  cleanup();
+  return brep_bytes(out, len);
+}
+
+// Surface made by moving a curve along a path (ExtrudeCrvAlongCrv): the sum
+// surface curve(s) + path(t) - path(start), one face per profile segment.
+unsigned char* f3dm_make_along(const double* stream, size_t n, double tol, size_t* len) {
+  *len = 0;
+  size_t k = 0;
+  ON_Curve* profile = stream_curve(stream, n, &k);
+  ON_Curve* path = profile ? stream_curve(stream, n, &k) : nullptr;
+  if (!profile || !path) {
+    delete profile;
+    delete path;
+    return nullptr;
+  }
+  ON_Brep* out = new ON_Brep();
+  std::vector<const ON_Curve*> segs;
+  if (const ON_PolyCurve* pc = ON_PolyCurve::Cast(profile)) {
+    for (int i = 0; i < pc->Count(); i++) segs.push_back(pc->SegmentCurve(i));
+  } else {
+    segs.push_back(profile);
+  }
+  for (const ON_Curve* s : segs) {
+    ON_SumSurface* ss = new ON_SumSurface();
+    // ON_SumSurface: S(u,v) = A(u) + B(v) + basepoint; shift so the profile starts in place.
+    ss->m_curve[0] = s->DuplicateCurve();
+    ss->m_curve[1] = path->DuplicateCurve();
+    ss->m_basepoint = ON_3dPoint::Origin - path->PointAtStart();
+    ss->BoundingBox();
+    ON_Surface* srf = ss;
+    ON_Brep f;
+    if (f.Create(srf)) out->Append(f);
+    else delete srf;
+  }
+  delete profile;
+  delete path;
+  if (out->m_F.Count() == 0) {
+    delete out;
+    return nullptr;
+  }
+  join_naked_edges(out, tol);
+  return brep_bytes(out, len);
+}
+
+// Cone from a curve to an apex (ExtrudeCrvToPoint): one face per segment,
+// joined; a closed planar curve also gets its planar base (a closed solid).
+unsigned char* f3dm_make_to_point(const double* stream, size_t n, const double* apex,
+                                  const double* plane, double tol, size_t* len) {
+  *len = 0;
+  size_t k = 0;
+  ON_Curve* c = stream_curve(stream, n, &k);
+  if (!c) return nullptr;
+  ON_Brep* out = new ON_Brep();
+  std::vector<const ON_Curve*> segs;
+  if (const ON_PolyCurve* pc = ON_PolyCurve::Cast(c)) {
+    for (int i = 0; i < pc->Count(); i++) segs.push_back(pc->SegmentCurve(i));
+  } else {
+    segs.push_back(c);
+  }
+  for (const ON_Curve* s : segs) {
+    ON_NurbsSurface* ns = ON_NurbsSurface::New();
+    if (!ns->CreateConeSurface(ON_3dPoint(apex), *s)) {
+      delete ns;
+      continue;
+    }
+    ON_Surface* srf = ns;
+    ON_Brep f;
+    if (f.Create(srf)) out->Append(f);
+    else delete srf;
+  }
+  if (plane && c->IsClosed()) {
+    ON_Brep* base = ON_BrepTrimmedPlane(plane_of(plane), *c, nullptr);
+    if (base) {
+      out->Append(*base);
+      delete base;
+    }
+  }
+  delete c;
+  if (out->m_F.Count() == 0) {
+    delete out;
+    return nullptr;
+  }
+  join_naked_edges(out, tol);
+  return brep_bytes(out, len);
 }
 
 }  // extern "C"

@@ -170,6 +170,15 @@ impl FormaApp {
             self.run_engine_from_tool(&line);
             return;
         }
+        // Two-solid booleans with two or more solids preselected act on the
+        // selection (the oldest is the base), like Rhino.
+        if matches!(kind.name(), "BooleanDifference" | "BooleanSplit")
+            && self.engine.ctx.selection.len() >= 2
+        {
+            self.set_last(kind.name());
+            self.run_engine_from_tool(kind.name());
+            return;
+        }
         let doc = self.engine.doc();
         let sel = &self.engine.ctx.selection;
         let anchor = pick::selection_box(doc, sel).map_or(Point3::ORIGIN, |b| b.center());

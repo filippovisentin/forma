@@ -146,6 +146,8 @@ pub fn xform16(x: &Xform) -> [f64; 16] {
         face_ends: Vec::new(),
         vertices: Vec::new(),
         edge_mids: Vec::new(),
+        arcs: Vec::new(),
+        wires: Vec::new(),
     }
     .xform16()
 }
@@ -394,6 +396,26 @@ pub(crate) fn curve_from_stream(s: &[f64]) -> Option<Geometry> {
     Geometry::from_chain(forma_geom::Chain::new(segs))
 }
 
+/// [`take_stream`] for the display module.
+pub(crate) unsafe fn take_stream_pub(p: *mut f64, n: usize) -> Option<Vec<f64>> {
+    take_stream(p, n)
+}
+
+/// The circles and arcs of an edge stream (count, then segments).
+pub(crate) fn arcs_in_stream(s: &[f64]) -> Vec<forma_geom::CircleArc> {
+    let count = s.first().map_or(0, |c| *c as usize);
+    let mut k = 1;
+    let mut out = Vec::new();
+    for _ in 0..count {
+        match read_segment(s, &mut k) {
+            Some(Geometry::Arc(a)) => out.push(a),
+            Some(_) => {}
+            None => break,
+        }
+    }
+    out
+}
+
 /// Edge curves of an exact surface (with its pending transform): all edges, or
 /// only the naked (border) ones. Lines, arcs and NURBS curves, as in the model.
 pub fn edges(b: &Brep, naked_only: bool) -> Vec<Geometry> {
@@ -547,6 +569,77 @@ pub fn make_revolved(
                 tol,
                 &mut len,
             )
+        },
+        len,
+    )
+}
+
+/// Loft through curves (in order): one smooth NURBS surface through all of
+/// them, or with `straight` ruled faces between neighbours (a polysurface).
+pub fn make_loft(curves: &[&Geometry], straight: bool, tol: f64) -> Option<Brep> {
+    let mut stream = Vec::new();
+    for c in curves {
+        if !push_loop(&mut stream, c) {
+            return None;
+        }
+    }
+    let mut len = 0;
+    // SAFETY: buffers outlive the call; owned bytes out.
+    made(
+        unsafe {
+            ffi::f3dm_make_loft(
+                stream.as_ptr(),
+                stream.len(),
+                c_int::try_from(curves.len()).ok()?,
+                c_int::from(straight),
+                tol,
+                &mut len,
+            )
+        },
+        len,
+    )
+}
+
+/// The surface swept by `profile` moving along `path` without turning
+/// (ExtrudeCrvAlongCrv).
+pub fn make_along(profile: &Geometry, path: &Geometry, tol: f64) -> Option<Brep> {
+    let mut stream = Vec::new();
+    if !push_loop(&mut stream, profile) || !push_loop(&mut stream, path) {
+        return None;
+    }
+    let mut len = 0;
+    // SAFETY: buffers outlive the call; owned bytes out.
+    made(
+        unsafe { ffi::f3dm_make_along(stream.as_ptr(), stream.len(), tol, &mut len) },
+        len,
+    )
+}
+
+/// The cone from `curve` to `apex` (ExtrudeCrvToPoint); a closed planar curve
+/// (normal given) also gets its flat base, making a closed solid.
+pub fn make_to_point(
+    curve: &Geometry,
+    apex: Point3,
+    base_normal: Option<Vec3>,
+    tol: f64,
+) -> Option<Brep> {
+    let mut stream = Vec::new();
+    if !push_loop(&mut stream, curve) {
+        return None;
+    }
+    let a = [apex.x, apex.y, apex.z];
+    let plane = base_normal.and_then(|n| {
+        curve
+            .curve_points()
+            .first()
+            .map(|o| plane9(&Plane::from_normal(*o, n)))
+    });
+    let pp = plane.as_ref().map_or(std::ptr::null(), |p| p.as_ptr());
+    let mut len = 0;
+    // SAFETY: buffers outlive the call; owned bytes out.
+    made(
+        unsafe {
+            ffi::f3dm_make_to_point(stream.as_ptr(), stream.len(), a.as_ptr(), pp, tol, &mut len)
         },
         len,
     )
@@ -895,6 +988,83 @@ mod tests {
             let (m, ..) = mesh_bytes(&b.data, Some(&stretch)).expect(name);
             assert!((volume(&m) - 6.0 * v).abs() / v < 0.2, "{name} stretched");
         }
+    }
+
+    #[test]
+    fn loft_sweep_along_and_cone_to_point() {
+        let c = |z: f64, r: f64| {
+            Geometry::Arc(CircleArc::circle(
+                Plane::from_normal(Point3::new(0.0, 0.0, z), Vec3::Z),
+                r,
+            ))
+        };
+        let (a, b, d) = (c(0.0, 5.0), c(5.0, 3.0), c(10.0, 5.0));
+        let smooth = make_loft(&[&a, &b, &d], false, 1e-6).expect("loft");
+        assert_eq!(smooth.faces, 1);
+        let bb = smooth.mesh.bounding_box().unwrap();
+        assert!(
+            (bb.max.z - 10.0).abs() < 1e-6 && (bb.max.x - 5.0).abs() < 0.1,
+            "{bb:?}"
+        );
+        // The middle section passes through the middle circle.
+        let near_mid = smooth
+            .mesh
+            .positions
+            .iter()
+            .filter(|p| (p.z - 5.0).abs() < 0.05)
+            .all(|p| ((p.x * p.x + p.y * p.y).sqrt() - 3.0).abs() < 0.05);
+        assert!(near_mid);
+        let straight = make_loft(&[&a, &b, &d], true, 1e-6).expect("straight loft");
+        assert_eq!(straight.faces, 2);
+        // Polylines with the same corners: one ruled face per side.
+        let sq = |z: f64, s: f64| {
+            let p = |x, y| Point3::new(x, y, z);
+            Geometry::Polyline(vec![
+                p(0.0, 0.0),
+                p(s, 0.0),
+                p(s, s),
+                p(0.0, s),
+                p(0.0, 0.0),
+            ])
+        };
+        let box_side = make_loft(&[&sq(0.0, 4.0), &sq(3.0, 4.0)], true, 1e-6).expect("ruled");
+        assert_eq!(box_side.faces, 4);
+        // Profile along a path.
+        let prof = Geometry::Line(forma_geom::LineCurve::new(
+            Point3::new(0.0, 0.0, 0.0),
+            Point3::new(0.0, 0.0, 2.0),
+        ));
+        let path = Geometry::Arc(
+            CircleArc::from_center_start_end(
+                Point3::new(10.0, 0.0, 0.0),
+                Point3::new(0.0, 0.0, 0.0),
+                Point3::new(20.0, 0.0, 0.0),
+                -Vec3::Z,
+            )
+            .unwrap(),
+        );
+        let along = make_along(&prof, &path, 1e-6).expect("along");
+        assert_eq!(along.faces, 1);
+        let bb = along.mesh.bounding_box().unwrap();
+        assert!(
+            (bb.max.z - 2.0).abs() < 1e-9 && (bb.max.x - 20.0).abs() < 1e-6,
+            "{bb:?}"
+        );
+        // A square to a point: a closed pyramid.
+        let pyr = make_to_point(
+            &sq(0.0, 4.0),
+            Point3::new(2.0, 2.0, 6.0),
+            Some(Vec3::Z),
+            1e-6,
+        )
+        .expect("pyramid");
+        assert!(pyr.solid, "{pyr:?}");
+        assert_eq!(pyr.faces, 5);
+        assert!(
+            (volume(&pyr.mesh) - 32.0).abs() < 1e-6,
+            "{}",
+            volume(&pyr.mesh)
+        );
     }
 
     #[test]

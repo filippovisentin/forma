@@ -593,6 +593,9 @@ fn circle_at(c: Point3, r: f64, pl: &Plane) -> Vec<[Point3; 2]> {
 
 /// Base circle while the radius is picked; base and top while the height is.
 fn round_solid(v: &View, top_radius: Option<usize>) -> Vec<[Point3; 2]> {
+    if v.vals.is_empty() {
+        return Vec::new(); // nothing picked yet
+    }
     let c = v.p(0);
     match v.vals.len() {
         1 => {

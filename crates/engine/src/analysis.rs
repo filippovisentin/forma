@@ -208,10 +208,21 @@ impl Command for What {
             if o.locked {
                 out.push_str(", locked");
             }
-            let _ = writeln!(out, "; box {} .. {}", b.min, b.max);
+            let _ = writeln!(out, "; box {} .. {}", short(b.min), short(b.max));
         }
         Ok(out.trim_end().to_string())
     }
+}
+
+/// A point for reports: at most 4 decimals, no float noise (`-19.99999999`
+/// → `-20`, `1.5e-14` → `0`).
+fn short(p: forma_geom::Point3) -> String {
+    let f = |v: f64| {
+        let r = (v * 1e4).round() / 1e4;
+        let r = if r == 0.0 { 0.0 } else { r }; // no "-0"
+        format!("{r}")
+    };
+    format!("{},{},{}", f(p.x), f(p.y), f(p.z))
 }
 
 #[cfg(test)]
@@ -275,5 +286,6 @@ mod tests {
         assert!(r.contains("6 face(s)"), "{r}");
         assert!(r.contains("closed"), "{r}");
         assert!(r.contains("group 1"), "{r}");
+        assert!(r.contains("box 0,0,0 .. 10,10,10"), "{r}");
     }
 }

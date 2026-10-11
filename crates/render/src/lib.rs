@@ -236,9 +236,10 @@ impl Renderer {
             std::mem::size_of::<MeshVertex>(),
             &mesh_attrs,
             wgpu::PrimitiveTopology::TriangleList,
+            // Enough that edges lying on faces do not come out dashed.
             wgpu::DepthBiasState {
-                constant: 2,
-                slope_scale: 1.5,
+                constant: 8,
+                slope_scale: 2.5,
                 clamp: 0.0,
             },
             true,

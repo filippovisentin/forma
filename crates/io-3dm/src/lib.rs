@@ -94,6 +94,7 @@ pub(crate) mod ffi {
         ) -> c_int;
         pub fn f3dm_curve_points(m: *mut Model, obj: c_int) -> c_int;
         pub fn f3dm_curve_exact(m: *const Model, obj: c_int, n: *mut usize) -> *mut f64;
+        pub fn f3dm_object_edges(m: *const Model, obj: c_int, n: *mut usize) -> *mut f64;
         pub fn f3dm_brep_points(m: *mut Model, obj: c_int, nverts: *mut c_int) -> c_int;
         pub fn f3dm_points_copy(m: *const Model, xyz: *mut f64, cap_points: c_int) -> c_int;
         pub fn f3dm_mesh_data(m: *mut Model, obj: c_int, nv: *mut c_int, nt: *mut c_int) -> c_int;
@@ -244,6 +245,23 @@ pub(crate) mod ffi {
             origin: *const f64,
             axis: *const f64,
             angle: f64,
+            tol: f64,
+            len: *mut usize,
+        ) -> *mut u8;
+        pub fn f3dm_make_loft(
+            stream: *const f64,
+            n: usize,
+            count: c_int,
+            straight: c_int,
+            tol: f64,
+            len: *mut usize,
+        ) -> *mut u8;
+        pub fn f3dm_make_along(stream: *const f64, n: usize, tol: f64, len: *mut usize) -> *mut u8;
+        pub fn f3dm_make_to_point(
+            stream: *const f64,
+            n: usize,
+            apex: *const f64,
+            plane: *const f64,
             tol: f64,
             len: *mut usize,
         ) -> *mut u8;

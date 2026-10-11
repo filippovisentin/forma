@@ -151,6 +151,16 @@ fn build_entry(o: &forma_doc::Object) -> Entry {
             // The exact corners and edge midpoints, whatever the size.
             points.extend(b.vertices.iter().map(|p| (*p, SnapKind::End)));
             points.extend(b.edge_mids.iter().map(|p| (*p, SnapKind::Mid)));
+            for a in &b.arcs {
+                arcs.push(*a);
+                points.push((a.center(), SnapKind::Cen));
+                for k in 0..4 {
+                    let ang = k as f64 * std::f64::consts::FRAC_PI_2;
+                    if a.is_closed() || (ang > 1e-9 && ang < a.sweep - 1e-9) {
+                        points.push((a.point_at_angle(ang), SnapKind::Quad));
+                    }
+                }
+            }
             if b.mesh.positions.len() <= MAX_VERTEX_SNAPS && b.planar {
                 points.extend(b.mesh.positions.iter().map(|p| (*p, SnapKind::Vertex)));
             }

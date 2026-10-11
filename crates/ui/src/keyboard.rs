@@ -17,6 +17,40 @@ impl FormaApp {
         if !other_focused {
             self.command_line_keys(ctx);
         }
+        // Characters typed just before Enter in the same frame belong to this
+        // command (the text box only sees them after this runs): take them now,
+        // and leave anything typed after Enter for the next command.
+        if cmd_focused {
+            let early = ctx.input_mut(|i| {
+                let Some(at) = i.events.iter().position(|e| {
+                    matches!(
+                        e,
+                        egui::Event::Key {
+                            key: Key::Enter,
+                            pressed: true,
+                            ..
+                        }
+                    )
+                }) else {
+                    return String::new();
+                };
+                let mut text = String::new();
+                let mut k = 0;
+                i.events.retain(|e| {
+                    let before = k < at;
+                    k += 1;
+                    match e {
+                        egui::Event::Text(t) if before => {
+                            text.push_str(t);
+                            false
+                        }
+                        _ => true,
+                    }
+                });
+                text
+            });
+            self.command.push_str(&early);
+        }
         // Enter in the command line submits and keeps the focus there.
         if cmd_focused && ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Enter)) {
             let text = self.take_command();

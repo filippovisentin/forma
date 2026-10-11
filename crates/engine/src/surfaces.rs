@@ -266,11 +266,12 @@ simple_command!(
     Loft,
     "Loft",
     &[],
-    "Loft — mesh surface through the selected curves (ordered along their common normal, else by id)"
+    "Loft [straight] — smooth surface through the selected curves (ordered along their common normal, else by id); straight: ruled faces between neighbours"
 );
 impl Command for Loft {
     impl_meta!(Loft);
-    fn run(&self, ctx: &mut Context, _args: &mut Args) -> CommandResult {
+    fn run(&self, ctx: &mut Context, args: &mut Args) -> CommandResult {
+        let straight = args.keyword("straight");
         let mut curves = selected_curves(ctx, "Loft")?;
         if curves.len() < 2 {
             return Err(CommandError::Invalid(
@@ -306,6 +307,23 @@ impl Command for Loft {
                 - keys.iter().fold(f64::MAX, |a, k| a.min(*k));
             if spread > ctx.tolerance.absolute {
                 curves.sort_by(|a, b| key(a).total_cmp(&key(b)));
+            }
+        }
+        // Exact loft (closed curves turned the same way round).
+        {
+            let n0 = curves[0].geometry.curve_normal();
+            let geoms: Vec<Geometry> = curves
+                .iter()
+                .map(|c| match (closed, n0, c.geometry.curve_normal()) {
+                    (true, Some(a), Some(b)) if a.dot(b) < 0.0 => c.geometry.reversed(),
+                    _ => c.geometry.clone(),
+                })
+                .collect();
+            let refs: Vec<&Geometry> = geoms.iter().collect();
+            let tol = ctx.doc.absolute_tolerance.max(1e-9);
+            if let Some(b) = forma_io_3dm::exact::make_loft(&refs, straight, tol) {
+                let ids = add_selected(ctx, vec![(Geometry::Brep(b), curves[0].clone())]);
+                return Ok(format!("lofted {} curves into #{}", curves.len(), ids[0].0));
             }
         }
         let raw: Vec<Vec<Point3>> = curves

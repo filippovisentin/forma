@@ -8,6 +8,7 @@ use eframe::egui::{Pos2, Rect};
 use forma_doc::{Document, Geometry, ObjectId};
 use forma_geom::{BoundingBox, Point3, Vec3};
 use forma_render::glam::DVec3;
+use forma_render::DisplayMode;
 use std::collections::BTreeSet;
 
 fn ray_box(o: Point3, d: Vec3, min: Point3, max: Point3) -> bool {
@@ -114,6 +115,14 @@ pub fn pick(
     origin: DVec3,
 ) -> Option<ObjectId> {
     let pr = vp.projector(origin);
+    // In shaded views a surface in front hides the curves behind it.
+    let hit = ray_mesh(doc, index, vp, pos, origin);
+    let (ro, rd) = vp.ray(pos, origin);
+    let rd2 = rd.dot(rd).max(1e-300);
+    let hidden = |p: Point3| match (&hit, vp.mode) {
+        (Some((t, ..)), DisplayMode::Shaded) => (p - ro).dot(rd) / rd2 > t * 1.001 + 1e-9,
+        _ => false,
+    };
     let mut best_curve: Option<(f32, ObjectId)> = None;
     for (id, e) in index.visible() {
         if !pr.box_near(e.min, e.max, pos, CURVE_RADIUS) {
@@ -129,20 +138,29 @@ pub fn pick(
         };
         if let Geometry::Point(p) = &o.geometry {
             if let Some(sp) = pr.to_screen(*p) {
-                offer(sp.distance(pos));
+                if !hidden(*p) {
+                    offer(sp.distance(pos));
+                }
             }
         } else if let Some(pts) = &e.curve {
             let sc = screen_polyline(&pr, pts);
-            for w in sc.windows(2) {
+            for (k, w) in sc.windows(2).enumerate() {
                 if let (Some(a), Some(b)) = (w[0], w[1]) {
-                    offer(dist_point_segment(pos, a, b));
+                    let ab = b - a;
+                    let t = if ab.length_sq() > 0.0 {
+                        ((pos - a).dot(ab) / ab.length_sq()).clamp(0.0, 1.0)
+                    } else {
+                        0.0
+                    };
+                    let p3 = pts[k] + (pts[k + 1] - pts[k]) * f64::from(t);
+                    if !hidden(p3) {
+                        offer(dist_point_segment(pos, a, b));
+                    }
                 }
             }
         }
     }
-    best_curve
-        .map(|c| c.1)
-        .or_else(|| ray_mesh(doc, index, vp, pos, origin).map(|m| m.1))
+    best_curve.map(|c| c.1).or_else(|| hit.map(|m| m.1))
 }
 
 /// Point on the curve under the cursor (within a few screen points), used by

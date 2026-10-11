@@ -252,7 +252,12 @@ pub(crate) unsafe fn brep_of_object(
     info: &ffi::Object,
     data: Vec<u8>,
 ) -> forma_geom::Brep {
-    let (mesh, face_ends) = brep_mesh_faces(m, obj);
+    let (mesh, face_ends, wires) = brep_mesh_faces(m, obj);
+    let mut n_edges = 0usize;
+    let p = ffi::f3dm_object_edges(m, obj, &mut n_edges);
+    let arcs = crate::exact::take_stream_pub(p, n_edges)
+        .map(|s| crate::exact::arcs_in_stream(&s))
+        .unwrap_or_default();
     let mut nverts: c_int = 0;
     let n = ffi::f3dm_brep_points(m, obj, &mut nverts);
     let mut buf = vec![0.0; n.max(0) as usize * 3];
@@ -272,20 +277,88 @@ pub(crate) unsafe fn brep_of_object(
         face_ends,
         vertices: pts,
         edge_mids,
+        arcs,
+        wires,
     }
 }
 
-/// Display mesh of a brep and, per face, the end of its triangles.
-pub(crate) unsafe fn brep_mesh_faces(m: *mut ffi::Model, obj: c_int) -> (Mesh, Vec<u32>) {
+/// Display mesh of a brep, per face the end of its triangles, and the
+/// isocurves of its curved faces.
+pub(crate) unsafe fn brep_mesh_faces(
+    m: *mut ffi::Model,
+    obj: c_int,
+) -> (Mesh, Vec<u32>, Vec<Vec<Point3>>) {
     let mut out = Mesh::default();
     let mut ends = Vec::new();
+    let mut wires = Vec::new();
     for face in 0..ffi::f3dm_face_count(m, obj) {
-        if let Some(fm) = face_mesh(m, obj, face) {
+        if let Some((fm, w)) = face_mesh(m, obj, face) {
             out.append(&fm);
+            wires.extend(w);
         }
         ends.push(out.triangles.len() as u32);
     }
-    (out, ends)
+    (out, ends, wires)
+}
+
+/// Isocurves inside the trimmed region of a curved face: three across each
+/// parameter direction (like Rhino's default density), as 3D polylines.
+unsafe fn face_isocurves(
+    m: *mut ffi::Model,
+    obj: c_int,
+    face: c_int,
+    info: &FaceInfo,
+    loops: &[Vec<[f64; 2]>],
+) -> Vec<Vec<Point3>> {
+    if info.degree[0] <= 1 && info.degree[1] <= 1 {
+        return Vec::new(); // flat faces show their edges only
+    }
+    const SAMPLES: usize = 48;
+    let [u0, u1, v0, v1] = info.domain;
+    let mut runs: Vec<Vec<[f64; 2]>> = Vec::new();
+    for k in 1..4 {
+        let f = k as f64 / 4.0;
+        for dir in 0..2 {
+            let mut run = Vec::new();
+            for i in 0..=SAMPLES {
+                let t = i as f64 / SAMPLES as f64;
+                let uv = if dir == 0 {
+                    [u0 + (u1 - u0) * f, v0 + (v1 - v0) * t]
+                } else {
+                    [u0 + (u1 - u0) * t, v0 + (v1 - v0) * f]
+                };
+                if inside(uv, loops) {
+                    run.push(uv);
+                } else if run.len() >= 2 {
+                    runs.push(std::mem::take(&mut run));
+                } else {
+                    run.clear();
+                }
+            }
+            if run.len() >= 2 {
+                runs.push(run);
+            }
+        }
+    }
+    runs.into_iter()
+        .map(|r| {
+            let flat: Vec<f64> = r.iter().flat_map(|p| [p[0], p[1]]).collect();
+            let mut xyz = vec![0.0; r.len() * 3];
+            let mut nrm = vec![0.0; r.len() * 3];
+            ffi::f3dm_face_eval(
+                m,
+                obj,
+                face,
+                r.len() as c_int,
+                flat.as_ptr(),
+                xyz.as_mut_ptr(),
+                nrm.as_mut_ptr(),
+            );
+            xyz.chunks(3)
+                .map(|c| Point3::new(c[0], c[1], c[2]))
+                .collect()
+        })
+        .collect()
 }
 
 struct FaceInfo {
@@ -295,7 +368,11 @@ struct FaceInfo {
     reversed: bool,
 }
 
-unsafe fn face_mesh(m: *mut ffi::Model, obj: c_int, face: c_int) -> Option<Mesh> {
+unsafe fn face_mesh(
+    m: *mut ffi::Model,
+    obj: c_int,
+    face: c_int,
+) -> Option<(Mesh, Vec<Vec<Point3>>)> {
     let mut domain = [0.0; 4];
     let mut spans = [0 as c_int; 2];
     let mut degree = [0 as c_int; 2];
@@ -353,6 +430,7 @@ unsafe fn face_mesh(m: *mut ffi::Model, obj: c_int, face: c_int) -> Option<Mesh>
     if tris.is_empty() {
         return None;
     }
+    let wires = face_isocurves(m, obj, face, &info, &loops);
 
     let n = uv.len();
     let flat: Vec<f64> = uv.iter().flat_map(|p| [p[0], p[1]]).collect();
@@ -382,11 +460,14 @@ unsafe fn face_mesh(m: *mut ffi::Model, obj: c_int, face: c_int) -> Option<Mesh>
         .into_iter()
         .map(|[a, b, c]| if info.reversed { [a, c, b] } else { [a, b, c] })
         .collect();
-    Some(Mesh {
-        positions,
-        normals,
-        triangles,
-    })
+    Some((
+        Mesh {
+            positions,
+            normals,
+            triangles,
+        },
+        wires,
+    ))
 }
 
 /// Even-odd point-in-region test against all loops.

@@ -334,6 +334,21 @@ fn build_entry(o: &Object, color: [u8; 3], origin: DVec3) -> Entry {
                     color: EDGE_COLOR,
                 });
             }
+            // Isocurves of curved faces (what wireframe views show of them).
+            if let Geometry::Brep(b) = &o.geometry {
+                for w in &b.wires {
+                    for s in w.windows(2) {
+                        e.lines.push(LineVertex {
+                            pos: local(&s[0]),
+                            color: EDGE_COLOR,
+                        });
+                        e.lines.push(LineVertex {
+                            pos: local(&s[1]),
+                            color: EDGE_COLOR,
+                        });
+                    }
+                }
+            }
         }
         // Drawn by the UI as screen-space markers.
         Geometry::Point(_) => {}

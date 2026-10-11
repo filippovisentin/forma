@@ -238,6 +238,39 @@ mod sequence_tools {
     }
 
     #[test]
+    fn no_sequence_preview_panics_at_any_step() {
+        let skeleton = [[p(0.0, 0.0), p(10.0, 10.0)]];
+        for s in seq::ALL {
+            for k in 0..=s.steps.len() {
+                let vals: Vec<seq::Val> = s.steps[..k]
+                    .iter()
+                    .enumerate()
+                    .map(|(i, st)| match st {
+                        In::Point(_) | In::SurfacePoint(_) => {
+                            seq::Val::P(p(10.0 * i as f64, 5.0 * i as f64))
+                        }
+                        In::Dist(..) | In::Height(..) | In::Num(..) => seq::Val::N(7.0),
+                        In::Text(_) => seq::Val::T("x".into()),
+                        In::Object(_) => seq::Val::O(1),
+                        In::CurveNear(_) => seq::Val::OP(1, p(1.0, 1.0)),
+                        In::Points(..) | In::SurfacePoints(..) => {
+                            seq::Val::Ps(vec![p(0.0, 0.0), p(5.0, 0.0), p(5.0, 5.0)])
+                        }
+                        In::Choice(_, c) => seq::Val::W(c[0]),
+                    })
+                    .collect();
+                let v = seq::View {
+                    vals: &vals,
+                    cur: Point3::new(20.0, 13.0, 4.0),
+                    plane: &Plane::TOP,
+                    skeleton: &skeleton,
+                };
+                let _ = (s.preview)(&v);
+            }
+        }
+    }
+
+    #[test]
     fn every_sequence_tool_is_an_engine_command_and_a_typed_name() {
         let e = Engine::new();
         for s in seq::ALL {

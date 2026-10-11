@@ -403,13 +403,14 @@ impl Command for ExtrudeCrvAlongCrv {
             .next_token()
             .ok_or(CommandError::MissingInput("path curve #id"))?;
         let path_id = parse_ids(vec![tok])?[0];
-        let path = ctx
+        let path_geometry = ctx
             .doc
             .object(path_id)
             .filter(|o| o.geometry.is_curve())
             .ok_or_else(|| CommandError::Invalid(format!("#{} is not a curve", path_id.0)))?
             .geometry
-            .curve_points();
+            .clone();
+        let path = path_geometry.curve_points();
         let curves: Vec<Object> = crate::surfaces::selected_curves(ctx, "ExtrudeCrvAlongCrv")?
             .into_iter()
             .filter(|o| o.id != path_id)
@@ -422,6 +423,17 @@ impl Command for ExtrudeCrvAlongCrv {
         let tol = ctx.doc.absolute_tolerance.max(1e-9);
         let mut out = Vec::new();
         for c in curves {
+            // Exact: the profile moved along the path, capped when it is a
+            // closed planar curve.
+            if let Some(mut s) = forma_io_3dm::exact::make_along(&c.geometry, &path_geometry, tol) {
+                if c.geometry.is_closed_curve() && closed_plane(&c.geometry, tol).is_some() {
+                    if let Some((capped, _)) = forma_io_3dm::exact::capped(&s, tol) {
+                        s = capped;
+                    }
+                }
+                out.push((Geometry::Brep(s), c));
+                continue;
+            }
             let (prof, closed) = profile(&c.geometry);
             let rows: Vec<Vec<Point3>> = path
                 .iter()
@@ -511,6 +523,19 @@ impl Command for ExtrudeCrvToPoint {
                 continue;
             }
             let plane = closed_plane(&c.geometry, tol);
+            if let Some((pl, _)) = &plane {
+                if pl.coords(apex).2.abs() <= tol {
+                    return Err(CommandError::Invalid(
+                        "ExtrudeCrvToPoint: the point lies in the curve's plane".into(),
+                    ));
+                }
+            }
+            // Exact cone faces (and the flat base of a closed planar curve).
+            let base = plane.as_ref().map(|(pl, _)| pl.z).filter(|_| closed);
+            if let Some(s) = forma_io_3dm::exact::make_to_point(&c.geometry, apex, base, tol) {
+                out.push((Geometry::Brep(s), c));
+                continue;
+            }
             if let Some((pl, _)) = &plane {
                 // Loop counter-clockwise seen from the apex side: sides face out.
                 let n = forma_geom::newell_area(&pts);
@@ -820,18 +845,22 @@ mod tests {
         e.run_line("Rectangle 0,0 10,10").unwrap();
         e.run_line("SelAll").unwrap();
         e.run_line("ExtrudeCrvToPoint 5,5,30").unwrap();
-        let Geometry::Mesh(m) = &e.doc().objects().last().unwrap().geometry else {
+        let Geometry::Brep(b) = &e.doc().objects().last().unwrap().geometry else {
             panic!()
         };
+        assert!(b.solid);
+        let m = &b.mesh;
         assert!(m.is_closed(1e-6));
         assert!((m.volume() - 1000.0).abs() < 1e-6, "{}", m.volume());
         // Apex below: still a positive volume.
         e.run_line("SelNone").unwrap();
         e.run_line("Select #1").unwrap();
         e.run_line("ExtrudeCrvToPoint 5,5,-30").unwrap();
-        let Geometry::Mesh(m) = &e.doc().objects().last().unwrap().geometry else {
+        let Geometry::Brep(b) = &e.doc().objects().last().unwrap().geometry else {
             panic!()
         };
+        assert!(b.solid);
+        let m = &b.mesh;
         assert!((m.volume() - 1000.0).abs() < 1e-6, "{}", m.volume());
         assert!(e.run_line("ExtrudeCrvToPoint 20,20,0").is_err());
         // An open curve: a fan surface.
@@ -839,9 +868,11 @@ mod tests {
         e.run_line("Line 0,0 10,0").unwrap();
         e.run_line("SelLast").unwrap();
         e.run_line("ExtrudeCrvToPoint 0,0,10").unwrap();
-        let Geometry::Mesh(m) = &e.doc().objects().last().unwrap().geometry else {
+        let Geometry::Brep(b) = &e.doc().objects().last().unwrap().geometry else {
             panic!()
         };
+        assert!(!b.solid);
+        let m = &b.mesh;
         assert!((m.area() - 50.0).abs() < 1e-9);
     }
 
