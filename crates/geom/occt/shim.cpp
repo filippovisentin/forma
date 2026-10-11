@@ -49,7 +49,11 @@
 #include <Geom2dConvert.hxx>
 #include <Geom2d_BSplineCurve.hxx>
 #include <Geom2d_TrimmedCurve.hxx>
+#include <GeomAPI_ProjectPointOnSurf.hxx>
 #include <GeomConvert.hxx>
+#include <GeomConvert_SurfToAnaSurf.hxx>
+#include <GeomProjLib.hxx>
+#include <Geom_ElementarySurface.hxx>
 #include <Geom_BSplineCurve.hxx>
 #include <Geom_BSplineSurface.hxx>
 #include <Geom_TrimmedCurve.hxx>
@@ -747,95 +751,267 @@ Handle(Geom2d_BSplineCurve) curve_on_face(const TopoDS_Edge& e, const TopoDS_Fac
 
 }  // namespace
 
-extern "C" {
-
 // Exact brep from a neutral stream: shared vertices and edges, pcurves fitted to
-// the edges, closed shells become solids. Null (with an error) when the data is
-// malformed or OpenCascade does not accept the result as valid.
-FoShape* fo_shape_from_neutral(const double* s, size_t n, double tol) {
-  const char* stage = "reading";
-  try {
+// the edges, closed shells become solids. Faces whose NURBS surface is really a
+// plane, cylinder, cone, sphere or torus get that analytic surface (offsets and
+// shells need it), with pcurves projected from the 3D edges; when that does not
+// give a valid solid, the NURBS surfaces are kept. Null (with an error) when the
+// data is malformed or OpenCascade does not accept the result.
+namespace {
+
+struct NTrim {
+  int edge;  // -1 singular
+  bool rev3d;
+  int vertex;
+  Handle(Geom2d_BSplineCurve) c2;
+};
+struct NLoop {
+  std::vector<NTrim> trims;
+};
+struct NFace {
+  bool rev;
+  Handle(Geom_BSplineSurface) srf;
+  std::vector<NLoop> loops;
+};
+struct NBrep {
+  std::vector<gp_Pnt> verts;
+  std::vector<std::pair<int, int>> edge_verts;
+  std::vector<Handle(Geom_BSplineCurve)> edges;
+  std::vector<NFace> faces;
+};
+
+bool parse(const double* s, size_t n, NBrep& out) {
   Rd r{s, n};
-  if (r.next() != 1.0) {
-    set_error("unknown exact-brep stream version");
-    return nullptr;
-  }
-  BRep_Builder B;
+  if (r.next() != 1.0) return false;
   const int nv = r.count(MAXN);
-  std::vector<TopoDS_Vertex> V(nv);
   for (int i = 0; i < nv && r.ok; i++) {
     const double x = r.next(), y = r.next(), z = r.next();
-    B.MakeVertex(V[i], gp_Pnt(x, y, z), tol);
+    out.verts.emplace_back(x, y, z);
   }
   const int ne = r.count(MAXN);
-  std::vector<TopoDS_Edge> E(ne);
   for (int i = 0; i < ne && r.ok; i++) {
     const int v0 = r.count(nv - 1), v1 = r.count(nv - 1);
-    stage = "edge curves";
     Handle(Geom_BSplineCurve) c = read_c3(r);
     if (!r.ok) break;
-    B.MakeEdge(E[i], c, tol);
-    B.Add(E[i], V[v0].Oriented(TopAbs_FORWARD));
-    B.Add(E[i], V[v1].Oriented(TopAbs_REVERSED));
-    B.Range(E[i], c->FirstParameter(), c->LastParameter());
+    out.edge_verts.emplace_back(v0, v1);
+    out.edges.push_back(c);
   }
-  std::vector<int> uses(ne, 0);
-  TopoDS_Shell shell;
-  B.MakeShell(shell);
   const int nf = r.count(MAXN);
   for (int fi = 0; fi < nf && r.ok; fi++) {
-    const bool rev = r.next() != 0.0;
-    stage = "surfaces";
-    Handle(Geom_BSplineSurface) srf = read_surface(r);
-    if (!r.ok) break;
-    TopoDS_Face F;
-    B.MakeFace(F, srf, tol);
-    // Pcurves per edge of this face: [0] along the edge, [1] against it (seams have both).
-    std::map<int, Handle(Geom2d_Curve)[2]> pc;
+    NFace f;
+    f.rev = r.next() != 0.0;
+    f.srf = read_surface(r);
     const int nl = r.count(MAXN);
     for (int li = 0; li < nl && r.ok; li++) {
       r.next();  // outer / inner: OpenCascade finds the outer wire itself
-      TopoDS_Wire W;
-      B.MakeWire(W);
+      NLoop l;
       const int nt = r.count(MAXN);
       for (int ti = 0; ti < nt && r.ok; ti++) {
+        NTrim t;
         const double ev = r.next();
-        const bool rev3d = r.next() != 0.0;
+        t.rev3d = r.next() != 0.0;
         const double vv = r.next();
-        stage = "trim curves";
-        Handle(Geom2d_BSplineCurve) c2 = read_c2(r);
-        stage = "trims";
+        t.c2 = read_c2(r);
         if (!r.ok) break;
         if (ev < 0) {
-          if (!(vv >= 0 && vv < nv)) {
-            r.ok = false;
-            break;
-          }
+          if (!(vv >= 0 && vv < nv)) return false;
+          t.edge = -1;
+          t.vertex = int(vv);
+        } else {
+          if (!(ev < ne)) return false;
+          t.edge = int(ev);
+          t.vertex = -1;
+        }
+        l.trims.push_back(t);
+      }
+      f.loops.push_back(l);
+    }
+    out.faces.push_back(f);
+  }
+  return r.ok && r.k == n;
+}
+
+// The analytic surface a NURBS face really is, oriented like it; null if none.
+Handle(Geom_Surface) analytic_of(const Handle(Geom_BSplineSurface)& s, double tol) {
+  GeomConvert_SurfToAnaSurf conv(s);
+  Handle(Geom_Surface) a = conv.ConvertToAnalytical(tol);
+  if (a.IsNull()) return a;
+  Handle(Geom_ElementarySurface) el = Handle(Geom_ElementarySurface)::DownCast(a);
+  if (el.IsNull()) return nullptr;
+  double u0, u1, v0, v1;
+  s->Bounds(u0, u1, v0, v1);
+  gp_Pnt p;
+  gp_Vec du, dv;
+  s->D1(0.5 * (u0 + u1), 0.5 * (v0 + v1), p, du, dv);
+  const gp_Vec nb = du.Crossed(dv);
+  GeomAPI_ProjectPointOnSurf proj(p, a);
+  if (!proj.IsDone() || proj.NbPoints() == 0 || nb.Magnitude() < 1e-12) return nullptr;
+  double u, v;
+  proj.LowerDistanceParameters(u, v);
+  gp_Vec au, av;
+  gp_Pnt q;
+  a->D1(u, v, q, au, av);
+  if (au.Crossed(av).Dot(nb) < 0) el->UReverse();
+  return a;
+}
+
+// Shift `c` by whole periods of `s` so it starts as close as possible to `at`.
+void follow(Handle(Geom2d_BSplineCurve)& c, const Handle(Geom_Surface)& s, const gp_Pnt2d& at) {
+  const double pu = s->IsUPeriodic() ? s->UPeriod() : 0.0;
+  const double pv = s->IsVPeriodic() ? s->VPeriod() : 0.0;
+  const gp_Pnt2d st = c->StartPoint();
+  const double ku = pu > 0 ? std::round((at.X() - st.X()) / pu) : 0.0;
+  const double kv = pv > 0 ? std::round((at.Y() - st.Y()) / pv) : 0.0;
+  if (ku != 0.0 || kv != 0.0) c->Translate(gp_Vec2d(ku * pu, kv * pv));
+}
+
+// Pcurves of one loop on analytic surface `a`, along each trim; false if one
+// cannot be projected.
+bool project_loop(const NBrep& b, const NLoop& l, const Handle(Geom_Surface)& a, double tol,
+                  std::vector<Handle(Geom2d_BSplineCurve)>& out) {
+  out.assign(l.trims.size(), nullptr);
+  bool have_prev = false;
+  gp_Pnt2d prev;
+  for (size_t i = 0; i < l.trims.size(); i++) {
+    const NTrim& t = l.trims[i];
+    if (t.edge < 0) continue;
+    const Handle(Geom_BSplineCurve)& c3 = b.edges[t.edge];
+    Handle(Geom2d_Curve) p = GeomProjLib::Curve2d(c3, c3->FirstParameter(), c3->LastParameter(), a);
+    if (p.IsNull()) return false;
+    Handle(Geom2d_BSplineCurve) c = bspline2(p, p->FirstParameter(), p->LastParameter());
+    if (t.rev3d) c->Reverse();
+    if (have_prev) follow(c, a, prev);
+    out[i] = c;
+    prev = c->EndPoint();
+    have_prev = true;
+  }
+  if (!have_prev) return false;
+  // Singular trims (poles): straight from the previous end to the next start.
+  const size_t n = l.trims.size();
+  for (size_t i = 0; i < n; i++) {
+    if (!out[i].IsNull()) continue;
+    size_t a0 = (i + n - 1) % n, a1 = (i + 1) % n;
+    while (out[a0].IsNull() && a0 != i) a0 = (a0 + n - 1) % n;
+    while (out[a1].IsNull() && a1 != i) a1 = (a1 + 1) % n;
+    if (out[a0].IsNull() || out[a1].IsNull()) return false;
+    const gp_Pnt2d p0 = out[a0]->EndPoint(), p1 = out[a1]->StartPoint();
+    if (p0.Distance(p1) < 1e-12) return false;
+    TColgp_Array1OfPnt2d poles(1, 2);
+    poles(1) = p0;
+    poles(2) = p1;
+    TColStd_Array1OfReal k(1, 2);
+    k(1) = 0.0;
+    k(2) = 1.0;
+    TColStd_Array1OfInteger m(1, 2);
+    m(1) = m(2) = 2;
+    out[i] = new Geom2d_BSplineCurve(poles, k, m, 1);
+  }
+  (void)tol;
+  return true;
+}
+
+// A face bounded only by seams and poles is its whole closed surface (a sphere,
+// an ellipsoid): with an analytic surface it is simplest made from that surface.
+bool whole_surface(const NFace& f) {
+  std::map<int, int> count;
+  for (const NLoop& l : f.loops)
+    for (const NTrim& t : l.trims)
+      if (t.edge >= 0) count[t.edge]++;
+  for (auto& [e, c] : count)
+    if (c != 2) return false;
+  return true;
+}
+
+TopoDS_Shape build(const NBrep& nb, double tol, bool analytic, const char*& stage) {
+  BRep_Builder B;
+  if (analytic && nb.faces.size() == 1 && whole_surface(nb.faces[0])) {
+    Handle(Geom_Surface) a = analytic_of(nb.faces[0].srf, tol);
+    if (!a.IsNull() && a->IsUClosed()) {
+      stage = "whole surface";
+      BRepBuilderAPI_MakeFace mf(a, tol);
+      if (mf.IsDone()) {
+        TopoDS_Face F = mf.Face();
+        if (nb.faces[0].rev) F.Reverse();
+        TopoDS_Shell sh;
+        B.MakeShell(sh);
+        B.Add(sh, F);
+        sh.Closed(Standard_True);
+        TopoDS_Solid so;
+        B.MakeSolid(so);
+        B.Add(so, sh);
+        BRepLib::OrientClosedSolid(so);
+        return so;
+      }
+    }
+  }
+  std::vector<TopoDS_Vertex> V(nb.verts.size());
+  for (size_t i = 0; i < V.size(); i++) B.MakeVertex(V[i], nb.verts[i], tol);
+  std::vector<TopoDS_Edge> E(nb.edges.size());
+  stage = "edges";
+  for (size_t i = 0; i < E.size(); i++) {
+    const Handle(Geom_BSplineCurve)& c = nb.edges[i];
+    B.MakeEdge(E[i], c, tol);
+    B.Add(E[i], V[nb.edge_verts[i].first].Oriented(TopAbs_FORWARD));
+    B.Add(E[i], V[nb.edge_verts[i].second].Oriented(TopAbs_REVERSED));
+    B.Range(E[i], c->FirstParameter(), c->LastParameter());
+  }
+  std::vector<int> uses(E.size(), 0);
+  TopoDS_Shell shell;
+  B.MakeShell(shell);
+  for (const NFace& nf : nb.faces) {
+    stage = "faces";
+    Handle(Geom_Surface) surface(nf.srf);
+    std::vector<std::vector<Handle(Geom2d_BSplineCurve)>> projected;
+    if (analytic) {
+      Handle(Geom_Surface) a = analytic_of(nf.srf, tol);
+      if (!a.IsNull()) {
+        bool ok = true;
+        for (const NLoop& l : nf.loops) {
+          std::vector<Handle(Geom2d_BSplineCurve)> p;
+          ok = ok && project_loop(nb, l, a, tol, p);
+          projected.push_back(p);
+        }
+        if (ok) {
+          surface = a;
+        } else {
+          projected.clear();
+        }
+      }
+    }
+    TopoDS_Face F;
+    B.MakeFace(F, surface, tol);
+    std::map<int, Handle(Geom2d_Curve)[2]> pc;
+    for (size_t li = 0; li < nf.loops.size(); li++) {
+      const NLoop& l = nf.loops[li];
+      TopoDS_Wire W;
+      B.MakeWire(W);
+      for (size_t ti = 0; ti < l.trims.size(); ti++) {
+        const NTrim& tr = l.trims[ti];
+        Handle(Geom2d_BSplineCurve) c2 = projected.empty()
+            ? Handle(Geom2d_BSplineCurve)::DownCast(tr.c2->Copy())
+            : projected[li][ti];
+        if (tr.edge < 0) {
           TopoDS_Edge D;
           B.MakeEdge(D);
           B.UpdateEdge(D, c2, F, tol);
           B.Degenerated(D, Standard_True);
-          B.Add(D, V[int(vv)].Oriented(TopAbs_FORWARD));
-          B.Add(D, V[int(vv)].Oriented(TopAbs_REVERSED));
+          B.Add(D, V[tr.vertex].Oriented(TopAbs_FORWARD));
+          B.Add(D, V[tr.vertex].Oriented(TopAbs_REVERSED));
           B.Range(D, c2->FirstParameter(), c2->LastParameter());
           B.Add(W, D);
           continue;
         }
-        if (!(ev < ne)) {
-          r.ok = false;
-          break;
-        }
-        const int ei = int(ev);
+        const int ei = tr.edge;
         uses[ei]++;
-        if (rev3d) c2->Reverse();  // now runs along the edge
+        if (tr.rev3d) c2->Reverse();  // now runs along the edge
         double ef, el;
         BRep_Tool::Range(E[ei], ef, el);
         TColStd_Array1OfReal k(1, c2->NbKnots());
         c2->Knots(k);
         BSplCLib::Reparametrize(ef, el, k);
         c2->SetKnots(k);
-        pc[ei][rev3d ? 1 : 0] = c2;
-        B.Add(W, E[ei].Oriented(rev3d ? TopAbs_REVERSED : TopAbs_FORWARD));
+        pc[ei][tr.rev3d ? 1 : 0] = c2;
+        B.Add(W, E[ei].Oriented(tr.rev3d ? TopAbs_REVERSED : TopAbs_FORWARD));
       }
       W.Closed(Standard_True);
       B.Add(F, W);
@@ -847,16 +1023,12 @@ FoShape* fo_shape_from_neutral(const double* s, size_t n, double tol) {
         B.UpdateEdge(E[ei], c[0].IsNull() ? c[1] : c[0], F, tol);
       }
     }
-    if (rev) F.Reverse();
+    if (nf.rev) F.Reverse();
     B.Add(shell, F);
   }
-  if (!r.ok || r.k != n) {
-    set_error("malformed exact-brep stream");
-    return nullptr;
-  }
-  stage = "same parameter";
   // Each edge's pcurves follow its 3D curve; edges where OpenCascade's own
   // approximation trips are left to ShapeFix below.
+  stage = "same parameter";
   for (auto& e : E) {
     B.SameParameter(e, Standard_False);
     try {
@@ -866,7 +1038,7 @@ FoShape* fo_shape_from_neutral(const double* s, size_t n, double tol) {
       fe.FixSameParameter(e, tol);
     }
   }
-  bool closed = ne > 0;
+  bool closed = !E.empty();
   for (int u : uses) closed = closed && u == 2;
   TopoDS_Shape result = shell;
   if (closed) {
@@ -882,12 +1054,35 @@ FoShape* fo_shape_from_neutral(const double* s, size_t n, double tol) {
   fix.SetPrecision(tol);
   fix.SetMaxTolerance(tol * 1000.0);
   fix.Perform();
-  result = fix.Shape();
-  if (!BRepCheck_Analyzer(result).IsValid()) {
+  return fix.Shape();
+}
+
+}  // namespace
+
+extern "C" {
+
+// `analytic`: try analytic surfaces first (offsets and shells need them; boolean
+// and fillet results round-trip to openNURBS more reliably on NURBS surfaces).
+FoShape* fo_shape_from_neutral(const double* s, size_t n, double tol, int analytic_first) {
+  const char* stage = "reading";
+  try {
+    NBrep nb;
+    if (!parse(s, n, nb)) {
+      set_error("malformed exact-brep stream");
+      return nullptr;
+    }
+    // Analytic surfaces first; plain NURBS when that does not check out.
+    for (bool analytic : {true, false}) {
+      if (analytic && !analytic_first) continue;
+      try {
+        TopoDS_Shape r = build(nb, tol, analytic, stage);
+        if (BRepCheck_Analyzer(r).IsValid()) return wrap(r);
+      } catch (const Standard_Failure&) {
+        if (!analytic) throw;
+      }
+    }
     set_error("the exact solid did not pass OpenCascade's check");
     return nullptr;
-  }
-  return wrap(result);
   } catch (const Standard_Failure& e) {
     set_error(std::string("OpenCascade (") + stage + "): " + e.DynamicType()->Name() +
               (e.GetMessageString() && *e.GetMessageString()

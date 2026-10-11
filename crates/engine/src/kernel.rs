@@ -707,6 +707,36 @@ mod tests {
     }
 
     #[test]
+    fn shells_and_offsets_of_curved_solids_stay_exact() {
+        if !KERNEL_AVAILABLE {
+            return;
+        }
+        let pi = std::f64::consts::PI;
+        // A cup: cylinder hollowed with 1 mm walls, top removed.
+        let mut e = Engine::new();
+        e.run_line("Cylinder 0,0,0 5 20").unwrap();
+        e.run_line("SelAll").unwrap();
+        e.run_line("Shell 1 0,0,20").unwrap();
+        let b = brep(&e, 1);
+        assert_eq!(b.faces, 5);
+        let cup = pi * 25.0 * 20.0 - pi * 16.0 * 19.0;
+        assert!(rel(b.mesh.volume(), cup) < 0.01, "{}", b.mesh.volume());
+        // Offsets: a cylinder and a sphere grow by 1.
+        let mut e = Engine::new();
+        e.run_line("Cylinder 0,0,0 5 20").unwrap();
+        e.run_line("SelAll").unwrap();
+        e.run_line("OffsetSrf 1").unwrap();
+        let v = brep(&e, 1).mesh.volume();
+        assert!(rel(v, pi * 36.0 * 22.0) < 0.01, "{v}");
+        let mut e = Engine::new();
+        e.run_line("Sphere 0,0,0 10").unwrap();
+        e.run_line("SelAll").unwrap();
+        e.run_line("OffsetSrf 1").unwrap();
+        let v = brep(&e, 1).mesh.volume();
+        assert!(rel(v, 4.0 / 3.0 * pi * 1331.0) < 0.02, "{v}");
+    }
+
+    #[test]
     fn exact_results_survive_save_and_open() {
         if !KERNEL_AVAILABLE {
             return;

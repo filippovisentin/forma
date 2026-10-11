@@ -66,7 +66,7 @@ extern "C" {
         triangles: *mut u32,
     );
     fn fo_tess_free(t: *mut FoTess);
-    fn fo_shape_from_neutral(s: *const f64, n: usize, tol: f64) -> *mut FoShape;
+    fn fo_shape_from_neutral(s: *const f64, n: usize, tol: f64, analytic: c_int) -> *mut FoShape;
     fn fo_shape_to_neutral(s: *const FoShape, n: *mut usize) -> *mut f64;
     fn fo_doubles_free(p: *mut f64);
 }
@@ -318,12 +318,18 @@ pub(super) fn rebuild(m: &Mesh, opts: SolidOptions) -> Result<Mesh, KernelError>
 
 // ----------------------------------------------------------------- exact solids (S3)
 
-fn from_neutral(s: &[f64], tol: f64) -> Result<Shape, KernelError> {
+/// `analytic`: give faces their plane / cylinder / sphere… surfaces back (needed by
+/// offsets and shells), else keep the NURBS surfaces.
+fn from_neutral_as(s: &[f64], tol: f64, analytic: bool) -> Result<Shape, KernelError> {
     // SAFETY: the slice outlives the call.
     wrap(
-        unsafe { fo_shape_from_neutral(s.as_ptr(), s.len(), tol) },
+        unsafe { fo_shape_from_neutral(s.as_ptr(), s.len(), tol, c_int::from(analytic)) },
         "reading the exact solid",
     )
+}
+
+fn from_neutral(s: &[f64], tol: f64) -> Result<Shape, KernelError> {
+    from_neutral_as(s, tol, false)
 }
 
 fn to_neutral(s: &Shape) -> Result<Vec<f64>, KernelError> {
@@ -431,7 +437,7 @@ pub(super) fn exact_shell(
     if thickness <= tol {
         return Err(KernelError::Failed("the thickness must be positive".into()));
     }
-    let shape = from_neutral(s, tol)?;
+    let shape = from_neutral_as(s, tol, true)?;
     let pts = points(near);
     // SAFETY: `shape` and `pts` outlive the call.
     let out = wrap(
@@ -454,7 +460,7 @@ pub(super) fn exact_offset(s: &[f64], d: f64, tol: f64) -> Result<Vec<Vec<f64>>,
     if d.abs() <= tol {
         return Err(KernelError::Failed("the distance is too small".into()));
     }
-    let shape = from_neutral(s, tol)?;
+    let shape = from_neutral_as(s, tol, true)?;
     // SAFETY: `shape` is a live handle.
     let out = wrap(unsafe { fo_offset(shape.0, d, tol) }, "offset")?;
     solid_streams(&out)

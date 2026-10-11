@@ -36,8 +36,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `ChamferEdge` on polysurfaces now work on the exact NURBS faces and give exact
   polysurfaces back: a round hole through a box or a wall, a box minus a sphere,
   crossing cylinders, rolling-ball fillets on box edges and cylinder rims. They save to
-  `.3dm` as real Rhino polysurfaces. Meshes, and the few cases the exact path cannot do
-  yet (`Shell` and `OffsetSrf` of curved solids), still go through triangles as before.
+  `.3dm` as real Rhino polysurfaces. `Shell` and `OffsetSrf` stay exact as well (a
+  hollowed cylinder, a grown sphere): the kernel recognises planes, cylinders, cones,
+  spheres and tori in the NURBS faces. Meshes still go through triangles as before.
 
 ### Fixed
 - `FilletEdge` / `ChamferEdge` no longer pick the seam of a cylinder or sphere (it cannot
