@@ -257,6 +257,13 @@ pub(crate) mod ffi {
             len: *mut usize,
         ) -> *mut u8;
         pub fn f3dm_make_along(stream: *const f64, n: usize, tol: f64, len: *mut usize) -> *mut u8;
+        pub fn f3dm_make_edge_srf(
+            stream: *const f64,
+            n: usize,
+            count: c_int,
+            tol: f64,
+            len: *mut usize,
+        ) -> *mut u8;
         pub fn f3dm_make_to_point(
             stream: *const f64,
             n: usize,

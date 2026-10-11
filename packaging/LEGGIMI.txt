@@ -159,9 +159,9 @@ Limiti di questa versione
     salvano come polisuperfici (anche dopo Move, Rotate, Scale, Mirror).
     Box, Cylinder, Sphere, Extrude, PlanarSrf, ExtrudeSrf, Revolve, Cap,
     Join ed Explode lavorano su geometria esatta.
-  - Restano mesh: Loft, Sweep1/Sweep2, FilletEdge e le booleane quando ci sono
-    facce curve (con solidi a facce piane, es. muri e scatole, il risultato
-    torna una polisuperficie esatta).
+  - Anche le forme libere sono superfici NURBS esatte: Loft, Sweep1 (con
+    angoli a 45° sulle polilinee, come una cornice), Sweep2, EdgeSrf, SrfPt,
+    Pipe, Revolve.
   - I punti di controllo (F10) delle superfici curve non sono ancora
     modificabili; quelli dei solidi a facce piane sì (spigoli).
   - Salvando un file aperto da Rhino, la prima volta Forma propone un nuovo nome
