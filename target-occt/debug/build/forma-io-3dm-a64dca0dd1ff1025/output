@@ -1,0 +1,393 @@
+CMAKE_TOOLCHAIN_FILE_x86_64-unknown-linux-gnu = None
+CMAKE_TOOLCHAIN_FILE_x86_64_unknown_linux_gnu = None
+HOST_CMAKE_TOOLCHAIN_FILE = None
+CMAKE_TOOLCHAIN_FILE = None
+CMAKE_GENERATOR_x86_64-unknown-linux-gnu = None
+CMAKE_GENERATOR_x86_64_unknown_linux_gnu = None
+HOST_CMAKE_GENERATOR = None
+CMAKE_GENERATOR = None
+CMAKE_PREFIX_PATH_x86_64-unknown-linux-gnu = None
+CMAKE_PREFIX_PATH_x86_64_unknown_linux_gnu = None
+HOST_CMAKE_PREFIX_PATH = None
+CMAKE_PREFIX_PATH = None
+CMAKE_x86_64-unknown-linux-gnu = None
+CMAKE_x86_64_unknown_linux_gnu = None
+HOST_CMAKE = None
+CMAKE = None
+-- The CXX compiler identification is GNU 13.3.0
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: /usr/bin/c++ - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- The C compiler identification is GNU 13.3.0
+-- Detecting C compiler ABI info
+-- Detecting C compiler ABI info - done
+-- Check for working C compiler: /usr/bin/cc - skipped
+-- Detecting C compile features
+-- Detecting C compile features - done
+-- Configuring done (0.7s)
+-- Generating done (0.1s)
+-- Build files have been written to: /home/user/forma/target-occt/debug/build/forma-io-3dm-a64dca0dd1ff1025/out/build
+[  0%] Building C object zlib/CMakeFiles/zlib.dir/adler32.c.o
+[  0%] Building C object zlib/CMakeFiles/zlib.dir/compress.c.o
+[  1%] Building C object zlib/CMakeFiles/zlib.dir/crc32.c.o
+[  1%] Building C object zlib/CMakeFiles/zlib.dir/deflate.c.o
+[  1%] Building C object zlib/CMakeFiles/zlib.dir/infback.c.o
+[  1%] Building C object zlib/CMakeFiles/zlib.dir/inffast.c.o
+[  1%] Building C object zlib/CMakeFiles/zlib.dir/inflate.c.o
+[  3%] Building C object zlib/CMakeFiles/zlib.dir/inftrees.c.o
+[  3%] Building C object zlib/CMakeFiles/zlib.dir/trees.c.o
+[  3%] Building C object zlib/CMakeFiles/zlib.dir/uncompr.c.o
+[  3%] Building C object zlib/CMakeFiles/zlib.dir/zutil.c.o
+[  5%] Linking C static library libzlib.a
+[  5%] Built target zlib
+[  5%] Building C object android_uuid/CMakeFiles/android_uuid.dir/copy.c.o
+[  5%] Building C object android_uuid/CMakeFiles/android_uuid.dir/gen_uuid.c.o
+[  5%] Building C object android_uuid/CMakeFiles/android_uuid.dir/isnull.c.o
+[  5%] Building C object android_uuid/CMakeFiles/android_uuid.dir/pack.c.o
+[  7%] Building C object android_uuid/CMakeFiles/android_uuid.dir/parse.c.o
+[  7%] Building C object android_uuid/CMakeFiles/android_uuid.dir/unpack.c.o
+[  7%] Building C object android_uuid/CMakeFiles/android_uuid.dir/unparse.c.o
+[  7%] Building C object android_uuid/CMakeFiles/android_uuid.dir/uuid_time.c.o
+[  8%] Linking C static library libandroid_uuid.a
+[  8%] Built target android_uuid
+[ 10%] Building C object freetype263/CMakeFiles/opennurbs_public_freetype.dir/src/autofit/autofit.c.o
+[ 10%] Building C object freetype263/CMakeFiles/opennurbs_public_freetype.dir/src/base/ftbase.c.o
+[ 10%] Building C object freetype263/CMakeFiles/opennurbs_public_freetype.dir/src/base/ftbbox.c.o
+[ 10%] Building C object freetype263/CMakeFiles/opennurbs_public_freetype.dir/src/base/ftbdf.c.o
+[ 12%] Building C object freetype263/CMakeFiles/opennurbs_public_freetype.dir/src/base/ftbitmap.c.o
+[ 12%] Building C object freetype263/CMakeFiles/opennurbs_public_freetype.dir/src/base/ftcid.c.o
+[ 12%] Building C object freetype263/CMakeFiles/opennurbs_public_freetype.dir/src/base/ftdebug.c.o
+[ 12%] Building C object freetype263/CMakeFiles/opennurbs_public_freetype.dir/src/base/ftfntfmt.c.o
+[ 12%] Building C object freetype263/CMakeFiles/opennurbs_public_freetype.dir/src/base/ftfstype.c.o
+[ 14%] Building C object freetype263/CMakeFiles/opennurbs_public_freetype.dir/src/base/ftgasp.c.o
+[ 14%] Building C object freetype263/CMakeFiles/opennurbs_public_freetype.dir/src/base/ftglyph.c.o
+[ 14%] Building C object freetype263/CMakeFiles/opennurbs_public_freetype.dir/src/base/ftgxval.c.o
+[ 14%] Building C object freetype263/CMakeFiles/opennurbs_public_freetype.dir/src/base/ftinit.c.o
+[ 14%] Building C object freetype263/CMakeFiles/opennurbs_public_freetype.dir/src/base/ftlcdfil.c.o
+[ 15%] Building C object freetype263/CMakeFiles/opennurbs_public_freetype.dir/src/base/ftmm.c.o
+[ 15%] Building C object freetype263/CMakeFiles/opennurbs_public_freetype.dir/src/base/ftotval.c.o
+[ 15%] Building C object freetype263/CMakeFiles/opennurbs_public_freetype.dir/src/base/ftpatent.c.o
+[ 15%] Building C object freetype263/CMakeFiles/opennurbs_public_freetype.dir/src/base/ftpfr.c.o
+[ 17%] Building C object freetype263/CMakeFiles/opennurbs_public_freetype.dir/src/base/ftstroke.c.o
+[ 17%] Building C object freetype263/CMakeFiles/opennurbs_public_freetype.dir/src/base/ftsynth.c.o
+[ 17%] Building C object freetype263/CMakeFiles/opennurbs_public_freetype.dir/src/base/ftsystem.c.o
+[ 17%] Building C object freetype263/CMakeFiles/opennurbs_public_freetype.dir/src/base/fttype1.c.o
+[ 17%] Building C object freetype263/CMakeFiles/opennurbs_public_freetype.dir/src/base/ftwinfnt.c.o
+[ 19%] Building C object freetype263/CMakeFiles/opennurbs_public_freetype.dir/src/bdf/bdf.c.o
+[ 19%] Building C object freetype263/CMakeFiles/opennurbs_public_freetype.dir/src/bzip2/ftbzip2.c.o
+[ 19%] Building C object freetype263/CMakeFiles/opennurbs_public_freetype.dir/src/cache/ftcache.c.o
+[ 19%] Building C object freetype263/CMakeFiles/opennurbs_public_freetype.dir/src/cff/cff.c.o
+[ 21%] Building C object freetype263/CMakeFiles/opennurbs_public_freetype.dir/src/cid/type1cid.c.o
+[ 21%] Building C object freetype263/CMakeFiles/opennurbs_public_freetype.dir/src/gzip/ftgzip.c.o
+[ 21%] Building C object freetype263/CMakeFiles/opennurbs_public_freetype.dir/src/lzw/ftlzw.c.o
+[ 21%] Building C object freetype263/CMakeFiles/opennurbs_public_freetype.dir/src/pcf/pcf.c.o
+[ 21%] Building C object freetype263/CMakeFiles/opennurbs_public_freetype.dir/src/pfr/pfr.c.o
+[ 22%] Building C object freetype263/CMakeFiles/opennurbs_public_freetype.dir/src/psaux/psaux.c.o
+[ 22%] Building C object freetype263/CMakeFiles/opennurbs_public_freetype.dir/src/pshinter/pshinter.c.o
+[ 22%] Building C object freetype263/CMakeFiles/opennurbs_public_freetype.dir/src/psnames/psnames.c.o
+[ 22%] Building C object freetype263/CMakeFiles/opennurbs_public_freetype.dir/src/raster/raster.c.o
+[ 24%] Building C object freetype263/CMakeFiles/opennurbs_public_freetype.dir/src/sfnt/sfnt.c.o
+[ 24%] Building C object freetype263/CMakeFiles/opennurbs_public_freetype.dir/src/smooth/smooth.c.o
+[ 24%] Building C object freetype263/CMakeFiles/opennurbs_public_freetype.dir/src/truetype/truetype.c.o
+[ 24%] Building C object freetype263/CMakeFiles/opennurbs_public_freetype.dir/src/type1/type1.c.o
+[ 24%] Building C object freetype263/CMakeFiles/opennurbs_public_freetype.dir/src/type42/type42.c.o
+[ 26%] Building C object freetype263/CMakeFiles/opennurbs_public_freetype.dir/src/winfonts/winfnt.c.o
+[ 26%] Linking C static library libopennurbs_public_freetype.a
+[ 26%] Built target opennurbs_public_freetype
+[ 26%] Building CXX object CMakeFiles/opennurbsStatic.dir/cmake_pch.hxx.gch
+[ 26%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_3dm_attributes.cpp.o
+[ 26%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_3dm_properties.cpp.o
+[ 26%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_3dm_settings.cpp.o
+[ 28%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_annotationbase.cpp.o
+[ 28%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_apple_nsfont.cpp.o
+[ 28%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_arc.cpp.o
+[ 28%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_arccurve.cpp.o
+[ 29%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_archivable_dictionary.cpp.o
+[ 29%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_archive.cpp.o
+[ 29%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_archive_manifest.cpp.o
+[ 29%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_array.cpp.o
+[ 29%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_base32.cpp.o
+[ 31%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_base64.cpp.o
+[ 31%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_beam.cpp.o
+[ 31%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_bezier.cpp.o
+[ 31%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_beziervolume.cpp.o
+[ 33%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_bitmap.cpp.o
+[ 33%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_bounding_box.cpp.o
+[ 33%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_box.cpp.o
+[ 33%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_brep.cpp.o
+[ 33%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_brep_extrude.cpp.o
+[ 35%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_brep_io.cpp.o
+[ 35%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_brep_isvalid.cpp.o
+[ 35%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_brep_region.cpp.o
+[ 35%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_brep_tools.cpp.o
+[ 35%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_brep_v2valid.cpp.o
+[ 36%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_calculator.cpp.o
+[ 36%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_circle.cpp.o
+[ 36%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_color.cpp.o
+[ 36%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_compress.cpp.o
+[ 38%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_compstat.cpp.o
+[ 38%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_cone.cpp.o
+[ 38%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_convex_poly.cpp.o
+[ 38%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_crc.cpp.o
+[ 38%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_curve.cpp.o
+[ 40%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_curveonsurface.cpp.o
+[ 40%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_curveproxy.cpp.o
+[ 40%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_cylinder.cpp.o
+[ 40%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_date.cpp.o
+[ 42%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_decals.cpp.o
+[ 42%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_defines.cpp.o
+[ 42%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_detail.cpp.o
+[ 42%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_dimension.cpp.o
+[ 42%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_dimensionformat.cpp.o
+[ 43%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_dimensionstyle.cpp.o
+[ 43%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_dithering.cpp.o
+[ 43%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_ellipse.cpp.o
+[ 43%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_embedded_file.cpp.o
+[ 45%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_error.cpp.o
+[ 45%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_error_message.cpp.o
+[ 45%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_evaluate_nurbs.cpp.o
+[ 45%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_extensions.cpp.o
+[ 45%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_file_utilities.cpp.o
+[ 47%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_font.cpp.o
+[ 47%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_freetype.cpp.o
+[ 47%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_fsp.cpp.o
+[ 47%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_function_list.cpp.o
+[ 49%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_geometry.cpp.o
+[ 49%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_glyph_outline.cpp.o
+[ 49%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_ground_plane.cpp.o
+[ 49%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_group.cpp.o
+[ 49%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_hash_table.cpp.o
+[ 50%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_hatch.cpp.o
+[ 50%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_instance.cpp.o
+[ 50%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_internal_V2_annotation.cpp.o
+[ 50%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_internal_V5_annotation.cpp.o
+[ 52%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_internal_V5_dimstyle.cpp.o
+[ 52%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_internal_Vx_annotation.cpp.o
+[ 52%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_intersect.cpp.o
+[ 52%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_ipoint.cpp.o
+[ 52%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_knot.cpp.o
+[ 54%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_layer.cpp.o
+[ 54%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_leader.cpp.o
+[ 54%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_light.cpp.o
+[ 54%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_line.cpp.o
+[ 54%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_linear_workflow.cpp.o
+[ 56%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_linecurve.cpp.o
+[ 56%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_linetype.cpp.o
+[ 56%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_locale.cpp.o
+[ 56%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_lock.cpp.o
+[ 57%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_lookup.cpp.o
+[ 57%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_material.cpp.o
+[ 57%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_math.cpp.o
+[ 57%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_matrix.cpp.o
+[ 57%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_md5.cpp.o
+[ 59%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_memory_util.cpp.o
+[ 59%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_mesh.cpp.o
+[ 59%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_mesh_modifiers.cpp.o
+[ 59%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_mesh_ngon.cpp.o
+[ 61%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_mesh_tools.cpp.o
+[ 61%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_mesh_topology.cpp.o
+[ 61%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_model_component.cpp.o
+[ 61%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_model_geometry.cpp.o
+[ 61%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_morph.cpp.o
+[ 63%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_nurbscurve.cpp.o
+[ 63%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_nurbssurface.cpp.o
+[ 63%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_nurbsvolume.cpp.o
+[ 63%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_object.cpp.o
+[ 64%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_object_history.cpp.o
+[ 64%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_objref.cpp.o
+[ 64%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_offsetsurface.cpp.o
+[ 64%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_optimize.cpp.o
+[ 64%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_parse_angle.cpp.o
+[ 66%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_parse_length.cpp.o
+[ 66%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_parse_number.cpp.o
+[ 66%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_parse_point.cpp.o
+[ 66%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_parse_settings.cpp.o
+[ 68%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_photogrammetry.cpp.o
+[ 68%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_plane.cpp.o
+[ 68%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_planesurface.cpp.o
+[ 68%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_pluginlist.cpp.o
+[ 68%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_point.cpp.o
+[ 70%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_pointcloud.cpp.o
+[ 70%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_pointgeometry.cpp.o
+[ 70%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_pointgrid.cpp.o
+[ 70%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_polycurve.cpp.o
+[ 70%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_polyedgecurve.cpp.o
+[ 71%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_polyline.cpp.o
+[ 71%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_polylinecurve.cpp.o
+[ 71%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_post_effects.cpp.o
+[ 71%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_progress_reporter.cpp.o
+[ 73%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_quaternion.cpp.o
+[ 73%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_rand.cpp.o
+[ 73%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_render_channels.cpp.o
+[ 73%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_render_content.cpp.o
+[ 73%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_revsurface.cpp.o
+[ 75%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_rtree.cpp.o
+[ 75%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_safe_frame.cpp.o
+[ 75%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_sectionstyle.cpp.o
+[ 75%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_sha1.cpp.o
+[ 77%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_skylight.cpp.o
+[ 77%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_sleeplock.cpp.o
+[ 77%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_sort.cpp.o
+[ 77%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_sphere.cpp.o
+[ 77%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_statics.cpp.o
+[ 78%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_std_string_format.cpp.o
+[ 78%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_std_string_utf.cpp.o
+[ 78%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_string.cpp.o
+[ 78%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_string_compare.cpp.o
+[ 80%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_string_format.cpp.o
+[ 80%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_string_scan.cpp.o
+[ 80%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_string_values.cpp.o
+[ 80%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_subd.cpp.o
+[ 80%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_subd_archive.cpp.o
+[ 82%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_subd_copy.cpp.o
+[ 82%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_subd_data.cpp.o
+[ 82%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_subd_eval.cpp.o
+[ 82%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_subd_fragment.cpp.o
+[ 84%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_subd_frommesh.cpp.o
+[ 84%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_subd_heap.cpp.o
+[ 84%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_subd_iter.cpp.o
+[ 84%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_subd_limit.cpp.o
+[ 84%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_subd_matrix.cpp.o
+[ 85%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_subd_mesh.cpp.o
+[ 85%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_subd_ref.cpp.o
+[ 85%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_subd_ring.cpp.o
+[ 85%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_subd_sector.cpp.o
+[ 87%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_subd_texture.cpp.o
+[ 87%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_sum.cpp.o
+[ 87%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_sumsurface.cpp.o
+[ 87%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_sun.cpp.o
+[ 87%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_surface.cpp.o
+[ 89%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_surfaceproxy.cpp.o
+[ 89%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_symmetry.cpp.o
+[ 89%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_terminator.cpp.o
+[ 89%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_testclass.cpp.o
+[ 89%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_text.cpp.o
+[ 91%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_text_style.cpp.o
+[ 91%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_textcontext.cpp.o
+[ 91%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_textdraw.cpp.o
+[ 91%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_textglyph.cpp.o
+[ 92%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_textiterator.cpp.o
+[ 92%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_textlog.cpp.o
+[ 92%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_textobject.cpp.o
+[ 92%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_textrun.cpp.o
+[ 92%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_topology.cpp.o
+[ 94%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_torus.cpp.o
+[ 94%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_unicode.cpp.o
+[ 94%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_unicode_cpsb.cpp.o
+[ 94%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_units.cpp.o
+[ 96%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_userdata.cpp.o
+[ 96%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_uuid.cpp.o
+[ 96%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_version.cpp.o
+[ 96%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_version_number.cpp.o
+[ 96%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_viewport.cpp.o
+[ 98%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_win_dwrite.cpp.o
+[ 98%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_workspace.cpp.o
+[ 98%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_wstring.cpp.o
+[ 98%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_xform.cpp.o
+[100%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_xml.cpp.o
+[100%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_zlib.cpp.o
+[100%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_zlib_memory.cpp.o
+[100%] Building CXX object CMakeFiles/opennurbsStatic.dir/opennurbs_public_memory.cpp.o
+[100%] Linking CXX static library libopennurbsStatic.a
+[100%] Built target opennurbsStatic
+cargo:root=/home/user/forma/target-occt/debug/build/forma-io-3dm-a64dca0dd1ff1025/out
+cargo:rustc-link-search=native=/home/user/forma/target-occt/debug/build/forma-io-3dm-a64dca0dd1ff1025/out/build/
+cargo:rustc-link-search=native=/home/user/forma/target-occt/debug/build/forma-io-3dm-a64dca0dd1ff1025/out/build/zlib
+cargo:rustc-link-search=native=/home/user/forma/target-occt/debug/build/forma-io-3dm-a64dca0dd1ff1025/out/build/freetype263
+cargo:rustc-link-search=native=/home/user/forma/target-occt/debug/build/forma-io-3dm-a64dca0dd1ff1025/out/build/android_uuid
+cargo:rerun-if-env-changed=CC_FORCE_DISABLE
+CC_FORCE_DISABLE = None
+cargo:rerun-if-env-changed=CXX_x86_64-unknown-linux-gnu
+CXX_x86_64-unknown-linux-gnu = None
+cargo:rerun-if-env-changed=CXX_x86_64_unknown_linux_gnu
+CXX_x86_64_unknown_linux_gnu = None
+cargo:rerun-if-env-changed=HOST_CXX
+HOST_CXX = None
+cargo:rerun-if-env-changed=CXX
+CXX = None
+cargo:rerun-if-env-changed=CC_ENABLE_DEBUG_OUTPUT
+cargo:rerun-if-env-changed=CRATE_CC_NO_DEFAULTS
+CRATE_CC_NO_DEFAULTS = None
+cargo:rerun-if-env-changed=CRATE_CC_NO_DEFAULTS
+CRATE_CC_NO_DEFAULTS = None
+cargo:rerun-if-env-changed=CXXFLAGS
+CXXFLAGS = None
+cargo:rerun-if-env-changed=HOST_CXXFLAGS
+HOST_CXXFLAGS = None
+cargo:rerun-if-env-changed=CXXFLAGS_x86_64_unknown_linux_gnu
+CXXFLAGS_x86_64_unknown_linux_gnu = None
+cargo:rerun-if-env-changed=CXXFLAGS_x86_64-unknown-linux-gnu
+CXXFLAGS_x86_64-unknown-linux-gnu = None
+cargo:rerun-if-env-changed=CXXFLAGS
+CXXFLAGS = None
+cargo:rerun-if-env-changed=HOST_CXXFLAGS
+HOST_CXXFLAGS = None
+cargo:rerun-if-env-changed=CXXFLAGS_x86_64_unknown_linux_gnu
+CXXFLAGS_x86_64_unknown_linux_gnu = None
+cargo:rerun-if-env-changed=CXXFLAGS_x86_64-unknown-linux-gnu
+CXXFLAGS_x86_64-unknown-linux-gnu = None
+cargo:rerun-if-env-changed=CC_FORCE_DISABLE
+CC_FORCE_DISABLE = None
+cargo:rerun-if-env-changed=AR_x86_64-unknown-linux-gnu
+AR_x86_64-unknown-linux-gnu = None
+cargo:rerun-if-env-changed=AR_x86_64_unknown_linux_gnu
+AR_x86_64_unknown_linux_gnu = None
+cargo:rerun-if-env-changed=HOST_AR
+HOST_AR = None
+cargo:rerun-if-env-changed=AR
+AR = None
+cargo:rerun-if-env-changed=ARFLAGS
+ARFLAGS = None
+cargo:rerun-if-env-changed=HOST_ARFLAGS
+HOST_ARFLAGS = None
+cargo:rerun-if-env-changed=ARFLAGS_x86_64_unknown_linux_gnu
+ARFLAGS_x86_64_unknown_linux_gnu = None
+cargo:rerun-if-env-changed=ARFLAGS_x86_64-unknown-linux-gnu
+ARFLAGS_x86_64-unknown-linux-gnu = None
+cargo:rerun-if-env-changed=AR_x86_64-unknown-linux-gnu
+AR_x86_64-unknown-linux-gnu = None
+cargo:rerun-if-env-changed=AR_x86_64_unknown_linux_gnu
+AR_x86_64_unknown_linux_gnu = None
+cargo:rerun-if-env-changed=HOST_AR
+HOST_AR = None
+cargo:rerun-if-env-changed=AR
+AR = None
+cargo:rerun-if-env-changed=ARFLAGS
+ARFLAGS = None
+cargo:rerun-if-env-changed=HOST_ARFLAGS
+HOST_ARFLAGS = None
+cargo:rerun-if-env-changed=ARFLAGS_x86_64_unknown_linux_gnu
+ARFLAGS_x86_64_unknown_linux_gnu = None
+cargo:rerun-if-env-changed=ARFLAGS_x86_64-unknown-linux-gnu
+ARFLAGS_x86_64-unknown-linux-gnu = None
+cargo:rustc-link-lib=static=forma_3dm_shim
+cargo:rustc-link-search=native=/home/user/forma/target-occt/debug/build/forma-io-3dm-a64dca0dd1ff1025/out
+cargo:rerun-if-env-changed=CXXSTDLIB_x86_64-unknown-linux-gnu
+CXXSTDLIB_x86_64-unknown-linux-gnu = None
+cargo:rerun-if-env-changed=CXXSTDLIB_x86_64_unknown_linux_gnu
+CXXSTDLIB_x86_64_unknown_linux_gnu = None
+cargo:rerun-if-env-changed=HOST_CXXSTDLIB
+HOST_CXXSTDLIB = None
+cargo:rerun-if-env-changed=CXXSTDLIB
+CXXSTDLIB = None
+cargo:rerun-if-env-changed=CXXSTDLIB_STATIC_x86_64-unknown-linux-gnu
+CXXSTDLIB_STATIC_x86_64-unknown-linux-gnu = None
+cargo:rerun-if-env-changed=CXXSTDLIB_STATIC_x86_64_unknown_linux_gnu
+CXXSTDLIB_STATIC_x86_64_unknown_linux_gnu = None
+cargo:rerun-if-env-changed=HOST_CXXSTDLIB_STATIC
+HOST_CXXSTDLIB_STATIC = None
+cargo:rerun-if-env-changed=CXXSTDLIB_STATIC
+CXXSTDLIB_STATIC = None
+cargo:rustc-link-lib=stdc++
+cargo:rustc-link-lib=static=opennurbsStatic
+cargo:rustc-link-lib=static=opennurbs_public_freetype
+cargo:rustc-link-lib=static=zlib
+cargo:rustc-link-search=native=/home/user/forma/target-occt/debug/build/forma-io-3dm-a64dca0dd1ff1025/out
+cargo:rustc-link-lib=static=forma_on_zmem
+cargo:rustc-link-lib=static=android_uuid
+cargo:rustc-link-lib=stdc++
+cargo:rerun-if-changed=shim/shim.cpp
+cargo:rerun-if-changed=build.rs
+cargo:rerun-if-changed=/home/user/forma/crates/io-3dm/../../third_party/opennurbs/.git

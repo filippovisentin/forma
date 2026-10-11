@@ -222,6 +222,7 @@ impl FormaApp {
                 // The model is back as it was: unsaved, under its own name, and
                 // a bare Save asks where to write (never over the autosave).
                 self.engine.ctx.doc.path = offer.source.clone();
+                self.new_model = None; // the recovered model replaces "New model"
                 self.reset_document_view();
                 self.saved_by_forma = false;
                 self.saved_version = u64::MAX;

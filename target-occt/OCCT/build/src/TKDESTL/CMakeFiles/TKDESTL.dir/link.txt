@@ -1,0 +1,2 @@
+/usr/bin/ar qc ../../lin64/gcc/lib/libTKDESTL.a CMakeFiles/TKDESTL.dir/__/StlAPI/StlAPI.cxx.o CMakeFiles/TKDESTL.dir/__/StlAPI/StlAPI_Reader.cxx.o CMakeFiles/TKDESTL.dir/__/StlAPI/StlAPI_Writer.cxx.o CMakeFiles/TKDESTL.dir/__/RWStl/RWStl.cxx.o CMakeFiles/TKDESTL.dir/__/RWStl/RWStl_Reader.cxx.o CMakeFiles/TKDESTL.dir/__/RWStl/RWStl_ConfigurationNode.cxx.o CMakeFiles/TKDESTL.dir/__/RWStl/RWStl_Provider.cxx.o
+/usr/bin/ranlib ../../lin64/gcc/lib/libTKDESTL.a

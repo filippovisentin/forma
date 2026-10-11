@@ -1,0 +1,2 @@
+/usr/bin/ar qc ../../lin64/gcc/lib/libTKDEPLY.a CMakeFiles/TKDEPLY.dir/__/RWPly/RWPly_CafWriter.cxx.o CMakeFiles/TKDEPLY.dir/__/RWPly/RWPly_ConfigurationNode.cxx.o CMakeFiles/TKDEPLY.dir/__/RWPly/RWPly_PlyWriterContext.cxx.o CMakeFiles/TKDEPLY.dir/__/RWPly/RWPly_Provider.cxx.o
+/usr/bin/ranlib ../../lin64/gcc/lib/libTKDEPLY.a

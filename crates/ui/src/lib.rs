@@ -31,6 +31,7 @@ mod perf;
 mod pick;
 mod settings;
 mod snap;
+mod start;
 mod status;
 mod theme;
 mod toolbar;
@@ -70,6 +71,7 @@ pub fn run(open: Option<String>) -> eframe::Result {
         Box::new(move |cc| {
             let mut app = FormaApp::new(cc);
             if let Some(path) = open {
+                app.new_model = None; // a file was given: no "New model" dialog
                 app.run_engine(&format!("Open {path}"));
             }
             Ok(Box::new(app))
@@ -365,8 +367,12 @@ struct FormaApp {
     /// Persistent user settings, and when they were last compared / written.
     settings: Settings,
     settings_checked: std::time::Instant,
+    /// What the settings file holds (written when the settings differ from it).
+    settings_on_disk: Settings,
     /// Periodic copy of unsaved changes, and recovery after a crash.
     autosave: autosave::Autosave,
+    /// The "New model" (units) dialog, when open.
+    new_model: Option<start::NewDialog>,
     /// Panel sizes (points), remembered between runs.
     side_width: f32,
     command_height: f32,

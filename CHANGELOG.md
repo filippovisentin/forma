@@ -19,7 +19,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Crashes are written to `crash.log` in the settings folder (the Windows app has no
   console), so they can be reported.
 
+- **New model dialog**: at start-up (and for File ▸ New, Ctrl+N or a bare `New`)
+  Forma asks for the units of the new model: millimetres, centimetres, metres,
+  inches or feet. The last choice is preselected; "Ask at every start" can be turned
+  off. `New` accepts `in` and `ft` too.
+
 ### Fixed
+- `Mesh` keeps the sharp edges of the polysurface (split at more than 30°, smooth
+  across gentler bends): `DupEdge` finds the edges of a meshed box and `Explode`
+  gives its faces (it used to weld everything into one smooth piece).
+- `Cap` no longer "closes" a flat mesh (a disc, one face of a box) by doubling it
+  into a zero-volume solid; flat meshes have nothing to cap.
+- Recent files and other settings changed by the app are written to the settings
+  file (they were sometimes only kept in memory until another setting changed).
 - Saving never damages the previous file: `.3dm` files are written under a
   temporary name and swapped in only when complete (a crash or a full disk during
   Save used to leave a half-written model).

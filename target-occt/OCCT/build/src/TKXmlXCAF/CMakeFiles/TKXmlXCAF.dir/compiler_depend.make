@@ -1,0 +1,2 @@
+# Empty compiler generated dependencies file for TKXmlXCAF.
+# This may be replaced when dependencies are built.

@@ -56,11 +56,7 @@ impl FormaApp {
         use ToolKind as K;
         egui::MenuBar::new().ui(ui, |ui| {
             ui.menu_button("File", |ui| {
-                ui.menu_button("New", |ui| {
-                    item(ui, &mut act, "Centimetres", "Ctrl+N", Act::Cmd("New cm"));
-                    item(ui, &mut act, "Millimetres", "", Act::Cmd("New mm"));
-                    item(ui, &mut act, "Metres", "", Act::Cmd("New m"));
-                });
+                item(ui, &mut act, "New…", "Ctrl+N", Act::Cmd("New"));
                 item(ui, &mut act, "Open…", "Ctrl+O", Act::Open);
                 let recent = self.settings.recent();
                 ui.add_enabled_ui(!recent.is_empty(), |ui| {

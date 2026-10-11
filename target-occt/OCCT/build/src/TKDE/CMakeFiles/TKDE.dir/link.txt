@@ -1,0 +1,2 @@
+/usr/bin/ar qc ../../lin64/gcc/lib/libTKDE.a CMakeFiles/TKDE.dir/__/DE/DE_ConfigurationContext.cxx.o CMakeFiles/TKDE.dir/__/DE/DE_ConfigurationNode.cxx.o CMakeFiles/TKDE.dir/__/DE/DE_Provider.cxx.o CMakeFiles/TKDE.dir/__/DE/DE_Wrapper.cxx.o
+/usr/bin/ranlib ../../lin64/gcc/lib/libTKDE.a

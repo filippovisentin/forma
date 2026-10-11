@@ -80,6 +80,11 @@ impl FormaApp {
             }
             return;
         }
+        if first == "new" && line.split_whitespace().count() == 1 {
+            // Bare New (Ctrl+N, toolbar, typed): ask for the units.
+            self.new_model = Some(self.new_dialog(false));
+            return;
+        }
         if first == "interface" {
             let arg = line.split_whitespace().nth(1);
             match arg.and_then(crate::theme::Look::parse) {

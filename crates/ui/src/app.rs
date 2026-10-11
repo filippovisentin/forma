@@ -138,7 +138,9 @@ impl FormaApp {
             track_points: Vec::new(),
             settings: Settings::load(),
             settings_checked: Instant::now(),
+            settings_on_disk: Settings::default(),
             autosave: crate::autosave::Autosave::at_startup(),
+            new_model: None,
             side_width: 280.0,
             command_height: 92.0,
         };
@@ -148,9 +150,11 @@ impl FormaApp {
             .and_then(theme::Look::parse)
             .unwrap_or(theme::Look::Classic);
         theme::init(&cc.egui_ctx, look);
+        app.settings_on_disk = app.settings.clone();
         app.apply_settings();
         // Interior design in centimetres, like Filippo's Rhino files.
-        let _ = app.engine.run_line("New cm");
+        let _ = app.engine.run_line(&format!("New {}", app.default_units()));
+        app.new_model = app.start_dialog();
         app.saved_version = app.engine.doc().version();
         app.reset_document_view();
         app.log(
@@ -400,12 +404,15 @@ impl FormaApp {
         }
         self.settings_checked = Instant::now();
         let s = self.collect_settings();
-        if s != self.settings {
-            if let Err(e) = s.save() {
-                self.log(LogKind::Error, format!("could not save the settings: {e}"));
+        // Compared with the file, not with `self.settings`: recent files, units
+        // and other values are put straight into `self.settings`.
+        if s != self.settings_on_disk {
+            match s.save() {
+                Ok(()) => self.settings_on_disk = s.clone(),
+                Err(e) => self.log(LogKind::Error, format!("could not save the settings: {e}")),
             }
-            self.settings = s;
         }
+        self.settings = s;
     }
 }
 
@@ -430,7 +437,7 @@ impl eframe::App for FormaApp {
             self.dirty_all();
         }
         self.handle_close(&ctx);
-        if self.confirm.is_none() && self.autosave.offer.is_none() {
+        if self.confirm.is_none() && self.autosave.offer.is_none() && self.new_model.is_none() {
             self.handle_keyboard(&ctx);
         }
         self.sync(frame);
@@ -502,6 +509,7 @@ impl eframe::App for FormaApp {
             .show(ui, |ui| self.ui_viewports(ui, frame));
         self.ui_confirm(&ctx);
         self.ui_recover(&ctx);
+        self.ui_new_dialog(&ctx);
         self.ui_form(&ctx);
         self.poll_capture(&ctx);
 

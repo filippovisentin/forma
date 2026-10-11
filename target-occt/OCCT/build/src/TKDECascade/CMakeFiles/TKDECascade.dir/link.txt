@@ -1,0 +1,2 @@
+/usr/bin/ar qc ../../lin64/gcc/lib/libTKDECascade.a CMakeFiles/TKDECascade.dir/__/DEBRepCascade/DEBRepCascade_ConfigurationNode.cxx.o CMakeFiles/TKDECascade.dir/__/DEBRepCascade/DEBRepCascade_Provider.cxx.o CMakeFiles/TKDECascade.dir/__/DEXCAFCascade/DEXCAFCascade_ConfigurationNode.cxx.o CMakeFiles/TKDECascade.dir/__/DEXCAFCascade/DEXCAFCascade_Provider.cxx.o
+/usr/bin/ranlib ../../lin64/gcc/lib/libTKDECascade.a

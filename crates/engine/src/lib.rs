@@ -305,7 +305,7 @@ mod tests {
         assert_eq!(e.missing_input("select"), Some("object ids"));
         assert_eq!(e.missing_input("SelAll"), None);
         assert_eq!(e.missing_input("Delete"), None);
-        assert_eq!(e.optional_args("New"), Some("[cm|mm|m]"));
+        assert_eq!(e.optional_args("New"), Some("[cm|mm|m|in|ft]"));
         assert_eq!(e.optional_args("Delete"), None);
         assert_eq!(e.optional_args("SelAll"), None);
     }
