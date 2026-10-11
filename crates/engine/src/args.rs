@@ -56,7 +56,9 @@ impl<'a> Args<'a> {
     pub fn number(&mut self, what: &'static str) -> Result<f64, CommandError> {
         let t = self.next_token().ok_or(CommandError::MissingInput(what))?;
         t.parse()
-            .map_err(|_| CommandError::BadInput(format!("{what}: {t}")))
+            .ok()
+            .filter(|v: &f64| v.is_finite())
+            .ok_or_else(|| CommandError::BadInput(format!("{what}: {t}")))
     }
 
     /// Next token parsed as a vector `x,y,z` (or `x,y`).
@@ -75,7 +77,7 @@ impl<'a> Args<'a> {
 
     /// Optional trailing number.
     pub fn optional_number(&mut self) -> Option<f64> {
-        let v = self.peek()?.parse().ok()?;
+        let v = self.peek()?.parse().ok().filter(|v: &f64| v.is_finite())?;
         self.pos += 1;
         Some(v)
     }
@@ -93,10 +95,13 @@ impl<'a> Args<'a> {
     }
 }
 
+/// A finite number (NaN and infinities would poison the model).
 fn num(s: &str, full: &str) -> Result<f64, CommandError> {
     s.trim()
         .parse()
-        .map_err(|_| CommandError::BadInput(full.to_string()))
+        .ok()
+        .filter(|v: &f64| v.is_finite())
+        .ok_or_else(|| CommandError::BadInput(full.to_string()))
 }
 
 /// Parse one coordinate token. See module docs for the accepted forms.
@@ -133,6 +138,20 @@ pub fn parse_point(token: &str, last: Option<Point3>) -> Result<Point3, CommandE
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn non_finite_numbers_are_rejected() {
+        for t in ["nan,0,0", "0,inf,0", "1,2,-inf", "@NaN<45", "@10<nan"] {
+            assert!(parse_point(t, Some(Point3::ORIGIN)).is_err(), "{t}");
+        }
+        let mut e = crate::Engine::new();
+        e.run_line("Line 0,0,0 10,0,0").unwrap();
+        e.run_line("SelAll").unwrap();
+        assert!(e.run_line("Move 0,0,0 nan,0,0").is_err());
+        assert!(e.run_line("Circle 0,0,0 inf").is_err());
+        assert!(e.run_line("Offset NaN 1,1,0").is_err());
+    }
+
     use super::*;
     use forma_geom::Tolerance;
 

@@ -169,6 +169,9 @@ pub fn chat(cfg: &AiConfig, messages: &[Message]) -> Result<String, String> {
         .ok_or_else(|| "the model's reply has no text".into())
 }
 
+/// Largest answer accepted from a model server.
+const MAX_ANSWER: u64 = 32 * 1024 * 1024;
+
 /// POST `body` as JSON; the status and the response body.
 fn post(
     ep: &Endpoint,
@@ -203,17 +206,21 @@ fn post(
         .write_all(head.as_bytes())
         .and_then(|()| stream.write_all(body.as_bytes()))
         .map_err(|e| format!("{place}: {e}"))?;
+    // A model's answer is text: cap it so a misbehaving server cannot exhaust memory.
     let mut raw = Vec::new();
-    stream.read_to_end(&mut raw).map_err(|e| {
-        if matches!(
-            e.kind(),
-            std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
-        ) {
-            "the model took too long to answer".to_string()
-        } else {
-            format!("{place}: {e}")
-        }
-    })?;
+    (&mut stream)
+        .take(MAX_ANSWER)
+        .read_to_end(&mut raw)
+        .map_err(|e| {
+            if matches!(
+                e.kind(),
+                std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+            ) {
+                "the model took too long to answer".to_string()
+            } else {
+                format!("{place}: {e}")
+            }
+        })?;
     parse_response(&raw)
 }
 
