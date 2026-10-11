@@ -581,6 +581,9 @@ impl FormaApp {
             ui.menu_button("Help", |ui| {
                 item(ui, &mut act, "Commands, keys and mouse", "F1", Act::Help);
             });
+            if crate::theme::look() == crate::theme::Look::Graphite {
+                self.ui_title_status(ui);
+            }
         });
         if let Some(a) = act {
             self.act(ui.ctx(), a);
@@ -597,5 +600,45 @@ impl FormaApp {
             }
             self.save_settings(true);
         }
+    }
+
+    /// Graphite: file name (with a dot when modified), save state and units at the
+    /// right of the menu bar.
+    fn ui_title_status(&self, ui: &mut egui::Ui) {
+        use crate::theme;
+        let doc = self.engine.doc();
+        let name = doc
+            .path
+            .as_deref()
+            .and_then(|p| std::path::Path::new(p).file_name())
+            .map_or("Untitled".to_string(), |n| n.to_string_lossy().into_owned());
+        let modified = self.is_modified();
+        let state = self.save_state();
+        let units = format!(
+            "{} · tol {}",
+            doc.units.abbreviation(),
+            doc.absolute_tolerance
+        );
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.add_space(6.0);
+            ui.label(egui::RichText::new(units).size(12.0).color(theme::weak()));
+            let chip = egui::Frame::NONE
+                .fill(theme::panel())
+                .stroke(egui::Stroke::new(1.0, theme::border()))
+                .corner_radius(egui::CornerRadius::same(10))
+                .inner_margin(egui::Margin::symmetric(8, 1));
+            chip.show(ui, |ui| {
+                let color = if modified {
+                    theme::weak()
+                } else {
+                    egui::Color32::from_rgb(127, 199, 154)
+                };
+                ui.label(egui::RichText::new(state).size(12.0).color(color));
+            });
+            if modified {
+                ui.label(egui::RichText::new("●").size(11.0).color(theme::accent()));
+            }
+            ui.label(egui::RichText::new(name).strong().size(13.0));
+        });
     }
 }

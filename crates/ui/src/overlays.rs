@@ -14,6 +14,15 @@ use forma_render::DisplayMode;
 const INK: Color32 = Color32::from_rgb(20, 20, 24);
 const YELLOW: Color32 = Color32::from_rgb(255, 200, 0);
 
+/// Tool previews and the cursor dot: dark ink, light on dark viewports.
+fn ink() -> Color32 {
+    if forma_render::dark_viewports() {
+        Color32::from_rgb(225, 225, 230)
+    } else {
+        INK
+    }
+}
+
 /// An object colour as drawn over the viewport: on dark viewports (Graphite)
 /// colours too dark to see are drawn light grey, like the rendered geometry.
 fn shown(rgb: [u8; 3]) -> Color32 {
@@ -199,7 +208,7 @@ impl FormaApp {
     /// Tool preview everywhere; cursor, osnap tag, SmartTrack and the live
     /// measurement only in the view under the mouse.
     fn draw_tool(&self, p: &Painter, pr: &Projector, vi: usize, t: &Tool, h: &Hover) {
-        let st = Stroke::new(1.3, INK);
+        let st = Stroke::new(1.3, ink());
         for [a, b] in t.preview(h.point) {
             seg(p, pr, a, b, st);
         }
@@ -249,7 +258,7 @@ impl FormaApp {
             );
         }
         if !t.selecting {
-            p.circle_filled(s, 3.0, INK);
+            p.circle_filled(s, 3.0, ink());
         }
         if let Some(k) = h.snap {
             snap_marker(p, s, Some(k.label()));
@@ -267,7 +276,7 @@ impl FormaApp {
         let here = drag.is_some_and(|d| d.viewport == vi);
         if dist.abs() > 1e-9 {
             let v = f.normal * dist;
-            let st = Stroke::new(1.3, INK);
+            let st = Stroke::new(1.3, ink());
             for [a, b] in &f.outline {
                 seg(p, pr, *a + v, *b + v, st);
                 seg(p, pr, *a, *a + v, st);
@@ -318,7 +327,7 @@ impl FormaApp {
         }
         let Some(m) = d.motion else { return };
         let x: Xform = m.xform(d.center);
-        let st = Stroke::new(1.2, INK);
+        let st = Stroke::new(1.2, ink());
         let extrude = matches!(m, gumball::Motion::Extrude(..));
         // Solids grow from one face: no moved copy of the whole object.
         let push_pull = extrude && !d.faces.is_empty();

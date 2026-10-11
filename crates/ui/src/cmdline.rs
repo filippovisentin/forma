@@ -90,18 +90,34 @@ impl FormaApp {
                 ui.label(mono(&format!("{prompt}:")));
             } else {
                 // Rhino: `Next point ( Close Undo ):` — each option is a link.
-                ui.label(mono(&format!("{prompt} (")));
+                // Graphite shows the options as chips instead.
+                let chips = theme::look() == theme::Look::Graphite;
+                ui.label(mono(&if chips {
+                    format!("{prompt}:")
+                } else {
+                    format!("{prompt} (")
+                }));
                 for (label, a) in &options {
-                    let link = egui::Link::new(mono(label).color(theme::accent()));
                     let tip = match a {
                         OptAction::Word(w) => format!("{w} (or type {})", &w[..1]),
                         OptAction::Value(n) => format!("Click, or type {n}=value"),
                     };
-                    if ui.add(link).on_hover_text(tip).clicked() {
+                    let r = if chips {
+                        ui.add(
+                            egui::Button::new(mono(label).size(12.0))
+                                .corner_radius(egui::CornerRadius::same(4))
+                                .stroke(Stroke::new(1.0, theme::border())),
+                        )
+                    } else {
+                        ui.add(egui::Link::new(mono(label).color(theme::accent())))
+                    };
+                    if r.on_hover_text(tip).clicked() {
                         clicked = Some(*a);
                     }
                 }
-                ui.label(mono("):"));
+                if !chips {
+                    ui.label(mono("):"));
+                }
             }
             let id = egui::Id::new(CMD_ID);
             let hint = self

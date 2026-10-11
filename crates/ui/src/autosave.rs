@@ -27,6 +27,8 @@ pub(crate) struct Autosave {
     version: Option<u64>,
     /// The copy being written.
     job: Option<JoinHandle<Result<(), String>>>,
+    /// When the last copy was written successfully (for the Graphite title bar).
+    written: Option<Instant>,
     /// A copy left by an earlier session, waiting for "Recover?".
     pub(crate) offer: Option<Offer>,
 }
@@ -136,7 +138,7 @@ impl FormaApp {
         {
             let job = self.autosave.job.take().expect("checked");
             match job.join() {
-                Ok(Ok(())) => {}
+                Ok(Ok(())) => self.autosave.written = Some(Instant::now()),
                 Ok(Err(e)) => self.log(LogKind::Error, format!("autosave failed: {e}")),
                 Err(_) => self.log(LogKind::Error, "autosave failed"),
             }
@@ -167,6 +169,21 @@ impl FormaApp {
         self.autosave.version = None;
         if self.autosave.offer.is_none() {
             remove();
+        }
+    }
+
+    /// Short save state for the title bar: "Saved", "Autosaved 3 min ago",
+    /// "Not saved yet".
+    pub(crate) fn save_state(&self) -> String {
+        if !self.is_modified() {
+            return "Saved".into();
+        }
+        match self.autosave.written {
+            Some(t) if self.autosave.version.is_some() => match t.elapsed().as_secs() / 60 {
+                0 => "Autosaved just now".into(),
+                m => format!("Autosaved {m} min ago"),
+            },
+            _ => "Not saved yet".into(),
         }
     }
 

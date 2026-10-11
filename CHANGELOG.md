@@ -43,6 +43,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - The Graphite look now has dark viewports too: dark background and grid, light edges,
   and black or near-black objects (and their text and points) drawn light grey, like
   Rhino's dark mode. Classic keeps the grey viewports.
+- Graphite layout (Classic stays as it was): the file name with a dot when it has
+  unsaved changes, the save state ("Autosaved 2 min ago") and the units at the right
+  of the menu bar; command options as clickable chips; object snaps as toggle pills;
+  tool previews and the cursor drawn light on the dark viewports.
 
 ### Fixed
 - The command history no longer goes blank after a few commands (it scrolled past its
