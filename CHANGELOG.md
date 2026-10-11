@@ -7,7 +7,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-## [0.9.1] — 2026-10-11
+## [1.0.0] — 2026-10-11
+
+First official release: exact solids and surfaces, tested in the app.
 
 ### Added
 - Exact `Loft` (smooth NURBS through the curves, or `Loft straight` with ruled faces),

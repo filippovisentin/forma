@@ -18,7 +18,7 @@ architect and reviewer.
 
 Forma **works**: you can draw a room in centimetres, extrude walls, push and pull faces,
 arrange furniture, colour things by layer, and save a `.3dm` file. But it is young
-(**v0.9.0**), so know its limits before you rely on it:
+(**v1.0.0**, the first official release), so know its limits before you rely on it:
 
 > **Solids and surfaces are exact (since v0.9.0).** Rhino polysurfaces, extrusions and
 > surfaces are kept as they are and saved back unchanged, also after Move, Rotate, Scale
@@ -264,7 +264,7 @@ revisore e unico utente.
 
 **Stato.** Funziona: si disegna una stanza in centimetri, si estrudono i muri, si
 spingono e tirano le facce, si organizzano layer e colori e si salva in `.3dm`. È però
-giovane (v0.9.0). **Solidi e superfici sono esatti**: le polisuperfici, estrusioni e
+giovane (v1.0.0, prima release ufficiale). **Solidi e superfici sono esatti**: le polisuperfici, estrusioni e
 superfici di Rhino restano tali e tornano a Rhino invariate (anche dopo Sposta, Ruota,
 Scala, Specchia); Box, Cylinder, Sphere, Extrude, PlanarSrf, Revolve, Cap… creano
 polisuperfici esatte, e push/pull, Join e booleane di solidi a facce piane restano esatti.
