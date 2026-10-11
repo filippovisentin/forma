@@ -7,6 +7,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.1.0] — 2026-10-11
+
 ### Added
 - **Autosave and crash recovery.** While a model has unsaved changes, a copy is
   written every 2 minutes to `autosave.3dm` in the settings folder (in the
