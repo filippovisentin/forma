@@ -514,6 +514,9 @@ impl FormaApp {
                 "commandarea" => Some("Top, Bottom, Float, Compact or Tall"),
                 "interface" => Some("Classic or Graphite"),
                 "agentconnection" => Some("On or Off"),
+                "runpythonscript" | "runpython" => {
+                    Some("path of the .py file (Enter alone: choose it in a dialog)")
+                }
                 _ => None,
             };
             if let Some(what) = what {

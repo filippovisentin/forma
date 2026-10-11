@@ -7,6 +7,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+- `RunPythonScript <file.py>` typed on the command line waits for the path (a space
+  no longer runs it before the path is typed).
+
 ## [1.2.0] — 2026-10-11
 
 ### Added
