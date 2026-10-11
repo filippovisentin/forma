@@ -7,6 +7,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.2.0] — 2026-10-11
+
 ### Added
 - **Python scripts inside the app** ([docs/SCRIPTING.md](docs/SCRIPTING.md), ADR 0008):
   `RunPythonScript`, the `forma` module (`run`, `objects`, `selection`, `select`,
@@ -325,7 +327,8 @@ First official release: exact solids and surfaces, tested in the app.
   with undo / redo, `cargo xtask ci` gate on Linux and Windows, openNURBS `.3dm` I/O
   (ADR 0002), geometry-kernel spike choosing OpenCascade (ADR 0001), Windows release workflow.
 
-[Unreleased]: https://github.com/filippovisentin/forma/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/filippovisentin/forma/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/filippovisentin/forma/releases/tag/v1.2.0
 [0.6.0]: https://github.com/filippovisentin/forma/releases/tag/v0.6.0
 [0.5.0]: https://github.com/filippovisentin/forma/releases/tag/v0.5.0
 [0.4.0]: https://github.com/filippovisentin/forma/releases/tag/v0.4.0
