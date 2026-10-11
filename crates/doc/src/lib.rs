@@ -149,6 +149,27 @@ impl Geometry {
         }
     }
 
+    /// The curve as one exact NURBS curve (lines and polylines of degree 1, arcs
+    /// and polycurves rational); `None` for anything that is not a curve.
+    pub fn to_nurbs(&self) -> Option<NurbsCurve> {
+        match self {
+            Geometry::Nurbs(n) => Some(n.clone()),
+            Geometry::Line(l) => {
+                NurbsCurve::new(1, vec![l.from, l.to], vec![1.0, 1.0], vec![0.0, 1.0])
+            }
+            Geometry::Polyline(p) => {
+                let mut pts = p.clone();
+                pts.dedup_by(|a, b| a.distance_to(*b) < 1e-12);
+                let n = pts.len();
+                let knots = (0..n).map(|i| i as f64).collect();
+                NurbsCurve::new(1, pts, vec![1.0; n], knots)
+            }
+            Geometry::Arc(a) => Some(NurbsCurve::from_arc(a)),
+            Geometry::PolyCurve(s) => NurbsCurve::from_segs(s),
+            _ => None,
+        }
+    }
+
     /// The curve as a chain of line/arc segments (None for meshes and points).
     /// NURBS curves become their display polyline (an approximation).
     pub fn to_chain(&self) -> Option<Chain> {

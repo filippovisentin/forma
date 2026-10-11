@@ -60,6 +60,128 @@ fn selected_chains(ctx: &Context, cmd: &str) -> Result<Vec<(ObjectId, Chain)>, C
         .collect())
 }
 
+/// Closest point of a curve to `p`: exact for NURBS, lines and arcs.
+fn closest_on(g: &Geometry, p: Point3) -> Option<Point3> {
+    match g {
+        Geometry::Nurbs(n) => Some(n.point_at(n.closest_param(p))),
+        _ => g.to_chain().map(|c| c.point_at(c.closest(p).0)),
+    }
+}
+
+/// Where `n` crosses the cutter nearest to `x` (alternating projections from
+/// `x`, which is near the crossing), as a parameter of `n`.
+fn crossing_param(n: &geom::NurbsCurve, x: Point3, cutters: &[Geometry], tol: f64) -> f64 {
+    let mut t = n.closest_param(x);
+    let Some(cutter) = cutters.iter().min_by(|a, b| {
+        let d = |g: &Geometry| closest_on(g, x).map_or(f64::MAX, |q| q.distance_to(x));
+        d(a).total_cmp(&d(b))
+    }) else {
+        return t;
+    };
+    if closest_on(cutter, x).is_none_or(|q| q.distance_to(x) > tol * 1000.0) {
+        return t;
+    }
+    for _ in 0..60 {
+        let p = n.point_at(t);
+        let Some(q) = closest_on(cutter, p) else {
+            break;
+        };
+        let t2 = n.closest_param(q);
+        if (t2 - t).abs() < 1e-13 {
+            break;
+        }
+        t = t2;
+    }
+    t
+}
+
+/// Pieces of a chain operation on an original NURBS curve, rebuilt exactly on
+/// it: each piece becomes the part of the curve between its ends (ends that
+/// were cut are moved onto the exact crossing with the nearest cutter). Other
+/// curves keep the chain pieces.
+fn exact_pieces(
+    orig: &Geometry,
+    pieces: Vec<Chain>,
+    cutters: &[Geometry],
+    tol: f64,
+) -> Result<Vec<Geometry>, CommandError> {
+    let Geometry::Nurbs(n) = orig else {
+        return pieces.into_iter().map(geometry).collect();
+    };
+    let (a, b) = n.domain();
+    let param = |p: Point3| {
+        if p.distance_to(n.start()) <= tol && !n.is_closed() {
+            a
+        } else if p.distance_to(n.end()) <= tol && !n.is_closed() {
+            b
+        } else {
+            crossing_param(n, p, cutters, tol)
+        }
+    };
+    let mut out = Vec::with_capacity(pieces.len());
+    for piece in pieces {
+        let (t0, t1) = (param(piece.start()), param(piece.end()));
+        let exact = if t1 > t0 {
+            n.sub(t0, t1)
+        } else if n.is_closed() {
+            // Across the seam of a closed curve.
+            match (n.sub(t0, b), n.sub(a, t1)) {
+                (Some(x), Some(y)) => geom::NurbsCurve::join(&[x, y], tol.max(1e-6)),
+                (Some(x), None) => Some(x),
+                (None, y) => y,
+            }
+        } else {
+            None
+        };
+        out.push(match exact {
+            Some(c) => Geometry::Nurbs(c),
+            None => geometry(piece)?,
+        });
+    }
+    Ok(out)
+}
+
+/// Curves joined end to end into exact NURBS curves (used when one of them is
+/// a NURBS curve: lines and arcs join it exactly). Groups that do not touch
+/// stay apart; each group's curves are turned to run the same way.
+fn join_nurbs(curves: Vec<geom::NurbsCurve>, tol: f64) -> Vec<geom::NurbsCurve> {
+    let mut left = curves;
+    let mut out = Vec::new();
+    while let Some(first) = (!left.is_empty()).then(|| left.remove(0)) {
+        let mut chain = vec![first];
+        loop {
+            let (s, e) = (chain[0].start(), chain.last().expect("chain").end());
+            if s.distance_to(e) <= tol && chain.len() > 1 {
+                break; // closed
+            }
+            let found = left.iter().position(|c| {
+                [c.start(), c.end()]
+                    .iter()
+                    .any(|p| p.distance_to(e) <= tol || p.distance_to(s) <= tol)
+            });
+            let Some(i) = found else { break };
+            let c = left.remove(i);
+            if c.start().distance_to(e) <= tol {
+                chain.push(c);
+            } else if c.end().distance_to(e) <= tol {
+                chain.push(c.reversed());
+            } else if c.end().distance_to(s) <= tol {
+                chain.insert(0, c);
+            } else {
+                chain.insert(0, c.reversed());
+            }
+        }
+        if chain.len() == 1 {
+            out.push(chain.remove(0));
+        } else if let Some(j) = geom::NurbsCurve::join(&chain, tol) {
+            out.push(j);
+        } else {
+            out.extend(chain);
+        }
+    }
+    out
+}
+
 fn geometry(c: Chain) -> Result<Geometry, CommandError> {
     Geometry::from_chain(c).ok_or_else(|| CommandError::Invalid("result is empty".into()))
 }
@@ -90,6 +212,15 @@ impl Command for Offset {
         for (id, c) in chains {
             let obj = ctx.doc.object(id).expect("selected").clone();
             let plane = plane_of(&obj.geometry, c.start(), n);
+            // Free-form curves: a smooth NURBS offset within tolerance.
+            if let Geometry::Nurbs(nc) = &obj.geometry {
+                let t = nc.closest_param(side_pt);
+                let left = (side_pt - nc.point_at(t)).dot(plane.z.cross(nc.tangent_at(t))) > 0.0;
+                if let Some(o) = nc.offset_planar(d, plane.z, left, tol) {
+                    out.push((obj, Geometry::Nurbs(o)));
+                    continue;
+                }
+            }
             let side = geom::side_of(&c, side_pt, &plane);
             let o = geom::offset(&c, d, side, &plane, tol).map_err(bad)?;
             out.push((obj, geometry(o.simplified(tol))?));
@@ -115,11 +246,13 @@ impl Command for Trim {
         let n = args.optional_vector();
         let cutter_ids = ctx.selected("Trim")?;
         let (target, chain) = nearest(ctx, pick)?;
-        let cutters: Vec<Chain> = cutter_ids
+        let cutter_geoms: Vec<Geometry> = cutter_ids
             .iter()
             .filter(|id| **id != target)
-            .filter_map(|id| ctx.doc.object(*id).and_then(|o| o.geometry.to_chain()))
+            .filter_map(|id| ctx.doc.object(*id).map(|o| o.geometry.clone()))
+            .filter(Geometry::is_curve)
             .collect();
+        let cutters: Vec<Chain> = cutter_geoms.iter().filter_map(Geometry::to_chain).collect();
         if cutters.is_empty() {
             return Err(CommandError::Invalid("select cutting curves first".into()));
         }
@@ -127,13 +260,14 @@ impl Command for Trim {
         let plane = plane_of(&obj.geometry, chain.start(), n);
         let tol = ctx.tolerance.absolute;
         let pieces = geom::trim(&chain, &cutters, pick, &plane, tol).map_err(bad)?;
+        let pieces = exact_pieces(&obj.geometry, pieces, &cutter_geoms, tol)?;
         let mut t = ctx.doc.begin();
         let mut pieces = pieces.into_iter();
         match pieces.next() {
             Some(first) => {
-                t.replace(target, geometry(first)?);
+                t.replace(target, first);
                 for p in pieces {
-                    t.add_like(geometry(p)?, &obj);
+                    t.add_like(p, &obj);
                 }
             }
             None => {
@@ -178,8 +312,31 @@ impl Command for Extend {
             }
         };
         let e = geom::extend(&chain, to, pick, &plane, tol).map_err(bad)?;
+        // A free-form curve keeps its exact shape, with a straight extension
+        // joined to the end that moved.
+        let g = match &obj.geometry {
+            Geometry::Nurbs(nc) => {
+                let line = |a: Point3, b: Point3| {
+                    geom::NurbsCurve::new(1, vec![a, b], vec![1.0, 1.0], vec![0.0, 1.0])
+                };
+                let mut parts = Vec::new();
+                if e.start().distance_to(nc.start()) > tol {
+                    parts.extend(line(e.start(), nc.start()));
+                }
+                parts.push(nc.clone());
+                if e.end().distance_to(nc.end()) > tol {
+                    parts.extend(line(nc.end(), e.end()));
+                }
+                geom::NurbsCurve::join(&parts, tol.max(1e-9)).map(Geometry::Nurbs)
+            }
+            _ => None,
+        };
+        let g = match g {
+            Some(g) => g,
+            None => geometry(e.simplified(tol))?,
+        };
         let mut t = ctx.doc.begin();
-        t.replace(target, geometry(e.simplified(tol))?);
+        t.replace(target, g);
         t.commit();
         Ok(format!("extended #{}", target.0))
     }
@@ -243,7 +400,35 @@ fn fillet_curves(
     let plane = plane_of(&g1, p1, Some(n));
     let circle = geom::circle_tangent_tangent(&c1, p1, &c2, p2, r, &plane, tol)
         .ok_or_else(|| CommandError::Invalid("no fillet of that radius fits there".into()))?;
-    let center = circle.center();
+    let g2 = ctx.doc.object(id2).expect("exists").geometry.clone();
+    // The circle was found on display polylines of free-form curves: move its
+    // centre until it is exactly `r` from both curves (Newton in the plane).
+    let mut center = circle.center();
+    if matches!(g1, Geometry::Nurbs(_)) || matches!(g2, Geometry::Nurbs(_)) {
+        for _ in 0..30 {
+            let (Some(q1), Some(q2)) = (closest_on(&g1, center), closest_on(&g2, center)) else {
+                break;
+            };
+            let (v1, v2) = (q1 - center, q2 - center);
+            let (d1, d2) = (v1.length(), v2.length());
+            let (Some(n1), Some(n2)) = (v1.normalized(), v2.normalized()) else {
+                break;
+            };
+            // n·δ = d − r for both curves, δ in the plane.
+            let (a1, b1) = (n1.dot(plane.x), n1.dot(plane.y));
+            let (a2, b2) = (n2.dot(plane.x), n2.dot(plane.y));
+            let det = a1 * b2 - a2 * b1;
+            if det.abs() < 1e-12 {
+                break;
+            }
+            let (e1, e2) = (d1 - r, d2 - r);
+            let (x, y) = ((e1 * b2 - e2 * b1) / det, (a1 * e2 - a2 * e1) / det);
+            center = center + plane.x * x + plane.y * y;
+            if x.abs() + y.abs() < 1e-12 {
+                break;
+            }
+        }
+    }
     // Keep each curve on the side of its pick, up to the tangent point.
     let keep = |c: &Chain, pick: Point3| -> Result<(Chain, Point3), CommandError> {
         let (s, _) = c.closest(center);
@@ -264,6 +449,30 @@ fn fillet_curves(
     };
     let (k1, t1) = keep(&c1, p1)?;
     let (k2, t2) = keep(&c2, p2)?;
+    // Free-form curves: trimmed exactly at the foot of the centre.
+    let exact_keep =
+        |g: &Geometry, k: Chain, tp: Point3| -> Result<(Geometry, Point3), CommandError> {
+            let Geometry::Nurbs(nc) = g else {
+                return Ok((geometry(k)?, tp));
+            };
+            let tc = nc.closest_param(center);
+            let foot = nc.point_at(tc);
+            let (a, b) = nc.domain();
+            // The kept part runs from the curve end away from the tangent point.
+            let keeps_start = k.start().distance_to(nc.start()) <= k.end().distance_to(nc.start())
+                && k.end().distance_to(tp) <= k.start().distance_to(tp);
+            let part = if keeps_start {
+                nc.sub(a, tc)
+            } else {
+                nc.sub(tc, b)
+            };
+            match part {
+                Some(c) => Ok((Geometry::Nurbs(c), foot)),
+                None => Ok((geometry(k)?, tp)),
+            }
+        };
+    let (k1, t1) = exact_keep(&g1, k1, t1)?;
+    let (k2, t2) = exact_keep(&g2, k2, t2)?;
     // The short way round between the two tangent points.
     let mut arc = geom::CircleArc::from_center_start_end(center, t1, t2, plane.z)
         .ok_or_else(|| CommandError::Invalid("degenerate fillet".into()))?;
@@ -273,8 +482,8 @@ fn fillet_curves(
     }
     let o1 = ctx.doc.object(id1).expect("exists").clone();
     let mut t = ctx.doc.begin();
-    t.replace(id1, geometry(k1)?);
-    t.replace(id2, geometry(k2)?);
+    t.replace(id1, k1);
+    t.replace(id2, k2);
     t.add_like(Geometry::Arc(arc), &o1);
     t.commit();
     Ok("filleted".into())
@@ -331,7 +540,27 @@ impl Command for Join {
         let mut result = Vec::new();
         let mut before = 0;
         let mut after = 0;
-        if curves.len() > 1 {
+        let any_nurbs = curves
+            .iter()
+            .any(|o| matches!(o.geometry, Geometry::Nurbs(_)));
+        if curves.len() > 1 && any_nurbs {
+            // Free-form curves join exactly into one NURBS curve.
+            let ncs: Vec<geom::NurbsCurve> = curves
+                .iter()
+                .filter_map(|o| o.geometry.to_nurbs())
+                .collect();
+            let joined = join_nurbs(ncs, tol);
+            if joined.len() < curves.len() {
+                before += curves.len();
+                after += joined.len();
+                for o in &curves {
+                    t.remove(o.id);
+                }
+                for c in joined {
+                    result.push(t.add_like(Geometry::Nurbs(c), curves[0]));
+                }
+            }
+        } else if curves.len() > 1 {
             let chains: Vec<Chain> = curves
                 .iter()
                 .filter_map(|o| o.geometry.to_chain())
@@ -422,6 +651,11 @@ impl Command for Explode {
                     .into_iter()
                     .filter_map(|s: Seg| Geometry::from_chain(Chain::new(vec![s])))
                     .collect(),
+                Geometry::Nurbs(n) => n
+                    .split_at_kinks()
+                    .into_iter()
+                    .map(Geometry::Nurbs)
+                    .collect(),
                 Geometry::Mesh(m) => m.components().into_iter().map(Geometry::Mesh).collect(),
                 // A polysurface explodes into its (exact) faces.
                 Geometry::Brep(b) => forma_io_3dm::exact::faces(b)
@@ -483,14 +717,17 @@ impl Command for Split {
             } else {
                 listed.clone()
             };
-            let cutters: Vec<Chain> = cutter_ids
+            let cutter_geoms: Vec<Geometry> = cutter_ids
                 .iter()
-                .filter_map(|c| ctx.doc.object(*c).and_then(|o| o.geometry.to_chain()))
+                .filter_map(|c| ctx.doc.object(*c).map(|o| o.geometry.clone()))
+                .filter(Geometry::is_curve)
                 .collect();
+            let cutters: Vec<Chain> = cutter_geoms.iter().filter_map(Geometry::to_chain).collect();
             let obj = ctx.doc.object(*id).expect("selected").clone();
             let plane = plane_of(&obj.geometry, chain.start(), None);
             if let Ok(pieces) = geom::split(chain, &cutters, &plane, tol) {
                 if pieces.len() > 1 {
+                    let pieces = exact_pieces(&obj.geometry, pieces, &cutter_geoms, tol)?;
                     results.push((obj, pieces));
                 }
             }
@@ -505,11 +742,11 @@ impl Command for Split {
         for (obj, pieces) in results {
             let mut it = pieces.into_iter();
             if let Some(first) = it.next() {
-                t.replace(obj.id, geometry(first)?);
+                t.replace(obj.id, first);
                 n += 1;
             }
             for p in it {
-                t.add_like(geometry(p)?, &obj);
+                t.add_like(p, &obj);
                 n += 1;
             }
         }
@@ -633,6 +870,82 @@ mod tests {
     use crate::Engine;
     use forma_doc::Geometry;
     use forma_geom::Point3;
+
+    fn nurbs(e: &Engine, id: u64) -> forma_geom::NurbsCurve {
+        match &e.doc().object(forma_doc::ObjectId(id)).unwrap().geometry {
+            Geometry::Nurbs(n) => n.clone(),
+            g => panic!("#{id} is a {}", g.kind()),
+        }
+    }
+
+    /// Largest distance from points of `a` to the curve `b`.
+    fn off(a: &forma_geom::NurbsCurve, b: &forma_geom::NurbsCurve) -> f64 {
+        let (t0, t1) = a.domain();
+        (0..=60)
+            .map(|i| {
+                let p = a.point_at(t0 + (t1 - t0) * f64::from(i) / 60.0);
+                b.point_at(b.closest_param(p)).distance_to(p)
+            })
+            .fold(0.0, f64::max)
+    }
+
+    #[test]
+    fn free_form_curves_stay_exact() {
+        let mut e = Engine::new();
+        e.run_line("Curve 0,0,0 30,40,0 70,-20,0 100,20,0").unwrap(); // #1
+        let orig = nurbs(&e, 1);
+        // Split by a line: two NURBS pieces on the original, meeting on the line.
+        e.run_line("Line 50,-60,0 50,60,0").unwrap(); // #2
+        e.run_line("Select #1").unwrap();
+        e.run_line("Split #2").unwrap();
+        let (a, b) = (nurbs(&e, 1), nurbs(&e, 3));
+        assert!(off(&a, &orig) < 1e-9 && off(&b, &orig) < 1e-9);
+        assert!((a.end().x - 50.0).abs() < 1e-6 && (b.start().x - 50.0).abs() < 1e-6);
+        // Join them back with a line: one exact curve; Explode cuts its corners.
+        e.run_line("Line 100,20,0 140,20,0").unwrap(); // #4
+        e.run_line("SelNone").unwrap();
+        e.run_line("Select #1 #3 #4").unwrap();
+        e.run_line("Join").unwrap();
+        let j = nurbs(&e, 5);
+        assert!(off(&orig, &j) < 1e-8);
+        assert!((j.end().x - 140.0).abs() < 1e-9);
+        e.run_line("Select #5").unwrap();
+        e.run_line("Explode").unwrap();
+        // The split point joins back smoothly: only the corner with the line cuts.
+        assert_eq!(e.doc().len(), 3, "cutter, curve, straight end");
+        // Offset: a smooth curve at the distance.
+        e.run_line("SelNone").unwrap();
+        e.run_line("Curve 0,100,0 30,140,0 70,80,0 100,120,0")
+            .unwrap();
+        let id = e.doc().objects().last().unwrap().id;
+        let c = nurbs(&e, id.0);
+        e.run_line(&format!("Select #{}", id.0)).unwrap();
+        e.run_line("Offset 3 50,200,0").unwrap();
+        let o = nurbs(&e, id.0 + 1);
+        let (t0, t1) = o.domain();
+        for i in 0..=40 {
+            let p = o.point_at(t0 + (t1 - t0) * f64::from(i) / 40.0);
+            let d = c.point_at(c.closest_param(p)).distance_to(p);
+            assert!((d - 3.0).abs() < 0.002, "{d}");
+        }
+        // Fillet with a line: the curve is trimmed exactly where the arc touches.
+        let mut f = Engine::new();
+        f.run_line("Curve 400,0,0 430,40,0 470,60,0").unwrap();
+        f.run_line("Line 400,0,0 480,-20,0").unwrap();
+        f.run_line("Fillet 5 430,40,0 460,-15,0").unwrap();
+        let k = nurbs(&f, 1);
+        let Geometry::Arc(arc) = &f.doc().object(forma_doc::ObjectId(3)).unwrap().geometry else {
+            panic!("no arc");
+        };
+        let ends = [arc.start(), arc.end()];
+        assert!(
+            ends.iter().any(|p| p.distance_to(k.start()) < 1e-6),
+            "{ends:?} {:?}",
+            k.start()
+        );
+        assert!(((arc.center().distance_to(k.start())) - 5.0).abs() < 1e-6);
+        let _ = Point3::ORIGIN;
+    }
 
     #[test]
     fn fillet_line_and_circle_arc() {
