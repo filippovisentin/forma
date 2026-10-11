@@ -388,3 +388,17 @@ impl FormaApp {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::CmdDock;
+
+    #[test]
+    fn command_area_places() {
+        for d in [CmdDock::Top, CmdDock::Bottom, CmdDock::Float] {
+            assert_eq!(CmdDock::parse(d.name()), Some(d));
+        }
+        assert_eq!(CmdDock::parse("floating"), Some(CmdDock::Float));
+        assert_eq!(CmdDock::parse("left"), None);
+    }
+}
