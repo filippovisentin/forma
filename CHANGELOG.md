@@ -24,6 +24,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   inches or feet. The last choice is preselected; "Ask at every start" can be turned
   off. `New` accepts `in` and `ft` too.
 
+- **AI assistants can work in Forma** (MCP server, [docs/AGENTS.md](docs/AGENTS.md)):
+  `forma-cli mcp` gives Claude Desktop, Claude Code and other MCP clients four tools:
+  run command lines, inspect the model, look up commands, render a view. With
+  `--live` they edit the model open in the app after Tools ▸ Agent Connection
+  (off by default, this computer only, protected by a random key); without it they
+  work on `.3dm` files, optionally limited to one folder (`--root`).
+
 ### Fixed
 - `Mesh` keeps the sharp edges of the polysurface (split at more than 30°, smooth
   across gentler bends): `DupEdge` finds the edges of a meshed box and `Explode`

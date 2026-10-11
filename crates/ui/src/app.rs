@@ -141,6 +141,8 @@ impl FormaApp {
             settings_on_disk: Settings::default(),
             autosave: crate::autosave::Autosave::at_startup(),
             new_model: None,
+            agent: None,
+            egui_ctx: cc.egui_ctx.clone(),
             side_width: 280.0,
             command_height: 92.0,
         };
@@ -436,6 +438,7 @@ impl eframe::App for FormaApp {
             theme::set_look(&ctx, look);
             self.dirty_all();
         }
+        self.agent_tick();
         self.handle_close(&ctx);
         if self.confirm.is_none() && self.autosave.offer.is_none() && self.new_model.is_none() {
             self.handle_keyboard(&ctx);

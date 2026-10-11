@@ -9,6 +9,7 @@
 //! gumball, labels), `views` (viewport layout and title menus), `cmdline`
 //! (history, prompt, autocomplete), `menus`, `toolbar`, `panels`, `status`.
 
+mod agent_link;
 mod app;
 mod autosave;
 mod capture;
@@ -371,6 +372,10 @@ struct FormaApp {
     settings_on_disk: Settings,
     /// Periodic copy of unsaved changes, and recovery after a crash.
     autosave: autosave::Autosave,
+    /// AI assistants' connection to this window (Tools ▸ Agent Connection), when on.
+    agent: Option<agent_link::AgentLink>,
+    /// For work that needs the context outside the frame callbacks.
+    egui_ctx: egui::Context,
     /// The "New model" (units) dialog, when open.
     new_model: Option<start::NewDialog>,
     /// Panel sizes (points), remembered between runs.

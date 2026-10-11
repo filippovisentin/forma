@@ -28,6 +28,7 @@ macro_rules! impl_meta {
     };
 }
 
+pub mod agent;
 mod analysis;
 mod annotate;
 mod args;

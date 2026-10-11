@@ -85,6 +85,11 @@ impl FormaApp {
             self.new_model = Some(self.new_dialog(false));
             return;
         }
+        if first == "agentconnection" {
+            let ctx = self.egui_ctx.clone();
+            self.agent_command(&ctx, line);
+            return;
+        }
         if first == "interface" {
             let arg = line.split_whitespace().nth(1);
             match arg.and_then(crate::theme::Look::parse) {

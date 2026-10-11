@@ -554,6 +554,12 @@ impl FormaApp {
                 ui.checkbox(&mut self.snap.grid, "Grid Snap (F9)");
                 ui.checkbox(&mut self.snap.ortho, "Ortho (F8)");
                 ui.checkbox(&mut self.snap.planar, "Planar");
+                ui.separator();
+                if self.agent.is_some() {
+                    item(ui, &mut act, "✓ Agent Connection (AI assistants)", "", Act::Submit("AgentConnection Off"));
+                } else {
+                    item(ui, &mut act, "Agent Connection (AI assistants)", "", Act::Submit("AgentConnection On"));
+                }
             });
             ui.menu_button("Analyze", |ui| {
                 tool(ui, &mut act, "Point (Evaluate)", K::Seq(&q::EVALUATE_PT));

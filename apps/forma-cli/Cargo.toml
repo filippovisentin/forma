@@ -11,6 +11,7 @@ occt = ["forma-geom/occt"]
 
 [dependencies]
 forma-engine.workspace = true
+forma-mcp.workspace = true
 forma-geom.workspace = true
 forma-doc.workspace = true
 forma-io-3dm.workspace = true

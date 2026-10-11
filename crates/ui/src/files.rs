@@ -44,6 +44,7 @@ impl FormaApp {
         }
         self.save_settings(true);
         self.autosave_discard();
+        self.agent_stop();
     }
 
     /// The "Save changes?" dialog (Yes / No / Cancel, like Rhino).
