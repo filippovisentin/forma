@@ -171,6 +171,10 @@ pub fn builtin() -> Vec<Box<dyn Command>> {
         Box::new(crate::crvtools::ExtractPt),
         Box::new(crate::crvtools::Project),
         Box::new(crate::crvtools::Pull),
+        Box::new(crate::knots::InsertKnot),
+        Box::new(crate::knots::RemoveKnot),
+        Box::new(crate::knots::CrvSeam),
+        Box::new(crate::knots::Curvature),
         // Surfaces, solids, meshes
         Box::new(crate::solids2::PlaneSrf),
         Box::new(crate::solids2::SrfPt),

@@ -1136,6 +1136,32 @@ fn more(g: &Pen<'_>, name: &str) -> bool {
             surface(g);
             g.line(&[(6.0, 13.0), (18.0, 13.0)], 2.0, BLUE);
         }
+        "InsertKnot" | "RemoveKnot" => {
+            let c = g.bez([(2.0, 18.0), (8.0, 2.0), (16.0, 24.0), (22.0, 8.0)]);
+            g.ink(&c);
+            g.dot(c[4].0, c[4].1);
+            g.dot(c[20].0, c[20].1);
+            let (x, y) = c[12];
+            if name == "InsertKnot" {
+                g.solid_dot(x, y, BLUE);
+            } else {
+                g.line(&[(x - 3.0, y - 3.0), (x + 3.0, y + 3.0)], 1.8, RED);
+                g.line(&[(x - 3.0, y + 3.0), (x + 3.0, y - 3.0)], 1.8, RED);
+            }
+        }
+        "CrvSeam" => {
+            g.ink(&g.arc((12.0, 12.0), 8.5, 8.5, 0.0, TAU));
+            g.dot(20.5, 12.0);
+            g.line(&g.arc((12.0, 12.0), 5.0, 5.0, 0.2, 1.4), 1.6, BLUE);
+            g.solid_dot(12.0, 20.5, BLUE);
+        }
+        "Curvature" => {
+            let c = g.bez([(2.0, 20.0), (6.0, 2.0), (18.0, 2.0), (22.0, 20.0)]);
+            g.ink(&c);
+            g.line(&g.arc((12.0, 13.5), 7.0, 7.0, 0.0, TAU), 1.2, BLUE);
+            g.dashed((12.0, 13.5), (12.0, 6.5));
+            g.solid_dot(12.0, 6.5, RED);
+        }
         "ClosestPt" | "EvaluatePt" => {
             let c = g.bez([(2.0, 18.0), (8.0, 10.0), (16.0, 22.0), (22.0, 12.0)]);
             g.ink(&c);

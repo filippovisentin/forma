@@ -12,7 +12,7 @@ is in `Help` and `forma-cli commands`.
 
 ## Summary
 
-279 Rhino commands: **204 ✓**, **38 partial**, **25 ✗**, **12 needs kernel**.
+279 Rhino commands: **207 ✓**, **38 partial**, **22 ✗**, **12 needs kernel**.
 
 ## Drawing: points and lines
 
@@ -73,10 +73,10 @@ is in `Help` and `forma-cli commands`.
 | Convert | ✓ | `Convert [tolerance]` → polylines |
 | CloseCrv | ✓ | `CloseCrv` |
 | Dir / Flip | ✓ | `Flip` (alias Dir) |
-| Seam / CrvSeam | ✗ |  |
+| Seam / CrvSeam | ✓ | `CrvSeam <point>` (alias Seam): circles stay circles, polylines polylines, other closed curves become one exact NURBS curve |
 | CurveBoolean | partial | `CurveBoolean union|intersection|difference [delete]`; no region picking, result as polylines |
 | PointsOn / EditPtOn | ✓ | F10 / F11: click, window-select and drag control points and mesh vertices (snaps, grid, Ortho); `MoveGrips` |
-| InsertKnot / RemoveKnot | ✗ |  |
+| InsertKnot / RemoveKnot | ✓ | `InsertKnot <points…>` / `InsertKnot Midpoints` (shape unchanged); `RemoveKnot <points near knots…>` reports the deviation; same control points as Rhino 8 on the test curves |
 
 ## Curves from objects
 
@@ -308,7 +308,7 @@ is in `Help` and `forma-cli commands`.
 | What | ✓ |  |
 | BoundingBox | ✓ |  |
 | CurvatureGraph | ✗ |  |
-| Curvature | ✗ |  |
+| Curvature | ✓ | `Curvature <points…>`: radius of curvature and curvature at the nearest points of the curve (exact, also on arcs and ellipses); no osculating circle drawn |
 | ShowEdges | ✗ |  |
 | Zebra | needs kernel |  |
 | DraftAngleAnalysis | ✗ |  |

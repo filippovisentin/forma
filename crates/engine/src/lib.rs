@@ -44,6 +44,7 @@ mod exact;
 mod files;
 mod import;
 mod kernel;
+mod knots;
 mod layers;
 mod measure;
 mod select;

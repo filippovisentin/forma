@@ -1347,6 +1347,45 @@ pub static EVALUATE_PT: Seq = Seq {
 };
 
 sel_only!(RADIUS, "Radius", "Radius — of arcs and circles");
+
+pub static CURVATURE: Seq = Seq {
+    name: "Curvature",
+    tip: "Curvature — radius of curvature of a curve at a point",
+    sel: true,
+    steps: &[In::Point("Point on the curve")],
+    emit: |v, _| format!("Curvature {}", fmt_p(v[0].p())),
+    preview: none,
+};
+
+pub static INSERT_KNOT: Seq = Seq {
+    name: "InsertKnot",
+    tip: "InsertKnot — add knots to a curve, same shape",
+    sel: true,
+    steps: &[In::Points(
+        "Point on the curve for a knot (Enter when done)",
+        1,
+    )],
+    emit: |v, _| format!("InsertKnot {}", pts_list(&v[0])),
+    preview: none,
+};
+
+pub static REMOVE_KNOT: Seq = Seq {
+    name: "RemoveKnot",
+    tip: "RemoveKnot — remove the knots nearest to the picked points",
+    sel: true,
+    steps: &[In::Points("Point near a knot (Enter when done)", 1)],
+    emit: |v, _| format!("RemoveKnot {}", pts_list(&v[0])),
+    preview: none,
+};
+
+pub static CRV_SEAM: Seq = Seq {
+    name: "CrvSeam",
+    tip: "CrvSeam — move the start point of a closed curve",
+    sel: true,
+    steps: &[In::Point("New seam point")],
+    emit: |v, _| format!("CrvSeam {}", fmt_p(v[0].p())),
+    preview: none,
+};
 sel_only!(
     AREA_CENTROID,
     "AreaCentroid",
@@ -1977,6 +2016,10 @@ pub static ALL: &[&Seq] = &[
     &ANGLE,
     &EVALUATE_PT,
     &RADIUS,
+    &CURVATURE,
+    &INSERT_KNOT,
+    &REMOVE_KNOT,
+    &CRV_SEAM,
     &AREA_CENTROID,
     &VOLUME_CENTROID,
     &CHANGE_TO_CURRENT,

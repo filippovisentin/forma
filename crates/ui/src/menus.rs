@@ -462,6 +462,9 @@ impl FormaApp {
                     tool(ui, &mut act, "Rebuild", K::Seq(&q::REBUILD));
                     tool(ui, &mut act, "Convert to Polyline", K::Seq(&q::CONVERT));
                     tool(ui, &mut act, "Close Open Curve", K::Seq(&q::CLOSECRV));
+                    tool(ui, &mut act, "Insert Knot", K::Seq(&q::INSERT_KNOT));
+                    tool(ui, &mut act, "Remove Knot", K::Seq(&q::REMOVE_KNOT));
+                    tool(ui, &mut act, "Adjust Closed Curve Seam", K::Seq(&q::CRV_SEAM));
                 });
                 ui.menu_button("Curve From Objects", |ui| {
                     tool(ui, &mut act, "Project", K::Seq(&q::PROJECT));
@@ -690,6 +693,7 @@ impl FormaApp {
                 tool(ui, &mut act, "Closest Point", K::Seq(&q::CLOSEST_PT));
                 tool(ui, &mut act, "Angle", K::Seq(&q::ANGLE));
                 tool(ui, &mut act, "Radius", K::Seq(&q::RADIUS));
+                tool(ui, &mut act, "Curvature", K::Seq(&q::CURVATURE));
                 tool(ui, &mut act, "Length", K::OnSel("Length"));
                 ui.menu_button("Mass Properties", |ui| {
                     tool(ui, &mut act, "Area", K::OnSel("Area"));

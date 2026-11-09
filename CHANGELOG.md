@@ -7,6 +7,21 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- **NURBS curve structure**: `InsertKnot` adds knots (and control points) where you
+  click, or in the middle of every span (`InsertKnot Midpoints`), without changing the
+  shape; `RemoveKnot` removes the knot nearest to each click and reports how far the
+  curve moved (0 for a knot that was only inserted); `CrvSeam` (alias `Seam`) moves the
+  start of a closed curve: circles stay circles, polylines stay polylines, free-form
+  curves stay exact and keep their parameters. Curve ▸ Curve Edit Tools. Checked
+  against Rhino 8.36 on test curves: the same control points, weights and knots
+  (within 1e-6) after inserting a knot, removing one (rational curves too) and moving
+  the seam of an ellipse.
+- **`Curvature`**: radius of curvature and curvature of a curve at the clicked points,
+  from the exact first and second derivatives (rational curves too: 25 on a circle of
+  radius 25, b²/a at the end of an ellipse; the curvature vectors of a free-form cubic
+  equal Rhino's to 1e-9). Analyze ▸ Curvature.
+
 ## [1.2.1] — 2026-10-11
 
 ### Fixed
