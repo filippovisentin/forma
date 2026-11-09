@@ -759,7 +759,7 @@ simple_command!(
     Chamfer,
     "Chamfer",
     &["Cha"],
-    "Chamfer <distance 1> [distance 2] <pick line 1> <pick line 2> [normal] — bevel the corner between two lines"
+    "Chamfer <distance 1> [distance 2] <pick curve 1> <pick curve 2> [normal] — bevel the corner between two curves (lines, arcs, polylines); the distances are measured along each curve from the corner"
 );
 impl Command for Chamfer {
     impl_meta!(Chamfer);
@@ -769,17 +769,39 @@ impl Command for Chamfer {
         let p1 = args.point("first line", None)?;
         let p2 = args.point("second line", None)?;
         let n = args.optional_vector().unwrap_or(Vec3::Z);
-        let (id1, _) = nearest(ctx, p1)?;
-        let (id2, _) = nearest(ctx, p2)?;
+        let (id1, c1) = nearest(ctx, p1)?;
+        let (id2, c2) = nearest(ctx, p2)?;
         if id1 == id2 {
-            return Err(CommandError::Invalid("pick two different lines".into()));
+            return Err(CommandError::Invalid("pick two different curves".into()));
         }
         let line = |id: ObjectId| match &ctx.doc.object(id).expect("exists").geometry {
-            Geometry::Line(l) => Ok((l.from, l.to)),
-            _ => Err(CommandError::Invalid("Chamfer works on lines".into())),
+            Geometry::Line(l) => Some((l.from, l.to)),
+            _ => None,
         };
-        let (a, b) = (line(id1)?, line(id2)?);
         let o1 = ctx.doc.object(id1).expect("exists").clone();
+        let (Some(a), Some(b)) = (line(id1), line(id2)) else {
+            // Arcs, polylines and polycurves: cut back along the curves.
+            let g2 = ctx.doc.object(id2).expect("exists").geometry.clone();
+            if matches!(o1.geometry, Geometry::Nurbs(_)) || matches!(g2, Geometry::Nurbs(_)) {
+                return Err(CommandError::Invalid(
+                    "Chamfer works on lines, arcs and polylines (not on free-form curves yet)"
+                        .into(),
+                ));
+            }
+            let tol = ctx.tolerance.absolute;
+            let plane = common_plane(&o1.geometry, &g2, tol.max(1e-9))
+                .unwrap_or_else(|| plane_of(&o1.geometry, p1, Some(n)));
+            let (ka, kb, cut) =
+                geom::chamfer_chains(&c1, p1, &c2, p2, d1, d2, &plane, tol).map_err(bad)?;
+            let mut t = ctx.doc.begin();
+            t.replace(id1, geometry(ka)?);
+            t.replace(id2, geometry(kb)?);
+            if let Some(c) = cut {
+                t.add_like(geometry(Chain::new(vec![c]))?, &o1);
+            }
+            t.commit();
+            return Ok("chamfered".into());
+        };
         let plane = Plane::from_normal(a.0, n);
         let (la, lb, cut) = geom::chamfer_lines(a, b, d1, d2, &plane).map_err(bad)?;
         let mut t = ctx.doc.begin();
@@ -1030,6 +1052,50 @@ mod tests {
         };
         assert!(near(c.to, Point3::new(100.0, 20.0, 0.0)), "{c:?}");
         assert!(e.run_line("Chamfer 500 50,0 100,50").is_err());
+    }
+
+    #[test]
+    fn chamfer_polyline_and_arc() {
+        let mut e = Engine::new();
+        // An L-shaped polyline and a line across its long leg.
+        e.run_line("Polyline 0,0 60,0 60,40").unwrap();
+        e.run_line("Line 30,-20 30,30").unwrap();
+        e.run_line("Chamfer 5 8 10,0 30,20").unwrap();
+        assert_eq!(e.doc().len(), 3);
+        let geoms: Vec<Geometry> = e.doc().objects().map(|o| o.geometry.clone()).collect();
+        let line = |g: &Geometry| match g {
+            Geometry::Line(l) => (l.from, l.to),
+            g => panic!("{}", g.kind()),
+        };
+        let (a, b, c) = (line(&geoms[0]), line(&geoms[1]), line(&geoms[2]));
+        assert!(near(a.0, Point3::new(0.0, 0.0, 0.0)) && near(a.1, Point3::new(25.0, 0.0, 0.0)));
+        assert!(near(b.0, Point3::new(30.0, 8.0, 0.0)) && near(b.1, Point3::new(30.0, 30.0, 0.0)));
+        assert!(near(c.0, Point3::new(25.0, 0.0, 0.0)) && near(c.1, Point3::new(30.0, 8.0, 0.0)));
+        e.run_line("Undo").unwrap();
+        assert_eq!(e.doc().len(), 2);
+        // The other side keeps the corner of the polyline.
+        e.run_line("Chamfer 5 50,0 30,-10").unwrap();
+        let first = e.doc().objects().next().unwrap().geometry.clone();
+        let Geometry::Polyline(p) = &first else {
+            panic!("{}", first.kind())
+        };
+        assert!(near(p[0], Point3::new(35.0, 0.0, 0.0)));
+        assert!(near(p[2], Point3::new(60.0, 40.0, 0.0)));
+
+        // A half circle of radius 20 and a line through its top: 10 along it.
+        let mut e = Engine::new();
+        e.run_line("Arc 0,0 20,0 -20,0").unwrap();
+        e.run_line("Line 0,0 0,40").unwrap();
+        e.run_line("Chamfer 10 4 14,14 0,30").unwrap();
+        let Geometry::Arc(a) = &e.doc().objects().next().unwrap().geometry else {
+            panic!()
+        };
+        assert!((a.radius - 20.0).abs() < 1e-9);
+        let want = Point3::new(20.0 * 0.5f64.sin(), 20.0 * 0.5f64.cos(), 0.0);
+        assert!(near(a.end(), want) || near(a.start(), want), "{:?}", a);
+        // Free-form curves are refused, with nothing changed.
+        e.run_line("Curve 0,50 10,60 20,50 30,60").unwrap();
+        assert!(e.run_line("Chamfer 2 5,55 0,35").is_err());
     }
 
     #[test]

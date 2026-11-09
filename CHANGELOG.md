@@ -14,6 +14,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   control points change, to the positions Rhino 8.36 gives on the test curves (within
   1e-6); curves with weights and uneven knots reach the exact curvature as well.
   Curve ▸ Curve Edit Tools ▸ Match.
+- **`Chamfer` on arcs and polylines**: it bevelled two lines only; now any two lines,
+  arcs, polylines or polycurves that cross or touch, each cut back from the corner by
+  its distance measured along the curve, on the side you click. Free-form curves are
+  refused with a message. (Not compared with Rhino on curved inputs.)
 - **`Conic`**: conic arc from start, end, apex and rho (below 0.5 an ellipse, 0.5 a
   parabola, above a hyperbola), an exact rational curve. Curve ▸ Conic.
 - **`CrvDeviation`**: largest and smallest distance between two selected curves where

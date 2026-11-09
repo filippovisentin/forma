@@ -58,7 +58,7 @@ is in `Help` and `forma-cli commands`.
 | OffsetCrvOnSrf | needs kernel |  |
 | Fillet | ✓ | `Fillet <radius> <pick> <pick>` between lines, arcs, polylines and polycurves (trims both); radius 0 for lines |
 | FilletCorners | ✓ | `FilletCorners` (FC) |
-| Chamfer | partial | `Chamfer` between two lines |
+| Chamfer | partial | `Chamfer <d1> [d2]` between lines, arcs, polylines and polycurves (distances along each curve from the corner); not on free-form curves |
 | BlendCrv | partial | `BlendCrv` tangency or curvature (curvature exact at lines and arcs) |
 | MatchCrv | partial | `MatchCrv #curve <point> #target <point> [position|tangency|curvature]`: same control points as Rhino 8 on the test curves; no Average, Join or Merge options |
 | Extend | ✓ | `Extend` to boundary objects |

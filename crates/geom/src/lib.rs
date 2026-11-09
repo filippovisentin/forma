@@ -27,8 +27,8 @@ pub use annotation::{format_value, text_width, DimKind, Dimension, Label, Text};
 pub use arc::CircleArc;
 pub use brep::Brep;
 pub use curve::{
-    carrier_intersections, chamfer_lines, crossings, extend, fillet_corners, fillet_lines, join,
-    offset, side_of, split, trim, Chain, CurveError, ExtendTo, Seg,
+    carrier_intersections, chamfer_chains, chamfer_lines, crossings, extend, fillet_corners,
+    fillet_lines, join, offset, side_of, split, trim, Chain, CurveError, ExtendTo, Seg,
 };
 pub use curvetools::{
     arc_3pt, arc_start_dir_end, blend_curves, chain_points_at_lengths, chain_segments, circle_3pt,

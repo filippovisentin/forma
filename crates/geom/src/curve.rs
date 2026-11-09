@@ -884,6 +884,100 @@ pub fn chamfer_lines(
     ))
 }
 
+/// Chain parameter reached by going `d` along the chain from parameter `s`,
+/// forwards or backwards. `None` when the chain ends first.
+fn walk(c: &Chain, s: f64, d: f64, forward: bool) -> Option<f64> {
+    let n = c.segs.len();
+    let mut i = (s.floor().max(0.0) as usize).min(n - 1);
+    let mut f = (s - i as f64).clamp(0.0, 1.0);
+    let mut left = d;
+    loop {
+        let len = c.segs[i].length();
+        let avail = if forward { (1.0 - f) * len } else { f * len };
+        if left <= avail {
+            let df = if len > 0.0 { left / len } else { 0.0 };
+            return Some(i as f64 + if forward { f + df } else { f - df });
+        }
+        left -= avail;
+        if forward {
+            if i + 1 >= n {
+                return None;
+            }
+            i += 1;
+            f = 0.0;
+        } else {
+            if i == 0 {
+                return None;
+            }
+            i -= 1;
+            f = 1.0;
+        }
+    }
+}
+
+/// Chamfer between two chains of lines and arcs that cross or touch in `plane`:
+/// each is cut back from the corner (the crossing nearest to the picks) by its
+/// distance, measured along the curve, keeping the side of its pick. Returns
+/// the kept parts and the chamfer segment (`None` when both distances are 0,
+/// which only trims the curves to the corner).
+#[allow(clippy::too_many_arguments)]
+pub fn chamfer_chains(
+    a: &Chain,
+    pick_a: Point3,
+    b: &Chain,
+    pick_b: Point3,
+    d1: f64,
+    d2: f64,
+    plane: &Plane,
+    tol: f64,
+) -> Result<(Chain, Chain, Option<Seg>), CurveError> {
+    if d1 < 0.0 || d2 < 0.0 {
+        return Err(CurveError::Degenerate("distances must not be negative"));
+    }
+    if a.segs.is_empty() || b.segs.is_empty() {
+        return Err(CurveError::Degenerate("empty curve"));
+    }
+    // Corners: crossings, and ends of one curve lying on the other.
+    let mut corners = crossings(a, b, plane, tol);
+    for (c, other) in [(a, b), (b, a)] {
+        for p in [c.start(), c.end()] {
+            if other.closest(p).1 <= tol {
+                corners.push(p);
+            }
+        }
+    }
+    let score = |x: &Point3| x.distance_to(pick_a) + x.distance_to(pick_b);
+    let x = corners
+        .into_iter()
+        .min_by(|p, q| score(p).total_cmp(&score(q)))
+        .ok_or(CurveError::Degenerate("the curves do not meet"))?;
+    let keep = |c: &Chain, pick: Point3, d: f64| -> Result<(Chain, Point3), CurveError> {
+        let sx = c.closest(x).0;
+        let sp = c.closest(pick).0;
+        if (sp - sx).abs() < 1e-9 {
+            return Err(CurveError::Degenerate(
+                "pick each curve away from the corner",
+            ));
+        }
+        let forward = sp > sx;
+        let st =
+            walk(c, sx, d, forward).ok_or(CurveError::Degenerate("chamfer distance too large"))?;
+        let part = if forward {
+            c.sub(st, c.segs.len() as f64, tol)
+        } else {
+            c.sub(0.0, st, tol)
+        };
+        if part.segs.is_empty() {
+            return Err(CurveError::Degenerate("chamfer distance too large"));
+        }
+        Ok((part, c.point_at(st)))
+    };
+    let (ka, ta) = keep(a, pick_a, d1)?;
+    let (kb, tb) = keep(b, pick_b, d2)?;
+    let cut = (ta.distance_to(tb) > tol).then_some(Seg::Line(ta, tb));
+    Ok((ka, kb, cut))
+}
+
 /// Tangent points and arc rounding the corner `x` between `p` and `q`.
 #[allow(clippy::type_complexity)]
 fn fillet_corner(
@@ -1011,6 +1105,62 @@ mod tests {
             TOL
         )
         .is_err());
+    }
+
+    #[test]
+    fn chamfer_polylines_and_arcs_along_the_curve() {
+        // Two polylines crossing at (20, 0).
+        let a = Chain::from_points(&[p(0.0, 0.0), p(15.0, 0.0), p(30.0, 0.0)]);
+        let b = Chain::from_points(&[p(20.0, -10.0), p(20.0, 5.0), p(20.0, 20.0)]);
+        let top = &Plane::TOP;
+        let (ka, kb, cut) =
+            chamfer_chains(&a, p(5.0, 0.0), &b, p(20.0, 15.0), 4.0, 6.0, top, TOL).unwrap();
+        assert!(ka.start().distance_to(p(0.0, 0.0)) < TOL);
+        assert!(ka.end().distance_to(p(16.0, 0.0)) < TOL);
+        assert!(kb.start().distance_to(p(20.0, 6.0)) < TOL);
+        assert!(kb.end().distance_to(p(20.0, 20.0)) < TOL);
+        let Some(Seg::Line(s, e)) = cut else { panic!() };
+        assert!(s.distance_to(p(16.0, 0.0)) < TOL && e.distance_to(p(20.0, 6.0)) < TOL);
+        // The other sides of the same corner; a distance past a vertex.
+        let (ka, kb, _) =
+            chamfer_chains(&a, p(28.0, 0.0), &b, p(20.0, -8.0), 4.0, 7.0, top, TOL).unwrap();
+        assert!(ka.start().distance_to(p(24.0, 0.0)) < TOL);
+        assert!(kb.end().distance_to(p(20.0, -7.0)) < TOL);
+        let (ka, _, _) =
+            chamfer_chains(&a, p(2.0, 0.0), &b, p(20.0, 15.0), 9.0, 1.0, top, TOL).unwrap();
+        assert!(ka.end().distance_to(p(11.0, 0.0)) < TOL);
+        assert_eq!(ka.segs.len(), 1);
+
+        // A half circle of radius 10 and a line through its top, (0, 10): 5
+        // along the arc is half a radian.
+        let arc =
+            CircleArc::from_center_start_end(p(0.0, 0.0), p(10.0, 0.0), p(-10.0, 0.0), Vec3::Z)
+                .unwrap();
+        let a = Chain::new(vec![Seg::Arc(arc)]);
+        let b = Chain::from_points(&[p(0.0, 0.0), p(0.0, 20.0)]);
+        let (ka, kb, cut) =
+            chamfer_chains(&a, p(7.0, 7.0), &b, p(0.0, 15.0), 5.0, 3.0, top, TOL).unwrap();
+        let on_arc = p(10.0 * 0.5f64.sin(), 10.0 * 0.5f64.cos());
+        assert!(ka.start().distance_to(p(10.0, 0.0)) < TOL);
+        assert!(ka.end().distance_to(on_arc) < 1e-9, "{}", ka.end());
+        let len: f64 = ka.segs.iter().map(Seg::length).sum();
+        assert!((len - 10.0 * (std::f64::consts::FRAC_PI_2 - 0.5)).abs() < 1e-9);
+        assert!(kb.start().distance_to(p(0.0, 13.0)) < TOL);
+        assert!(cut.unwrap().length() > 4.0);
+
+        // Corner where the curves only touch at their ends.
+        let a = Chain::from_points(&[p(0.0, 0.0), p(10.0, 0.0)]);
+        let b = Chain::from_points(&[p(10.0, 0.0), p(10.0, 10.0)]);
+        let (ka, kb, cut) =
+            chamfer_chains(&a, p(5.0, 0.0), &b, p(10.0, 5.0), 2.0, 2.0, top, TOL).unwrap();
+        assert!(ka.end().distance_to(p(8.0, 0.0)) < TOL);
+        assert!(kb.start().distance_to(p(10.0, 2.0)) < TOL);
+        assert!(cut.is_some());
+        // Errors: too far, apart, negative.
+        let e = |d1, d2| chamfer_chains(&a, p(5.0, 0.0), &b, p(10.0, 5.0), d1, d2, top, TOL);
+        assert!(e(11.0, 1.0).is_err() && e(1.0, 10.5).is_err() && e(-1.0, 1.0).is_err());
+        let far = Chain::from_points(&[p(50.0, 50.0), p(60.0, 50.0)]);
+        assert!(chamfer_chains(&a, p(5.0, 0.0), &far, p(55.0, 50.0), 1.0, 1.0, top, TOL).is_err());
     }
 
     #[test]
