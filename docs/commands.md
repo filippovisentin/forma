@@ -12,7 +12,7 @@ is in `Help` and `forma-cli commands`.
 
 ## Summary
 
-279 Rhino commands: **204 ✓**, **38 partial**, **25 ✗**, **12 needs kernel**.
+279 Rhino commands: **209 ✓**, **39 partial**, **19 ✗**, **12 needs kernel**.
 
 ## Drawing: points and lines
 
@@ -28,7 +28,7 @@ is in `Help` and `forma-cli commands`.
 | Sketch | ✗ |  |
 | Helix | ✓ | `Helix <axis start> <axis end> <radius> <turns>` |
 | Spiral | ✓ | `Spiral <center> <r0> <r1> <turns> [height]` |
-| Conic | ✗ |  |
+| Conic | ✓ | `Conic <start> <end> <apex> [rho=0.5]`: rational quadratic arc |
 | TextObject | ✗ | text as curves / solids: needs font outlines |
 
 ## Drawing: shapes
@@ -58,9 +58,9 @@ is in `Help` and `forma-cli commands`.
 | OffsetCrvOnSrf | needs kernel |  |
 | Fillet | ✓ | `Fillet <radius> <pick> <pick>` between lines, arcs, polylines and polycurves (trims both); radius 0 for lines |
 | FilletCorners | ✓ | `FilletCorners` (FC) |
-| Chamfer | partial | `Chamfer` between two lines |
+| Chamfer | partial | `Chamfer <d1> [d2]` between lines, arcs, polylines and polycurves (distances along each curve from the corner); not on free-form curves |
 | BlendCrv | partial | `BlendCrv` tangency or curvature (curvature exact at lines and arcs) |
-| MatchCrv | ✗ |  |
+| MatchCrv | partial | `MatchCrv #curve <point> #target <point> [position|tangency|curvature]`: same control points as Rhino 8 on the test curves; no Average, Join or Merge options |
 | Extend | ✓ | `Extend` to boundary objects |
 | Trim | ✓ | `Trim` curves with cutting objects |
 | Split | ✓ | `Split` curves at cutting objects |
@@ -73,10 +73,10 @@ is in `Help` and `forma-cli commands`.
 | Convert | ✓ | `Convert [tolerance]` → polylines |
 | CloseCrv | ✓ | `CloseCrv` |
 | Dir / Flip | ✓ | `Flip` (alias Dir) |
-| Seam / CrvSeam | ✗ |  |
+| Seam / CrvSeam | ✓ | `CrvSeam <point>` (alias Seam): circles stay circles, polylines polylines, other closed curves become one exact NURBS curve |
 | CurveBoolean | partial | `CurveBoolean union|intersection|difference [delete]`; no region picking, result as polylines |
 | PointsOn / EditPtOn | ✓ | F10 / F11: click, window-select and drag control points and mesh vertices (snaps, grid, Ortho); `MoveGrips` |
-| InsertKnot / RemoveKnot | ✗ |  |
+| InsertKnot / RemoveKnot | ✓ | `InsertKnot <points…>` / `InsertKnot Midpoints` (shape unchanged); `RemoveKnot <points near knots…>` reports the deviation; same control points as Rhino 8 on the test curves |
 
 ## Curves from objects
 
@@ -308,12 +308,12 @@ is in `Help` and `forma-cli commands`.
 | What | ✓ |  |
 | BoundingBox | ✓ |  |
 | CurvatureGraph | ✗ |  |
-| Curvature | ✗ |  |
+| Curvature | ✓ | `Curvature <points…>`: radius of curvature and curvature at the nearest points of the curve (exact, also on arcs and ellipses); no osculating circle drawn |
 | ShowEdges | ✗ |  |
 | Zebra | needs kernel |  |
 | DraftAngleAnalysis | ✗ |  |
 | ClosestPt | ✓ | `ClosestPt <point>` adds points on the selected objects |
-| CrvDeviation | ✗ |  |
+| CrvDeviation | ✓ | `CrvDeviation` on two selected curves: largest and smallest distance with their points (0 where the curves cross); nothing drawn |
 | List / Check | ✓ | `List` (= `What`); `Check` validity of surfaces and polysurfaces |
 
 ## Dimensions and annotation

@@ -1347,6 +1347,45 @@ pub static EVALUATE_PT: Seq = Seq {
 };
 
 sel_only!(RADIUS, "Radius", "Radius — of arcs and circles");
+
+pub static CURVATURE: Seq = Seq {
+    name: "Curvature",
+    tip: "Curvature — radius of curvature of a curve at a point",
+    sel: true,
+    steps: &[In::Point("Point on the curve")],
+    emit: |v, _| format!("Curvature {}", fmt_p(v[0].p())),
+    preview: none,
+};
+
+pub static INSERT_KNOT: Seq = Seq {
+    name: "InsertKnot",
+    tip: "InsertKnot — add knots to a curve, same shape",
+    sel: true,
+    steps: &[In::Points(
+        "Point on the curve for a knot (Enter when done)",
+        1,
+    )],
+    emit: |v, _| format!("InsertKnot {}", pts_list(&v[0])),
+    preview: none,
+};
+
+pub static REMOVE_KNOT: Seq = Seq {
+    name: "RemoveKnot",
+    tip: "RemoveKnot — remove the knots nearest to the picked points",
+    sel: true,
+    steps: &[In::Points("Point near a knot (Enter when done)", 1)],
+    emit: |v, _| format!("RemoveKnot {}", pts_list(&v[0])),
+    preview: none,
+};
+
+pub static CRV_SEAM: Seq = Seq {
+    name: "CrvSeam",
+    tip: "CrvSeam — move the start point of a closed curve",
+    sel: true,
+    steps: &[In::Point("New seam point")],
+    emit: |v, _| format!("CrvSeam {}", fmt_p(v[0].p())),
+    preview: none,
+};
 sel_only!(
     AREA_CENTROID,
     "AreaCentroid",
@@ -1744,6 +1783,60 @@ pub static BLEND_CRV: Seq = Seq {
     preview: none,
 };
 
+pub static MATCH_CRV: Seq = Seq {
+    name: "MatchCrv",
+    tip: "MatchCrv — move the end of a curve onto another, smoothly",
+    sel: false,
+    steps: &[
+        In::CurveNear("Curve to change (click near the end to move)"),
+        In::CurveNear("Curve to match (near its end)"),
+        In::Choice("Continuity", &["Tangency", "Curvature", "Position"]),
+    ],
+    emit: |v, _| {
+        format!(
+            "MatchCrv #{} {} #{} {} {}",
+            v[0].o(),
+            fmt_p(v[0].p()),
+            v[1].o(),
+            fmt_p(v[1].p()),
+            v[2].t().to_lowercase()
+        )
+    },
+    preview: none,
+};
+
+pub static CONIC: Seq = Seq {
+    name: "Conic",
+    tip: "Conic — conic arc from start, end, apex and rho",
+    sel: false,
+    steps: &[
+        In::Point("Start of conic"),
+        In::Point("End of conic"),
+        In::Point("Apex"),
+        In::Num("Rho (0 to 1; 0.5 a parabola)", Some(0.5)),
+    ],
+    emit: |v, _| {
+        format!(
+            "Conic {} {} {} {}",
+            fmt_p(v[0].p()),
+            fmt_p(v[1].p()),
+            fmt_p(v[2].p()),
+            round(v[3].n())
+        )
+    },
+    preview: |v| match v.vals.len() {
+        0 => Vec::new(),
+        1 => vec![[v.p(0), v.cur]],
+        _ => vec![[v.p(0), v.p(2)], [v.p(2), v.p(1)]],
+    },
+};
+
+sel_only!(
+    CRV_DEVIATION,
+    "CrvDeviation",
+    "CrvDeviation — largest and smallest distance between two curves"
+);
+
 pub static CLIPPING_PLANE: Seq = Seq {
     name: "ClippingPlane",
     tip: "ClippingPlane — section cut: hide everything beyond a plane in every view",
@@ -1893,6 +1986,9 @@ pub static ALL: &[&Seq] = &[
     &DIM_ROTATED,
     &CLIPPING_PLANE,
     &BLEND_CRV,
+    &MATCH_CRV,
+    &CONIC,
+    &CRV_DEVIATION,
     &CIRCLE_TTR,
     &ARC_DIRECTION,
     &MAKE2D,
@@ -1977,6 +2073,10 @@ pub static ALL: &[&Seq] = &[
     &ANGLE,
     &EVALUATE_PT,
     &RADIUS,
+    &CURVATURE,
+    &INSERT_KNOT,
+    &REMOVE_KNOT,
+    &CRV_SEAM,
     &AREA_CENTROID,
     &VOLUME_CENTROID,
     &CHANGE_TO_CURRENT,

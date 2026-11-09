@@ -495,19 +495,32 @@ impl NurbsCurve {
         let best = (0..params.len())
             .min_by(|i, j| d(params[*i]).total_cmp(&d(params[*j])))
             .unwrap_or(0);
-        let mut lo = params[best.saturating_sub(1)];
-        let mut hi = params[(best + 1).min(params.len() - 1)];
-        let g = (5f64.sqrt() - 1.0) / 2.0;
-        for _ in 0..80 {
-            let m1 = hi - g * (hi - lo);
-            let m2 = lo + g * (hi - lo);
-            if d(m1) < d(m2) {
-                hi = m2;
-            } else {
-                lo = m1;
+        let last = params.len() - 1;
+        let refine = |i: usize| {
+            let mut lo = params[i.saturating_sub(1)];
+            let mut hi = params[(i + 1).min(last)];
+            let g = (5f64.sqrt() - 1.0) / 2.0;
+            for _ in 0..80 {
+                let m1 = hi - g * (hi - lo);
+                let m2 = lo + g * (hi - lo);
+                if d(m1) < d(m2) {
+                    hi = m2;
+                } else {
+                    lo = m1;
+                }
+            }
+            (lo + hi) / 2.0
+        };
+        let t = refine(best);
+        // At the seam of a closed curve the closest point may be just before
+        // the end rather than just after the start (or the reverse).
+        if (best == 0 || best == last) && self.is_closed() {
+            let other = refine(last - best);
+            if d(other) < d(t) {
+                return other;
             }
         }
-        (lo + hi) / 2.0
+        t
     }
 
     /// The same curve raised to degree `degree` (exact): split into Bézier
@@ -797,6 +810,194 @@ fn solve(mut a: Vec<Vec<f64>>, mut b: Vec<[f64; 3]>) -> Option<Vec<[f64; 3]>> {
     Some(x)
 }
 
+/// De Boor evaluation of a B-spline in homogeneous space on a known span
+/// (degree 0 allowed: the hodograph of a polyline).
+fn eval_h(pw: &[Hom], p: usize, u: &[f64], span: usize, t: f64) -> Hom {
+    let mut d: Vec<Hom> = pw[span - p..=span].to_vec();
+    for r in 1..=p {
+        for j in (r..=p).rev() {
+            let i = span - p + j;
+            let den = u[i + p + 1 - r] - u[i];
+            let a = if den.abs() < 1e-300 {
+                0.0
+            } else {
+                (t - u[i]) / den
+            };
+            d[j] = lerp_h(d[j - 1], d[j], a);
+        }
+    }
+    d[p]
+}
+
+/// Derivative of a B-spline of degree `p >= 1` (The NURBS Book eq. 3.4): control
+/// points and textbook knots of a spline of degree `p - 1`.
+fn hodograph(pw: &[Hom], p: usize, u: &[f64]) -> (Vec<Hom>, Vec<f64>) {
+    let q = (0..pw.len() - 1)
+        .map(|i| {
+            let den = u[i + p + 1] - u[i + 1];
+            let f = if den.abs() < 1e-300 {
+                0.0
+            } else {
+                p as f64 / den
+            };
+            [
+                (pw[i + 1][0] - pw[i][0]) * f,
+                (pw[i + 1][1] - pw[i][1]) * f,
+                (pw[i + 1][2] - pw[i][2]) * f,
+                (pw[i + 1][3] - pw[i][3]) * f,
+            ]
+        })
+        .collect();
+    (q, u[1..u.len() - 1].to_vec())
+}
+
+impl NurbsCurve {
+    /// Point, first and second derivative at `t` (clamped to the domain). Exact,
+    /// also for rational curves (The NURBS Book eq. 4.8). At a corner they are
+    /// those of the span that starts there (of the last span at the end).
+    pub fn derivatives_at(&self, t: f64) -> (Point3, Vec3, Vec3) {
+        let (t0, t1) = self.domain();
+        let t = t.clamp(t0, t1);
+        let u = self.full_knots();
+        let p = self.degree;
+        let pw = self.homogeneous();
+        let span = find_span(pw.len(), p, t, &u);
+        let a0 = eval_h(&pw, p, &u, span, t);
+        let (q1, u1) = hodograph(&pw, p, &u);
+        let a1 = eval_h(&q1, p - 1, &u1, span - 1, t);
+        let a2 = if p >= 2 {
+            let (q2, u2) = hodograph(&q1, p - 1, &u1);
+            eval_h(&q2, p - 2, &u2, span - 2, t)
+        } else {
+            [0.0; 4]
+        };
+        let w = a0[3];
+        let c = Vec3::new(a0[0] / w, a0[1] / w, a0[2] / w);
+        let d1 = (Vec3::new(a1[0], a1[1], a1[2]) - c * a1[3]) * (1.0 / w);
+        let d2 = (Vec3::new(a2[0], a2[1], a2[2]) - d1 * (2.0 * a1[3]) - c * a2[3]) * (1.0 / w);
+        (Point3::new(c.x, c.y, c.z), d1, d2)
+    }
+
+    /// Curvature vector at `t`: it points from the curve to the centre of the
+    /// osculating circle and its length is the curvature (1 / radius). Zero on
+    /// straight parts; `None` where the curve has no direction (a cusp).
+    pub fn curvature_at(&self, t: f64) -> Option<Vec3> {
+        let (_, d1, d2) = self.derivatives_at(t);
+        let s = d1.dot(d1);
+        if s < 1e-24 {
+            return None;
+        }
+        // k = (C' × C'') × C' / |C'|⁴
+        Some(d1.cross(d2).cross(d1) * (1.0 / (s * s)))
+    }
+
+    /// Distinct knot values strictly inside the domain, in order.
+    pub fn interior_knots(&self) -> Vec<f64> {
+        let (a, b) = self.domain();
+        let eps = (b - a).abs() * 1e-12;
+        let mut out: Vec<f64> = Vec::new();
+        for &k in &self.knots {
+            if k > a + eps && k < b - eps && out.last().is_none_or(|l| (k - l).abs() > eps) {
+                out.push(k);
+            }
+        }
+        out
+    }
+
+    /// The curve with the interior knot `t` removed once: one control point
+    /// fewer. The new curve passes through the old one at the knot averages
+    /// (Greville abscissae) of the reduced knot vector, in homogeneous
+    /// coordinates. The shape is kept exactly when the curve is smooth enough
+    /// there (a knot added by [`NurbsCurve::with_knot`]); otherwise the whole
+    /// curve adjusts a little, and the caller measures by how much. This is how
+    /// Rhino 8 behaves (control points observed on test curves, see the tests).
+    /// `None` when `t` is not an interior knot, the curve has no control point
+    /// to spare, or a weight would not stay positive.
+    pub fn without_knot(&self, t: f64) -> Option<NurbsCurve> {
+        let p = self.degree;
+        let (a, b) = self.domain();
+        let eps = (b - a).abs() * 1e-12;
+        if t <= a + eps || t >= b - eps || self.points.len() <= p + 1 {
+            return None;
+        }
+        let u = self.full_knots();
+        let pw = self.homogeneous();
+        let r = u.iter().rposition(|k| (k - t).abs() <= eps)?;
+        let mut v = u.clone();
+        v.remove(r);
+        let n = pw.len() - 1;
+        let mut rows = vec![vec![0.0; n]; n];
+        let mut xyz = Vec::with_capacity(n);
+        let mut www = Vec::with_capacity(n);
+        for (i, row) in rows.iter_mut().enumerate() {
+            let g = (v[i + 1..=i + p].iter().sum::<f64>() / p as f64).clamp(a, b);
+            let span = find_span(n, p, g, &v);
+            for (k, w) in basis(span, g, p, &v).into_iter().enumerate() {
+                row[span - p + k] = w;
+            }
+            let h = eval_h(&pw, p, &u, find_span(pw.len(), p, g, &u), g);
+            xyz.push([h[0], h[1], h[2]]);
+            www.push([h[3], 0.0, 0.0]);
+        }
+        let xyz = solve(rows.clone(), xyz)?;
+        let www = solve(rows, www)?;
+        let out: Vec<Hom> = xyz
+            .iter()
+            .zip(&www)
+            .map(|(q, w)| [q[0], q[1], q[2], w[0]])
+            .collect();
+        if out.iter().any(|h| h[3] <= 0.0 || !h[3].is_finite()) {
+            return None;
+        }
+        NurbsCurve::from_hom(p, &out, &v)
+    }
+
+    /// A closed curve starting (and ending) at parameter `t` instead: the same
+    /// shape and the same parameters, exact, with its seam moved. The domain
+    /// becomes `[t, t + length of the old domain]`, as in Rhino. `None` for
+    /// open curves and when `t` is the seam already.
+    pub fn with_seam(&self, t: f64, tol: f64) -> Option<NurbsCurve> {
+        if self.start().distance_to(self.end()) > tol {
+            return None;
+        }
+        let p = self.degree;
+        let (a, b) = self.domain();
+        let eps = (b - a) * 1e-9;
+        if t <= a + eps || t >= b - eps {
+            return None;
+        }
+        let n = self.points.len();
+        let clamped = (self.knots[p - 1] - self.knots[0]).abs() <= eps
+            && (self.knots[n + p - 2] - self.knots[n - 1]).abs() <= eps;
+        if !clamped {
+            // Periodic knots: cut and join (the parameter follows the length).
+            let (left, right) = self.split_at(t)?;
+            return NurbsCurve::join(&[right, left], tol);
+        }
+        let c = self.with_knot(t, p);
+        let u = c.full_knots();
+        let pw = c.homogeneous();
+        let ktol = (b - a) * 1e-12;
+        let r = u.iter().position(|k| (k - t).abs() <= ktol)?;
+        if r == 0 || r > pw.len() {
+            return None;
+        }
+        // One weight for the old start / end point, now inside the curve.
+        let f = pw[pw.len() - 1][3] / pw[0][3];
+        let mut out: Vec<Hom> = pw[r - 1..].to_vec();
+        out.extend(
+            pw[1..r]
+                .iter()
+                .map(|h| [h[0] * f, h[1] * f, h[2] * f, h[3] * f]),
+        );
+        let mut full = vec![t; p + 1];
+        full.extend_from_slice(&u[r + p..u.len() - 1]);
+        full.extend(u[p + 1..r].iter().map(|k| k + (b - a)));
+        full.extend(std::iter::repeat_n(t + (b - a), p + 1));
+        NurbsCurve::from_hom(p, &out, &full)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1025,5 +1226,257 @@ mod tests {
         assert!(p
             .iter()
             .all(|q| (q.distance_to(Point3::ORIGIN) - 10.0).abs() < 1e-9));
+    }
+
+    #[test]
+    fn derivatives_match_differences_and_circle_curvature_is_exact() {
+        let c = wavy();
+        let (t0, t1) = c.domain();
+        let h = (t1 - t0) * 1e-5;
+        for i in 1..20 {
+            let t = t0 + (t1 - t0) * f64::from(i) / 20.0;
+            let (p, d1, d2) = c.derivatives_at(t);
+            assert!(p.distance_to(c.point_at(t)) < 1e-12);
+            let f1 = (c.point_at(t + h) - c.point_at(t - h)) * (0.5 / h);
+            let (pa, pb) = (c.point_at(t + h) - p, c.point_at(t - h) - p);
+            let f2 = (pa + pb) * (1.0 / (h * h));
+            assert!((d1 - f1).length() < 1e-5 * d1.length().max(1.0), "{t}");
+            assert!((d2 - f2).length() < 1e-3 * d2.length().max(1.0), "{t}");
+        }
+        // Rational: every point of a circle of radius 5 has curvature 1/5,
+        // towards the centre.
+        let centre = Point3::new(3.0, -2.0, 1.0);
+        let circle =
+            NurbsCurve::from_arc(&CircleArc::circle(Plane::from_normal(centre, Vec3::Z), 5.0));
+        let (a, b) = circle.domain();
+        for i in 0..=40 {
+            let t = a + (b - a) * f64::from(i) / 40.0;
+            let k = circle.curvature_at(t).unwrap();
+            assert!((k.length() - 0.2).abs() < 1e-9, "{t}: {}", k.length());
+            let to_centre = (centre - circle.point_at(t)).normalized().unwrap();
+            assert!(k.normalized().unwrap().dot(to_centre) > 1.0 - 1e-9);
+        }
+        // A straight line has none; so does a polyline (degree 1).
+        let line = NurbsCurve::new(
+            1,
+            vec![Point3::ORIGIN, Point3::new(10.0, 0.0, 0.0)],
+            vec![1.0, 1.0],
+            vec![0.0, 1.0],
+        )
+        .unwrap();
+        assert!(line.curvature_at(0.3).unwrap().length() < 1e-12);
+    }
+
+    #[test]
+    fn removing_an_inserted_knot_gives_the_curve_back() {
+        let c = wavy();
+        assert_eq!(c.interior_knots().len(), 1);
+        let k = c.with_knot(0.7, 1);
+        assert_eq!(k.interior_knots().len(), 2);
+        let back = k.without_knot(0.7).unwrap();
+        assert_eq!(back.points.len(), c.points.len());
+        for (p, q) in back.points.iter().zip(&c.points) {
+            assert!(p.distance_to(*q) < 1e-9, "{p} {q}");
+        }
+        // Twice inserted, twice removed.
+        let back2 = c
+            .with_knot(1.4, 2)
+            .without_knot(1.4)
+            .and_then(|x| x.without_knot(1.4))
+            .unwrap();
+        assert!(deviation(&c, &back2) < 1e-9);
+        assert!(back2.interior_knots().len() == 1);
+        // Rational: a circle with an extra knot.
+        let circle = NurbsCurve::from_arc(&CircleArc::circle(
+            Plane::from_normal(Point3::ORIGIN, Vec3::Z),
+            5.0,
+        ));
+        let t = circle.interior_knots()[0] * 0.4;
+        let back = circle.with_knot(t, 1).without_knot(t).unwrap();
+        assert!(deviation(&circle, &back) < 1e-9);
+        // Not a knot, or outside the domain.
+        assert!(c.without_knot(0.5).is_none());
+        assert!(c.without_knot(0.0).is_none());
+    }
+
+    #[test]
+    fn removing_a_real_knot_changes_the_shape_but_keeps_the_ends() {
+        let pts: Vec<Point3> = (0..8)
+            .map(|i| Point3::new(f64::from(i) * 10.0, if i % 2 == 0 { 0.0 } else { 8.0 }, 0.0))
+            .collect();
+        let c = NurbsCurve::clamped_uniform(&pts, 3).unwrap();
+        let k = c.interior_knots()[1];
+        let r = c.without_knot(k).unwrap();
+        assert_eq!(r.points.len(), c.points.len() - 1);
+        assert_eq!(r.interior_knots().len(), c.interior_knots().len() - 1);
+        assert_eq!(r.domain(), c.domain());
+        assert!(r.start().distance_to(c.start()) < 1e-9);
+        assert!(r.end().distance_to(c.end()) < 1e-9);
+        let d = deviation(&c, &r);
+        assert!(d > 1e-3 && d < 8.0, "{d}");
+        // A curve with no knot to spare.
+        let bezier = NurbsCurve::clamped_uniform(&pts[..4], 3).unwrap();
+        assert!(bezier.interior_knots().is_empty());
+    }
+
+    /// Control points Rhino 8.36 gives for the same operations (observed by
+    /// running it on these curves; behaviour only, clean-room).
+    #[test]
+    fn knot_removal_and_seam_match_rhino() {
+        let pts: Vec<Point3> = (0..8)
+            .map(|i| Point3::new(f64::from(i) * 10.0, if i % 2 == 0 { 0.0 } else { 8.0 }, 0.0))
+            .collect();
+        let near = |c: &NurbsCurve, want: &[[f64; 3]]| {
+            assert_eq!(c.points.len(), want.len());
+            for ((p, w), r) in c.points.iter().zip(&c.weights).zip(want) {
+                assert!(
+                    p.distance_to(Point3::new(r[0], r[1], 0.0)) < 1e-6,
+                    "{p} {r:?}"
+                );
+                assert!((w - r[2]).abs() < 1e-6, "{w} {r:?}");
+            }
+        };
+        // Insert at 0.6 in the five-point cubic.
+        near(
+            &wavy().with_knot(0.6, 1),
+            &[
+                [0.0, 0.0, 1.0],
+                [18.0, 24.0, 1.0],
+                [42.0, 22.0, 1.0],
+                [79.0, -8.0, 1.0],
+                [100.0, 20.0, 1.0],
+                [130.0, 0.0, 1.0],
+            ],
+        );
+        // Remove the knot 2 of a zigzag cubic: every point adjusts.
+        let z = NurbsCurve::clamped_uniform(&pts, 3).unwrap();
+        let r = z.without_knot(2.0).unwrap();
+        assert_eq!(r.knots, [0.0, 0.0, 0.0, 1.0, 3.0, 4.0, 5.0, 5.0, 5.0]);
+        near(
+            &r,
+            &[
+                [0.0, 0.0, 1.0],
+                [10.061971894, 7.157182243, 1.0],
+                [24.544677822, 2.192381614, 1.0],
+                [36.278770872, 2.608716139, 1.0],
+                [50.084325173, 6.853177651, 1.0],
+                [59.983134965, 0.22936447, 1.0],
+                [70.0, 8.0, 1.0],
+            ],
+        );
+        let (t0, t1) = z.domain();
+        let dev = (0..=400)
+            .map(|i| {
+                let t = t0 + (t1 - t0) * f64::from(i) / 400.0;
+                z.point_at(t).distance_to(r.point_at(t))
+            })
+            .fold(0.0, f64::max);
+        assert!((dev - 2.486_805_047_8).abs() < 1e-6, "{dev}");
+        // The same with weights.
+        let mut zw = z.clone();
+        zw.weights = vec![1.0, 2.0, 1.0, 0.5, 1.0, 3.0, 1.0, 1.0];
+        near(
+            &zw.without_knot(2.0).unwrap(),
+            &[
+                [0.0, 0.0, 1.0],
+                [9.906753225, 7.577281288, 1.993802811],
+                [40.0, -2.645784423, 0.545532218],
+                [13.127158644, -6.487911591, 0.372122913],
+                [50.028187622, 7.616648344, 2.991567483],
+                [59.966326721, 0.242447609, 1.001686503],
+                [70.0, 8.0, 1.0],
+            ],
+        );
+        // Curvature vectors of the five-point cubic.
+        for (t, kx, ky) in [
+            (0.25, 0.013_453_448_549, -0.031_327_315_907),
+            (0.6, -0.007_670_023_143, -0.016_200_967_251),
+            (1.0, 0.012_910_881_690, 0.045_188_085_914),
+            (1.5, 0.002_781_463_749, -0.014_370_896_038),
+        ] {
+            let k = wavy().curvature_at(t).unwrap();
+            assert!((k - Vec3::new(kx, ky, 0.0)).length() < 1e-9, "{t}: {k:?}");
+        }
+        // Seam of an ellipse (9 rational points, quarter knots) moved to the
+        // top: the same points turned, the knots shifted, domain [π/2, 5π/2].
+        let s = std::f64::consts::FRAC_1_SQRT_2;
+        let q = FRAC_PI_2;
+        let ring = [
+            (10.0, 0.0, 1.0),
+            (10.0, 4.0, s),
+            (0.0, 4.0, 1.0),
+            (-10.0, 4.0, s),
+            (-10.0, 0.0, 1.0),
+            (-10.0, -4.0, s),
+            (0.0, -4.0, 1.0),
+            (10.0, -4.0, s),
+            (10.0, 0.0, 1.0),
+        ];
+        let e = NurbsCurve::new(
+            2,
+            ring.iter().map(|p| Point3::new(p.0, p.1, 0.0)).collect(),
+            ring.iter().map(|p| p.2).collect(),
+            vec![
+                0.0,
+                0.0,
+                q,
+                q,
+                2.0 * q,
+                2.0 * q,
+                3.0 * q,
+                3.0 * q,
+                4.0 * q,
+                4.0 * q,
+            ],
+        )
+        .unwrap();
+        let m = e.with_seam(q, 1e-6).unwrap();
+        let want: Vec<[f64; 3]> = (0..9)
+            .map(|i| {
+                let p = ring[(i + 2) % 8];
+                [p.0, p.1, p.2]
+            })
+            .collect();
+        near(&m, &want);
+        for (k, i) in m.knots.iter().zip([1, 1, 2, 2, 3, 3, 4, 4, 5, 5]) {
+            assert!((k - q * f64::from(i)).abs() < 1e-9, "{:?}", m.knots);
+        }
+    }
+
+    #[test]
+    fn closest_point_across_the_seam_of_a_closed_curve() {
+        let circle = NurbsCurve::from_arc(&CircleArc::circle(
+            Plane::from_normal(Point3::ORIGIN, Vec3::Z),
+            12.0,
+        ));
+        // Just before and just after the seam (the start, on +x).
+        for y in [-0.2, -0.01, 0.01, 0.2] {
+            let p = Point3::new(9.0, y, 0.0);
+            let q = circle.point_at(circle.closest_param(p));
+            let want = Point3::ORIGIN + (p - Point3::ORIGIN).normalized().unwrap() * 12.0;
+            assert!(q.distance_to(want) < 1e-6, "{y}: {q}");
+        }
+    }
+
+    #[test]
+    fn seam_of_a_closed_curve_moves_exactly() {
+        let circle = NurbsCurve::from_arc(&CircleArc::circle(
+            Plane::from_normal(Point3::ORIGIN, Vec3::Z),
+            5.0,
+        ));
+        let (a, b) = circle.domain();
+        let t = a + (b - a) * 0.37;
+        let p = circle.point_at(t);
+        let s = circle.with_seam(t, 1e-6).unwrap();
+        assert!(s.start().distance_to(p) < 1e-9 && s.end().distance_to(p) < 1e-9);
+        // `length` is a fine polyline measure: equal within its own accuracy.
+        assert!((s.length() - circle.length()).abs() < 1e-3);
+        let (sa, sb) = s.domain();
+        for i in 0..=60 {
+            let q = s.point_at(sa + (sb - sa) * f64::from(i) / 60.0);
+            assert!((q.distance_to(Point3::ORIGIN) - 5.0).abs() < 1e-9);
+        }
+        assert!(wavy().with_seam(1.0, 1e-6).is_none());
+        assert!(circle.with_seam(a, 1e-6).is_none());
     }
 }
