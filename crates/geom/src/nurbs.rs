@@ -495,19 +495,32 @@ impl NurbsCurve {
         let best = (0..params.len())
             .min_by(|i, j| d(params[*i]).total_cmp(&d(params[*j])))
             .unwrap_or(0);
-        let mut lo = params[best.saturating_sub(1)];
-        let mut hi = params[(best + 1).min(params.len() - 1)];
-        let g = (5f64.sqrt() - 1.0) / 2.0;
-        for _ in 0..80 {
-            let m1 = hi - g * (hi - lo);
-            let m2 = lo + g * (hi - lo);
-            if d(m1) < d(m2) {
-                hi = m2;
-            } else {
-                lo = m1;
+        let last = params.len() - 1;
+        let refine = |i: usize| {
+            let mut lo = params[i.saturating_sub(1)];
+            let mut hi = params[(i + 1).min(last)];
+            let g = (5f64.sqrt() - 1.0) / 2.0;
+            for _ in 0..80 {
+                let m1 = hi - g * (hi - lo);
+                let m2 = lo + g * (hi - lo);
+                if d(m1) < d(m2) {
+                    hi = m2;
+                } else {
+                    lo = m1;
+                }
+            }
+            (lo + hi) / 2.0
+        };
+        let t = refine(best);
+        // At the seam of a closed curve the closest point may be just before
+        // the end rather than just after the start (or the reverse).
+        if (best == 0 || best == last) && self.is_closed() {
+            let other = refine(last - best);
+            if d(other) < d(t) {
+                return other;
             }
         }
-        (lo + hi) / 2.0
+        t
     }
 
     /// The same curve raised to degree `degree` (exact): split into Bézier
@@ -1427,6 +1440,21 @@ mod tests {
         near(&m, &want);
         for (k, i) in m.knots.iter().zip([1, 1, 2, 2, 3, 3, 4, 4, 5, 5]) {
             assert!((k - q * f64::from(i)).abs() < 1e-9, "{:?}", m.knots);
+        }
+    }
+
+    #[test]
+    fn closest_point_across_the_seam_of_a_closed_curve() {
+        let circle = NurbsCurve::from_arc(&CircleArc::circle(
+            Plane::from_normal(Point3::ORIGIN, Vec3::Z),
+            12.0,
+        ));
+        // Just before and just after the seam (the start, on +x).
+        for y in [-0.2, -0.01, 0.01, 0.2] {
+            let p = Point3::new(9.0, y, 0.0);
+            let q = circle.point_at(circle.closest_param(p));
+            let want = Point3::ORIGIN + (p - Point3::ORIGIN).normalized().unwrap() * 12.0;
+            assert!(q.distance_to(want) < 1e-6, "{y}: {q}");
         }
     }
 

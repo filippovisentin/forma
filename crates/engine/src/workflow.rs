@@ -979,7 +979,7 @@ impl Command for Silhouette {
 }
 
 /// `#id` token → object id that exists.
-fn object_arg(
+pub(crate) fn object_arg(
     ctx: &Context,
     args: &mut Args,
     what: &'static str,

@@ -439,6 +439,7 @@ impl FormaApp {
                     tool(ui, &mut act, "Start, Direction, End", K::Seq(&q::ARC_DIRECTION));
                 });
                 tool(ui, &mut act, "Ellipse", K::Ellipse);
+                tool(ui, &mut act, "Conic", K::Seq(&q::CONIC));
                 tool(ui, &mut act, "Slot", K::Seq(&q::SLOT));
                 tool(ui, &mut act, "Helix", K::Seq(&q::HELIX));
                 tool(ui, &mut act, "Spiral", K::Seq(&q::SPIRAL));
@@ -452,6 +453,7 @@ impl FormaApp {
                 ui.separator();
                 ui.menu_button("Curve Edit Tools", |ui| {
                     tool(ui, &mut act, "Blend Curves", K::Seq(&q::BLEND_CRV));
+                    tool(ui, &mut act, "Match", K::Seq(&q::MATCH_CRV));
                     tool(ui, &mut act, "Simplify", K::OnSel("SimplifyCrv"));
                     tool(ui, &mut act, "Smooth", K::OnSel("Smooth"));
                     tool(ui, &mut act, "Join", K::Join);
@@ -694,6 +696,7 @@ impl FormaApp {
                 tool(ui, &mut act, "Angle", K::Seq(&q::ANGLE));
                 tool(ui, &mut act, "Radius", K::Seq(&q::RADIUS));
                 tool(ui, &mut act, "Curvature", K::Seq(&q::CURVATURE));
+                tool(ui, &mut act, "Curve Deviation", K::Seq(&q::CRV_DEVIATION));
                 tool(ui, &mut act, "Length", K::OnSel("Length"));
                 ui.menu_button("Mass Properties", |ui| {
                     tool(ui, &mut act, "Area", K::OnSel("Area"));

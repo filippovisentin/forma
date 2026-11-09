@@ -8,6 +8,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **`MatchCrv`** (alias `Match`): moves the end of a curve onto the end of another and
+  makes it go on from it with the same direction (tangency, the default) or the same
+  curvature too; `position` only moves the end. Only the first one, two or three
+  control points change, to the positions Rhino 8.36 gives on the test curves (within
+  1e-6); curves with weights and uneven knots reach the exact curvature as well.
+  Curve ▸ Curve Edit Tools ▸ Match.
+- **`Conic`**: conic arc from start, end, apex and rho (below 0.5 an ellipse, 0.5 a
+  parabola, above a hyperbola), an exact rational curve. Curve ▸ Conic.
+- **`CrvDeviation`**: largest and smallest distance between two selected curves where
+  they run alongside each other, with the points; the largest distance equals Rhino's
+  on the test curves (within 1e-4). Analyze ▸ Curve Deviation.
 - **NURBS curve structure**: `InsertKnot` adds knots (and control points) where you
   click, or in the middle of every span (`InsertKnot Midpoints`), without changing the
   shape; `RemoveKnot` removes the knot nearest to each click and reports how far the
@@ -21,6 +32,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   from the exact first and second derivatives (rational curves too: 25 on a circle of
   radius 25, b²/a at the end of an ellipse; the curvature vectors of a free-form cubic
   equal Rhino's to 1e-9). Analyze ▸ Curvature.
+
+### Fixed
+- Closest point on a closed curve next to its seam: a point just before the start of a
+  circle could be answered with the start itself (a few thousandths off).
 
 ## [1.2.1] — 2026-10-11
 

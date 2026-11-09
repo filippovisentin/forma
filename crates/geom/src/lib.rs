@@ -14,6 +14,7 @@ mod kernel;
 mod make2d;
 mod meshtools;
 mod nurbs;
+mod nurbsedit;
 mod plane;
 mod polyhedron;
 mod primitives;
@@ -46,6 +47,7 @@ pub use meshtools::{
     polyline_plane_points, Deform,
 };
 pub use nurbs::{Bezier2, NurbsCurve};
+pub use nurbsedit::CurveDeviation;
 pub use plane::Plane;
 pub use polyhedron::{PolyFace, Polyhedron};
 pub use primitives::{

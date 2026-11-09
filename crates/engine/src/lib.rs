@@ -35,6 +35,7 @@ mod args;
 mod attrs;
 mod commands;
 mod create;
+mod crvmatch;
 mod crvtools;
 mod curves;
 mod deform;

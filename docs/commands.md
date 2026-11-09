@@ -12,7 +12,7 @@ is in `Help` and `forma-cli commands`.
 
 ## Summary
 
-279 Rhino commands: **207 ✓**, **38 partial**, **22 ✗**, **12 needs kernel**.
+279 Rhino commands: **209 ✓**, **39 partial**, **19 ✗**, **12 needs kernel**.
 
 ## Drawing: points and lines
 
@@ -28,7 +28,7 @@ is in `Help` and `forma-cli commands`.
 | Sketch | ✗ |  |
 | Helix | ✓ | `Helix <axis start> <axis end> <radius> <turns>` |
 | Spiral | ✓ | `Spiral <center> <r0> <r1> <turns> [height]` |
-| Conic | ✗ |  |
+| Conic | ✓ | `Conic <start> <end> <apex> [rho=0.5]`: rational quadratic arc |
 | TextObject | ✗ | text as curves / solids: needs font outlines |
 
 ## Drawing: shapes
@@ -60,7 +60,7 @@ is in `Help` and `forma-cli commands`.
 | FilletCorners | ✓ | `FilletCorners` (FC) |
 | Chamfer | partial | `Chamfer` between two lines |
 | BlendCrv | partial | `BlendCrv` tangency or curvature (curvature exact at lines and arcs) |
-| MatchCrv | ✗ |  |
+| MatchCrv | partial | `MatchCrv #curve <point> #target <point> [position|tangency|curvature]`: same control points as Rhino 8 on the test curves; no Average, Join or Merge options |
 | Extend | ✓ | `Extend` to boundary objects |
 | Trim | ✓ | `Trim` curves with cutting objects |
 | Split | ✓ | `Split` curves at cutting objects |
@@ -313,7 +313,7 @@ is in `Help` and `forma-cli commands`.
 | Zebra | needs kernel |  |
 | DraftAngleAnalysis | ✗ |  |
 | ClosestPt | ✓ | `ClosestPt <point>` adds points on the selected objects |
-| CrvDeviation | ✗ |  |
+| CrvDeviation | ✓ | `CrvDeviation` on two selected curves: largest and smallest distance with their points (0 where the curves cross); nothing drawn |
 | List / Check | ✓ | `List` (= `What`); `Check` validity of surfaces and polysurfaces |
 
 ## Dimensions and annotation

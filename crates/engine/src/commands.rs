@@ -175,6 +175,9 @@ pub fn builtin() -> Vec<Box<dyn Command>> {
         Box::new(crate::knots::RemoveKnot),
         Box::new(crate::knots::CrvSeam),
         Box::new(crate::knots::Curvature),
+        Box::new(crate::crvmatch::Conic),
+        Box::new(crate::crvmatch::MatchCrv),
+        Box::new(crate::crvmatch::CrvDeviation),
         // Surfaces, solids, meshes
         Box::new(crate::solids2::PlaneSrf),
         Box::new(crate::solids2::SrfPt),
